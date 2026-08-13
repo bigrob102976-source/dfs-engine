@@ -380,3 +380,22 @@ Before adding substantial architecture, dependencies, databases, queues, service
 When a simpler implementation will allow us to test the DFS hypothesis sooner, choose the simpler implementation.
 
 The primary goal is learning from real DFS results, not demonstrating software architecture.
+
+## Git Workflow
+
+This repository is connected to GitHub at https://github.com/bigrob102976-source/dfs-engine.git, tracked as `origin`, on branch `main`.
+
+After completing any requested coding task, automatically:
+
+1. Run the relevant test suite(s) (Python: `python -m pytest tests/` from the project root; dashboard: `npm run test` from `dashboard/`).
+2. If tests pass, run `git status` and stage only the files related to the completed task (never a blanket `git add -A` without reviewing what it picked up).
+3. Commit with a clear message describing the completed change.
+4. Push to `origin/main`.
+5. Verify the push: `git status`, `git rev-parse HEAD`, `git rev-parse @{u}` — confirm local HEAD equals the upstream commit.
+6. Report: tests run, commit hash, files committed, push result.
+
+Do not require manual `git add`/`git commit`/`git push` from the user after routine development work. A coding task is not complete until it is implemented, tested, committed, and pushed, and the working tree is clean — unless the user explicitly says not to commit or push.
+
+Never force-push unless explicitly requested. If a push fails (authentication, branch protection, merge conflict, etc.), do not discard any changes — pause, report the exact error, and state the smallest action needed from the user to unblock it.
+
+All Python processes must run with the project root (`C:\Users\bigro\mlb-dfs-engine`) as their working directory. All dashboard/npm commands must run from `C:\Users\bigro\mlb-dfs-engine\dashboard`. Do not assume the terminal already starts in either directory.
