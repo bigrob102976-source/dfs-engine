@@ -83,6 +83,8 @@ def solve_single_lineup(
         model.Add(used[key] == 1)
 
     model.Add(sum(used[k] * by_key[k].salary for k in used) <= settings.salary_cap)
+    if settings.min_salary is not None:
+        model.Add(sum(used[k] * by_key[k].salary for k in used) >= settings.min_salary)
 
     if settings.max_total_ownership is not None:
         # A simple field-exposure constraint on the SUM of individual
@@ -143,7 +145,9 @@ def solve_single_lineup(
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = SOLVER_NUM_SEARCH_WORKERS
     solver.parameters.random_seed = SOLVER_RANDOM_SEED
-    solver.parameters.max_time_in_seconds = SOLVER_MAX_TIME_SECONDS
+    solver.parameters.max_time_in_seconds = (
+        settings.time_limit_seconds if settings.time_limit_seconds is not None else SOLVER_MAX_TIME_SECONDS
+    )
     status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):

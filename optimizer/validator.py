@@ -56,6 +56,9 @@ def validate_lineup(
     if lineup.salary > settings.salary_cap:
         violations.append(f"Salary {lineup.salary} exceeds cap {settings.salary_cap}.")
 
+    if settings.min_salary is not None and lineup.salary < settings.min_salary:
+        violations.append(f"Salary {lineup.salary} is below the minimum spend {settings.min_salary}.")
+
     for key in locked_keys:
         if key not in keys:
             player = players_by_key.get(key)

@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+
+import { reconcileConstraintsWithPool } from "../reconcile";
+import type { OptimizerPoolResult, PoolPlayerRow } from "../types";
+
+function player(overrides: Partial<PoolPlayerRow> = {}): PoolPlayerRow {
+  return {
+    dkPlayerId: "d1",
+    mlbPlayerId: "h1",
+    name: "Leadoff Hitter",
+    team: "BOS",
+    opponent: "TOR",
+    gameId: "g1",
+    playerType: "hitter",
+    positions: ["OF"],
+    battingOrder: 1,
+    salary: 4000,
+    projection: 10,
+    ceiling: 18,
+    value: 2.5,
+    ownership: null,
+    leverage: null,
+    risk: 30,
+    confidence: 80,
+    lineupStatus: "active",
+    matchStatus: "matched",
+    ...overrides,
+  };
+}
+
+function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
+  return {
+    date: "2026-08-12",
+    slateId: "mock-main",
+    slateName: "Mock Main (Dev)",
+    providerName: "mock_dev_provider",
+    isMock: true,
+    generatedAt: "2026-08-12T18:00:00Z",
+    players,
+    activePlayers: players.filter((p) => p.lineupStatus === "active").length,
+    pitcherCount: 0,
+    hitterCount: 0,
+    confirmedLineupGames: 0,
+    unconfirmedLineupGames: 0,
+    unmatchedCount: 0,
+    slateGames: 1,
+    rosterFeasibilityPass: true,
+    salaryCap: 50000,
+    hasOwnership: false,
+  };
+}
+
+describe("reconcileConstraintsWithPool", () => {
+  it("keeps a lock/exclusion/exposure for a player who is still active", () => {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1" })]), {
+      locks: ["d1"],
+      exclusions: [],
+      maxExposure: { d1: 0.5 },
+    });
+    expect(result.state.locks).toEqual(["d1"]);
+    expect(result.state.maxExposure).toEqual({ d1: 0.5 });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("silently drops a lock/exclusion/exposure for a player not on this slate at all", () => {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1" })]), {
+      locks: ["not-on-this-slate"],
+      exclusions: ["also-not-here"],
+      maxExposure: { "still-not-here": 0.25 },
+    });
+    expect(result.state).toEqual({ locks: [], exclusions: [], maxExposure: {} });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("drops a lock with a warning when the player is present but scratched", () => {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", name: "Scratched Guy", lineupStatus: "lineup_not_confirmed" })]), {
+      locks: ["d1"],
+      exclusions: [],
+      maxExposure: {},
+    });
+    expect(result.state.locks).toEqual([]);
+    expect(result.warnings).toEqual(["Locked player Scratched Guy is no longer active."]);
+  });
+
+  it("keeps an exclusion for a scratched player without warning (excluding an inactive player is harmless)", () => {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", lineupStatus: "lineup_not_confirmed" })]), {
+      locks: [],
+      exclusions: ["d1"],
+      maxExposure: {},
+    });
+    expect(result.state.exclusions).toEqual(["d1"]);
+    expect(result.warnings).toEqual([]);
+  });
+});

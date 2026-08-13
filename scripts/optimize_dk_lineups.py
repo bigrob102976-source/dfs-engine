@@ -30,8 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config.optimizer_config import OPTIMIZER_VERSION
-from optimizer.constraints import OptimizerConfigError
+from config.optimizer_config import INTERACTIVE_SOLVER_MAX_TIME_SECONDS, OPTIMIZER_VERSION
+from optimizer.constraints import OptimizerConfigError, pre_solve_diagnostics
 from optimizer.lineup_generator import generate_lineups
 from optimizer.models import OptimizerPlayer, OptimizerSettings
 from optimizer.persistence import build_lineup_set_document, save_lineup_set_csv, save_lineup_set_json
@@ -144,31 +144,52 @@ def main() -> None:
     parser.add_argument("--max-total-ownership", type=float, default=None)
     parser.add_argument("--max-player-ownership", type=float, default=None)
     parser.add_argument("--min-player-ownership", type=float, default=None)
+    parser.add_argument("--min-salary", type=int, default=None, help="Minimum total lineup salary (a spend floor; the cap is always enforced separately)")
+    parser.add_argument(
+        "--allow-pitcher-vs-hitter", action="store_true",
+        help="Allow rostering a hitter against one of the lineup's own pitchers (off by default)",
+    )
+    parser.add_argument(
+        "--time-limit-seconds", type=float, default=None,
+        help="Override the CP-SAT per-lineup time budget (default: config.optimizer_config.SOLVER_MAX_TIME_SECONDS)",
+    )
+    parser.add_argument(
+        "--interactive", action="store_true",
+        help="Use config.optimizer_config.INTERACTIVE_SOLVER_MAX_TIME_SECONDS instead of the batch default "
+             "(ignored if --time-limit-seconds is also given)",
+    )
+    parser.add_argument(
+        "--validate-only", action="store_true",
+        help="Skip solving/saving entirely -- print {\"errors\": [...]} for pre-solve validation (dashboard use)",
+    )
     parser.add_argument("--output-root", default="lineups")
     args = parser.parse_args()
 
     pool_doc = _load_pool(args.pool)
     players, skipped = _build_optimizer_players(pool_doc)
 
-    print("=" * 70)
-    print("DRAFTKINGS LINEUP OPTIMIZER")
-    print("=" * 70)
-    print(f"\nSlate date: {args.date}")
-    print(f"Player pool: {args.pool}")
-    print(f"Active players available: {len(players)}")
-    if skipped:
-        print(f"Skipped (active but missing projection/ceiling -- never invented): {len(skipped)}")
+    if not args.validate_only:
+        print("=" * 70)
+        print("DRAFTKINGS LINEUP OPTIMIZER")
+        print("=" * 70)
+        print(f"\nSlate date: {args.date}")
+        print(f"Player pool: {args.pool}")
+        print(f"Active players available: {len(players)}")
+        if skipped:
+            print(f"Skipped (active but missing projection/ceiling -- never invented): {len(skipped)}")
 
     ownership_doc = None
     if args.ownership:
         ownership_doc = _load_ownership(args.ownership)
         matched = _merge_ownership(players, ownership_doc)
-        print(f"Ownership snapshot: {args.ownership} ({matched}/{len(players)} players matched)")
-    print()
+        if not args.validate_only:
+            print(f"Ownership snapshot: {args.ownership} ({matched}/{len(players)} players matched)")
+    if not args.validate_only:
+        print()
 
-    if args.objective == "leverage" and not any(p.leverage_score is not None for p in players):
-        print("CONFIGURATION ERROR: --objective leverage requires --ownership (no player has a leverage_score).")
-        return
+    time_limit_seconds = args.time_limit_seconds
+    if time_limit_seconds is None and args.interactive:
+        time_limit_seconds = INTERACTIVE_SOLVER_MAX_TIME_SECONDS
 
     settings = OptimizerSettings(
         objective_mode=args.objective, num_lineups=args.lineups, min_unique=args.min_unique,
@@ -178,8 +199,22 @@ def main() -> None:
         min_exposure=dict(_parse_key_value(a, "--min-exposure") for a in args.min_exposure),
         min_confidence=args.min_confidence, min_season_pa=args.min_season_pa, max_player_risk=args.max_player_risk,
         max_total_ownership=args.max_total_ownership, max_player_ownership=args.max_player_ownership,
-        min_player_ownership=args.min_player_ownership,
+        min_player_ownership=args.min_player_ownership, min_salary=args.min_salary,
+        allow_pitcher_vs_hitter=args.allow_pitcher_vs_hitter, time_limit_seconds=time_limit_seconds,
     )
+
+    leverage_errors = []
+    if args.objective == "leverage" and not any(p.leverage_score is not None for p in players):
+        leverage_errors.append("--objective leverage requires --ownership (no player has a leverage_score).")
+
+    if args.validate_only:
+        errors = list(leverage_errors) + pre_solve_diagnostics(players, settings)
+        print(json.dumps({"errors": errors}))
+        return
+
+    if leverage_errors:
+        print(f"CONFIGURATION ERROR: {leverage_errors[0]}")
+        return
 
     try:
         output = generate_lineups(players, settings)

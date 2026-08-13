@@ -65,6 +65,14 @@ class OptimizerSettings:
     max_total_ownership: Optional[float] = None
     max_player_ownership: Optional[float] = None
     min_player_ownership: Optional[float] = None
+    # Milestone 14: optional minimum total lineup salary (a "spend floor"
+    # symmetric to salary_cap's ceiling) and an optional override of the
+    # solver's per-lineup CP-SAT time budget (see
+    # config/optimizer_config.py::INTERACTIVE_SOLVER_MAX_TIME_SECONDS).
+    # Both None by default -- unset means "no floor" / "use the batch
+    # default (SOLVER_MAX_TIME_SECONDS)", identical to before this field existed.
+    min_salary: Optional[int] = None
+    time_limit_seconds: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

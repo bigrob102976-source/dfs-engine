@@ -1,0 +1,458 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
+import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
+import type { OptimizerBuildResult, OptimizerPoolResult, SlateOption } from "@/lib/optimizerWorkspace/types";
+import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
+
+import { ConstraintsPanel } from "./ConstraintsPanel";
+import { LineupsPanel } from "./LineupsPanel";
+import { PoolTable } from "./PoolTable";
+
+type Objective = "projection" | "ceiling" | "balanced" | "leverage";
+
+const SLATE_STATUS_MESSAGES: Record<string, string> = {
+  not_connected: "DFS provider not connected. Configure DFS_SALARY_PROVIDER to enable slate selection.",
+  unavailable: "DFS provider unavailable.",
+  auth_failed: "DFS provider authentication failed.",
+  no_slate: "DFS provider returned no slate for today.",
+};
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "--";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--";
+  return d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+}
+
+/** The Milestone 14 interactive optimizer workspace: slate selection,
+ * player-pool browsing/locking/excluding/exposure, stack/salary/unique
+ * constraints, an authoritative live pre-solve validation panel, and a
+ * BUILD action that runs the real CP-SAT optimizer server-side and
+ * displays the resulting lineups + exposure summaries. Every server call
+ * goes through /api/optimizer/* -- nothing here talks to Python
+ * directly or invents projections/salaries/ownership. */
+export function OptimizerWorkspace() {
+  const [hydrated, setHydrated] = useState(false);
+
+  const [slates, setSlates] = useState<SlateOption[]>([]);
+  const [slateStatus, setSlateStatus] = useState<string | null>(null);
+  const [slateReason, setSlateReason] = useState<string | null>(null);
+  const [providerIsMock, setProviderIsMock] = useState(false);
+  const [slatesLoading, setSlatesLoading] = useState(true);
+
+  const [selectedSlateId, setSelectedSlateId] = useState<string | null>(null);
+  const [pool, setPool] = useState<OptimizerPoolResult | null>(null);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolError, setPoolError] = useState<string | null>(null);
+  const [reconcileWarnings, setReconcileWarnings] = useState<string[]>([]);
+
+  const [locks, setLocks] = useState<string[]>([]);
+  const [exclusions, setExclusions] = useState<string[]>([]);
+  const [maxExposure, setMaxExposure] = useState<Record<string, number>>({});
+  const [stackSize, setStackSize] = useState<number | null>(null);
+  const [stackTeam, setStackTeam] = useState<string | null>(null);
+  const [allowPitcherVsHitter, setAllowPitcherVsHitter] = useState(false);
+  const [minSalary, setMinSalary] = useState<number | null>(null);
+  const [minUnique, setMinUnique] = useState(2);
+  const [lineups, setLineups] = useState(20);
+  const [objective, setObjective] = useState<Objective>("projection");
+
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [building, setBuilding] = useState(false);
+  const [buildResult, setBuildResult] = useState<OptimizerBuildResult | null>(null);
+  const [buildErrors, setBuildErrors] = useState<string[]>([]);
+
+  // 1. Hydrate persisted UI preferences on mount (Milestone 14's "STATE
+  // PERSISTENCE"). Deferred one microtask so every setState call happens
+  // inside a callback rather than the effect's synchronous body --
+  // satisfies react-hooks/set-state-in-effect while still running as
+  // soon as possible after mount (localStorage is the "external system"
+  // being synchronized from).
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const persisted = loadWorkspaceState();
+      if (persisted) {
+        setSelectedSlateId(persisted.selectedSlateId);
+        setLocks(persisted.locks);
+        setExclusions(persisted.exclusions);
+        setMaxExposure(persisted.maxExposure);
+        setStackSize(persisted.stackSize);
+        setStackTeam(persisted.stackTeam);
+        setAllowPitcherVsHitter(persisted.allowPitcherVsHitter);
+        setMinSalary(persisted.minSalary);
+        setMinUnique(persisted.minUnique);
+        setLineups(persisted.lineups);
+        setObjective(persisted.objective);
+      }
+      setHydrated(true);
+    });
+  }, []);
+
+  // 2. Persist on every relevant change, once hydrated (never before --
+  // that would clobber a saved session with fresh-mount defaults).
+  useEffect(() => {
+    if (!hydrated) return;
+    saveWorkspaceState({
+      selectedSlateId,
+      locks,
+      exclusions,
+      maxExposure,
+      stackSize,
+      stackTeam,
+      allowPitcherVsHitter,
+      minSalary,
+      minUnique,
+      lineups,
+      objective,
+    });
+  }, [hydrated, selectedSlateId, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, lineups, objective]);
+
+  // 3. Discover today's slates once, right after hydration (so we know
+  // whether a persisted selection still exists among them).
+  useEffect(() => {
+    if (!hydrated) return;
+    Promise.resolve()
+      .then(() => {
+        setSlatesLoading(true);
+        return fetch("/api/optimizer/slates");
+      })
+      .then((res) => res.json())
+      .then((data) => {
+        setSlateStatus(data.status ?? null);
+        setSlateReason(data.reason ?? null);
+        setProviderIsMock(Boolean(data.isMock));
+        const list: SlateOption[] = data.slates ?? [];
+        setSlates(list);
+        setSlatesLoading(false);
+        setSelectedSlateId((current) => {
+          if (list.length === 1) return list[0].slateId;
+          if (current && !list.some((s) => s.slateId === current)) return null;
+          return current;
+        });
+      })
+      .catch(() => {
+        setSlatesLoading(false);
+        setSlateStatus("unavailable");
+      });
+    // Runs once, right after hydration -- deliberately not re-run on every
+    // selectedSlateId change (that's handled by the selectedSlateId effect below).
+  }, [hydrated]);
+
+  // 4. Load the selected slate's player pool. Reconciles existing
+  // locks/exclusions/exposures/stackTeam against the new pool (Milestone
+  // 14's "SLATE CHANGE" / "REFRESH BEHAVIOR" requirements).
+  useEffect(() => {
+    if (!hydrated || !selectedSlateId) return;
+    Promise.resolve()
+      .then(() => {
+        setPoolLoading(true);
+        setPoolError(null);
+        setBuildResult(null);
+        setBuildErrors([]);
+        return fetch("/api/optimizer/pool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slateId: selectedSlateId }),
+        });
+      })
+      .then((res) => res.json())
+      .then((data) => {
+        setPoolLoading(false);
+        if (data.error) {
+          setPoolError(data.error);
+          setPool(null);
+          return;
+        }
+        const newPool: OptimizerPoolResult = data.pool;
+        setPool(newPool);
+
+        // Reads the CURRENT (not necessarily latest-latest, but close
+        // enough for a user-driven, infrequent slate change) locks/
+        // exclusions/exposures via closure -- intentionally not in this
+        // effect's dependency array, since re-running the pool fetch on
+        // every lock/exclude toggle would be wrong.
+        const reconciled = reconcileConstraintsWithPool(newPool, { locks, exclusions, maxExposure });
+        setLocks(reconciled.state.locks);
+        setExclusions(reconciled.state.exclusions);
+        setMaxExposure(reconciled.state.maxExposure);
+        setReconcileWarnings(reconciled.warnings);
+
+        const teams = new Set(newPool.players.map((p) => p.team));
+        setStackTeam((prevTeam) => (prevTeam && !teams.has(prevTeam) ? null : prevTeam));
+      })
+      .catch(() => {
+        setPoolLoading(false);
+        setPoolError("Failed to load player pool.");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, selectedSlateId]);
+
+  const buildRequestBody = useCallback(() => {
+    const byId = new Map((pool?.players ?? []).map((p) => [p.dkPlayerId, p]));
+    const lockNames = locks.map((id) => byId.get(id)?.name).filter((n): n is string => Boolean(n));
+    const exclusionNames = exclusions.map((id) => byId.get(id)?.name).filter((n): n is string => Boolean(n));
+    const maxExposureByName: Record<string, number> = {};
+    for (const [id, fraction] of Object.entries(maxExposure)) {
+      const name = byId.get(id)?.name;
+      if (name) maxExposureByName[name] = fraction;
+    }
+    return {
+      slateId: selectedSlateId,
+      lineups,
+      objective,
+      locks: lockNames,
+      exclusions: exclusionNames,
+      maxExposure: maxExposureByName,
+      stackSize,
+      stackTeam,
+      allowPitcherVsHitter,
+      minSalary,
+      minUnique,
+    };
+  }, [pool, locks, exclusions, maxExposure, selectedSlateId, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique]);
+
+  // 5. Debounced, authoritative pre-solve validation (reuses the real
+  // optimizer's own resolve_settings()/pre_solve_diagnostics() via
+  // /api/optimizer/validate -- never the CP-SAT solver).
+  useEffect(() => {
+    if (!pool) {
+      Promise.resolve().then(() => setValidationErrors([]));
+      return;
+    }
+    const handle = setTimeout(() => {
+      fetch("/api/optimizer/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildRequestBody()),
+      })
+        .then((res) => res.json())
+        .then((data) => setValidationErrors(data.errors ?? []))
+        .catch(() => setValidationErrors([]));
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, objective, buildRequestBody]);
+
+  function handleBuild() {
+    setBuilding(true);
+    setBuildErrors([]);
+    fetch("/api/optimizer/build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildRequestBody()),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setBuilding(false);
+        const result: OptimizerBuildResult | undefined = data.result;
+        if (!result || !result.ok) {
+          setBuildErrors(result?.errors ?? [data.error ?? "Build failed."]);
+          setBuildResult(null);
+        } else {
+          setBuildResult(result);
+        }
+      })
+      .catch(() => {
+        setBuilding(false);
+        setBuildErrors(["Build request failed."]);
+      });
+  }
+
+  function toggleLock(id: string) {
+    setLocks((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setExclusions((prev) => prev.filter((x) => x !== id));
+  }
+  function toggleExclude(id: string) {
+    setExclusions((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setLocks((prev) => prev.filter((x) => x !== id));
+  }
+  function setExposure(id: string, fraction: number) {
+    setMaxExposure((prev) => {
+      if (fraction >= 1) {
+        const rest = { ...prev };
+        delete rest[id];
+        return rest;
+      }
+      return { ...prev, [id]: fraction };
+    });
+  }
+
+  const selectedSlate = slates.find((s) => s.slateId === selectedSlateId) ?? null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* TOP CONTROL BAR */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-panel p-3">
+        <div className="flex items-center gap-1">
+          <span className="rounded bg-accent-dim px-2 py-1 text-xs font-semibold text-text">DraftKings</span>
+          <span className="cursor-not-allowed rounded bg-bg-panel-raised px-2 py-1 text-xs text-text-faint" title="FanDuel support is not implemented in this milestone">
+            FanDuel -- Coming Soon
+          </span>
+        </div>
+
+        <label className="flex items-center gap-2 text-xs text-text-muted">
+          Slate:
+          <select
+            value={selectedSlateId ?? ""}
+            onChange={(e) => setSelectedSlateId(e.target.value || null)}
+            disabled={slatesLoading || slates.length === 0}
+            className="min-w-[220px] rounded border border-border bg-bg-panel-raised px-2 py-1 text-text disabled:opacity-40"
+          >
+            <option value="">{slatesLoading ? "Loading slates..." : slates.length === 0 ? "No slates available" : "Select a slate"}</option>
+            {slates.map((s) => (
+              <option key={s.slateId} value={s.slateId}>
+                {s.slateName ?? s.slateId}
+                {s.startTime ? ` -- ${s.startTime}` : ""}
+                {s.gameCount != null ? ` -- ${s.gameCount} games` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {providerIsMock && <span className="rounded bg-yellow/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow">Dev / Mock Data</span>}
+
+        <span className="text-[11px] text-text-faint">Updated: {pool ? formatTime(pool.generatedAt) : "--"}</span>
+
+        <div className="ml-auto flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            Lineups
+            <select value={lineups} onChange={(e) => setLineups(Number(e.target.value))} className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-text">
+              {LINEUP_COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-text-muted" title={OPTIMIZER_OBJECTIVES.find((o) => o.value === objective)?.explanation}>
+            Objective
+            <select value={objective} onChange={(e) => setObjective(e.target.value as Objective)} className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-text">
+              {OPTIMIZER_OBJECTIVES.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={handleBuild}
+            disabled={!pool || building || validationErrors.length > 0}
+            className="rounded border border-accent bg-accent-dim px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {building ? "Solving..." : "Build Lineups"}
+          </button>
+        </div>
+      </div>
+
+      {slateStatus && slateStatus !== "ready" && (
+        <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
+          {SLATE_STATUS_MESSAGES[slateStatus] ?? slateReason ?? `Slate status: ${slateStatus}`}
+        </div>
+      )}
+      {poolError && <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{poolError}</div>}
+      {reconcileWarnings.length > 0 && (
+        <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{reconcileWarnings.join(" ")}</div>
+      )}
+
+      {pool && (
+        <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-bg-panel p-3 text-xs md:grid-cols-4 lg:grid-cols-7">
+          <StatusStat label="Active Players" value={pool.activePlayers} />
+          <StatusStat label="Pitchers" value={pool.pitcherCount} />
+          <StatusStat label="Hitters" value={pool.hitterCount} />
+          <StatusStat label="Confirmed Lineups" value={pool.confirmedLineupGames} />
+          <StatusStat label="Unconfirmed Lineups" value={pool.unconfirmedLineupGames} />
+          <StatusStat label="Unmatched" value={pool.unmatchedCount} />
+          <StatusStat label="Slate Games" value={pool.slateGames} />
+        </div>
+      )}
+
+      {validationErrors.length > 0 && (
+        <div className="rounded border border-red bg-bg-panel-raised p-3 text-xs">
+          <div className="mb-1 font-semibold uppercase tracking-wide text-red">Unable to build:</div>
+          <ul className="list-inside list-disc text-text-muted">
+            {validationErrors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {buildErrors.length > 0 && (
+        <div className="rounded border border-red bg-bg-panel-raised p-3 text-xs">
+          <div className="mb-1 font-semibold uppercase tracking-wide text-red">Build failed:</div>
+          <ul className="list-inside list-disc text-text-muted">
+            {buildErrors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* THREE-ZONE LAYOUT: stacked on narrow screens, side-by-side at lg+ */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_360px]">
+        <div className="min-w-0">
+          <ConstraintsPanel
+            pool={pool}
+            locks={locks}
+            exclusions={exclusions}
+            maxExposure={maxExposure}
+            onUnlock={toggleLock}
+            onUnexclude={toggleExclude}
+            onClearExclusions={() => setExclusions([])}
+            stackSize={stackSize}
+            stackTeam={stackTeam}
+            onStackSizeChange={setStackSize}
+            onStackTeamChange={setStackTeam}
+            allowPitcherVsHitter={allowPitcherVsHitter}
+            onAllowPitcherVsHitterChange={setAllowPitcherVsHitter}
+            minSalary={minSalary}
+            onMinSalaryChange={setMinSalary}
+            minUnique={minUnique}
+            onMinUniqueChange={setMinUnique}
+          />
+        </div>
+
+        <div className="min-w-0">
+          {pool ? (
+            <PoolTable
+              players={pool.players}
+              locks={new Set(locks)}
+              exclusions={new Set(exclusions)}
+              maxExposure={maxExposure}
+              onToggleLock={toggleLock}
+              onToggleExclude={toggleExclude}
+              onExposureChange={setExposure}
+            />
+          ) : (
+            <div className="rounded border border-border bg-bg-panel p-6 text-center text-sm text-text-faint">
+              {poolLoading ? "Loading player pool..." : selectedSlate ? "No player data yet." : "Select a slate to load its player pool."}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0">
+          {buildResult ? (
+            <LineupsPanel result={buildResult} />
+          ) : (
+            <div className="rounded border border-border bg-bg-panel p-6 text-center text-sm text-text-faint">
+              Configure locks, exclusions, and stacking, then click Build Lineups.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-text-faint">{label}</div>
+      <div className="text-sm font-semibold text-text">{value}</div>
+    </div>
+  );
+}

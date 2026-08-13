@@ -39,6 +39,7 @@ PREGAME_EXTRA_FILES = [
     "scripts/project_dk_ownership.py",
     "scripts/fetch_dfs_slate.py",
     "scripts/build_dfs_pool_from_provider.py",
+    "scripts/list_dfs_slates.py",
 ]
 
 

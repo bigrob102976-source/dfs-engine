@@ -1,0 +1,158 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { ConstraintsPanel } from "../ConstraintsPanel";
+import type { OptimizerPoolResult, PoolPlayerRow } from "@/lib/optimizerWorkspace/types";
+
+function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
+  return {
+    dkPlayerId: "d1",
+    mlbPlayerId: "h1",
+    name: "Player",
+    team: "AAA",
+    opponent: "BBB",
+    gameId: "g1",
+    playerType: "hitter",
+    positions: ["OF"],
+    battingOrder: 1,
+    salary: 4000,
+    projection: 8,
+    ceiling: 15,
+    value: 2,
+    ownership: 20,
+    leverage: 5,
+    risk: 30,
+    confidence: 90,
+    lineupStatus: "active",
+    matchStatus: "matched",
+    ...overrides,
+  };
+}
+
+function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
+  return {
+    date: "2026-08-12",
+    slateId: "mock-main",
+    slateName: "Mock Main (Dev)",
+    providerName: "mock_dev_provider",
+    isMock: true,
+    generatedAt: "2026-08-12T18:00:00Z",
+    players,
+    activePlayers: players.length,
+    pitcherCount: 0,
+    hitterCount: players.length,
+    confirmedLineupGames: 1,
+    unconfirmedLineupGames: 0,
+    unmatchedCount: 0,
+    slateGames: 1,
+    rosterFeasibilityPass: true,
+    salaryCap: 50000,
+    hasOwnership: true,
+  };
+}
+
+function defaultProps(overrides: Partial<Parameters<typeof ConstraintsPanel>[0]> = {}) {
+  return {
+    pool: pool([player({ dkPlayerId: "d1", name: "Locked Guy", team: "PHI" }), player({ dkPlayerId: "d2", name: "Excluded Guy", team: "NYY" })]),
+    locks: ["d1"],
+    exclusions: ["d2"],
+    maxExposure: { d1: 0.5 },
+    onUnlock: vi.fn(),
+    onUnexclude: vi.fn(),
+    onClearExclusions: vi.fn(),
+    stackSize: null,
+    stackTeam: null,
+    onStackSizeChange: vi.fn(),
+    onStackTeamChange: vi.fn(),
+    allowPitcherVsHitter: false,
+    onAllowPitcherVsHitterChange: vi.fn(),
+    minSalary: null,
+    onMinSalaryChange: vi.fn(),
+    minUnique: 2,
+    onMinUniqueChange: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe("ConstraintsPanel", () => {
+  it("lists locked players with their exposure and a Remove control", () => {
+    render(<ConstraintsPanel {...defaultProps()} />);
+    expect(screen.getByText(/Locked Guy/)).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("calls onUnlock when Remove is clicked on a locked player", () => {
+    const onUnlock = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onUnlock })} />);
+    fireEvent.click(screen.getByText("Remove"));
+    expect(onUnlock).toHaveBeenCalledWith("d1");
+  });
+
+  it("lists excluded players with a Restore control", () => {
+    render(<ConstraintsPanel {...defaultProps()} />);
+    expect(screen.getByText("Excluded Guy")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Restore"));
+  });
+
+  it("calls onClearExclusions when Clear All is clicked", () => {
+    const onClearExclusions = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onClearExclusions })} />);
+    fireEvent.click(screen.getByText("Clear All"));
+    expect(onClearExclusions).toHaveBeenCalled();
+  });
+
+  it("shows friendly empty states when nothing is locked/excluded", () => {
+    render(<ConstraintsPanel {...defaultProps({ locks: [], exclusions: [] })} />);
+    expect(screen.getByText("No players locked.")).toBeInTheDocument();
+    expect(screen.getByText("No players excluded.")).toBeInTheDocument();
+  });
+
+  it("calls onStackSizeChange when a primary stack preset is clicked", () => {
+    const onStackSizeChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onStackSizeChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    expect(onStackSizeChange).toHaveBeenCalledWith(5);
+  });
+
+  it("disables the Stack Team selector until a stack size is chosen", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: null })} />);
+    expect(screen.getByText("Stack Team").closest("label")!.querySelector("select")).toBeDisabled();
+  });
+
+  it("enables the Stack Team selector once a stack size is chosen", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5 })} />);
+    expect(screen.getByText("Stack Team").closest("label")!.querySelector("select")).not.toBeDisabled();
+  });
+
+  it("secondary stack presets are shown but disabled, never faking support", () => {
+    render(<ConstraintsPanel {...defaultProps()} />);
+    const preset = screen.getByText("5 / 2");
+    expect(preset.tagName).toBe("SPAN"); // not a clickable button
+    expect(preset).toHaveAttribute("title", "Not yet supported by the optimizer");
+    expect(screen.getByText(/multi-stack presets are disabled, not faked/i)).toBeInTheDocument();
+  });
+
+  it("toggles allowPitcherVsHitter", () => {
+    const onAllowPitcherVsHitterChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onAllowPitcherVsHitterChange })} />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onAllowPitcherVsHitterChange).toHaveBeenCalledWith(true);
+  });
+
+  it("shows the salary cap read-only and reports minSalary changes", () => {
+    const onMinSalaryChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onMinSalaryChange })} />);
+    expect(screen.getByText("$50,000")).toBeInTheDocument();
+    const input = screen.getByText("Minimum Spend").closest("label")!.querySelector("input")!;
+    fireEvent.change(input, { target: { value: "45000" } });
+    expect(onMinSalaryChange).toHaveBeenCalledWith(45000);
+  });
+
+  it("reports minUnique changes", () => {
+    const onMinUniqueChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onMinUniqueChange })} />);
+    const select = screen.getByText("Minimum Unique Players").closest("label")!.querySelector("select")!;
+    fireEvent.change(select, { target: { value: "3" } });
+    expect(onMinUniqueChange).toHaveBeenCalledWith(3);
+  });
+});

@@ -1,0 +1,243 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { OptimizerWorkspace } from "../OptimizerWorkspace";
+
+const SLATES_READY = {
+  date: "2026-08-12",
+  status: "ready",
+  reason: null,
+  providerName: "mock_dev_provider",
+  isMock: true,
+  slates: [{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }],
+};
+
+const POOL_RESULT = {
+  date: "2026-08-12",
+  slateId: "mock-main",
+  slateName: "Mock Main (Dev)",
+  providerName: "mock_dev_provider",
+  isMock: true,
+  generatedAt: "2026-08-12T18:00:00.000Z",
+  players: [
+    {
+      dkPlayerId: "d1",
+      mlbPlayerId: "h1",
+      name: "Leadoff Hitter",
+      team: "BOS",
+      opponent: "TOR",
+      gameId: "g1",
+      playerType: "hitter",
+      positions: ["OF"],
+      battingOrder: 1,
+      salary: 4000,
+      projection: 10,
+      ceiling: 18,
+      value: 2.5,
+      ownership: 20,
+      leverage: 5,
+      risk: 30,
+      confidence: 80,
+      lineupStatus: "active",
+      matchStatus: "matched",
+    },
+    {
+      dkPlayerId: "d2",
+      mlbPlayerId: "p1",
+      name: "Ace Pitcher",
+      team: "TOR",
+      opponent: "BOS",
+      gameId: "g1",
+      playerType: "pitcher",
+      positions: ["P"],
+      battingOrder: null,
+      salary: 8000,
+      projection: 20,
+      ceiling: 32,
+      value: 2.5,
+      ownership: 30,
+      leverage: -2,
+      risk: 25,
+      confidence: 90,
+      lineupStatus: "active",
+      matchStatus: "matched",
+    },
+  ],
+  activePlayers: 2,
+  pitcherCount: 1,
+  hitterCount: 1,
+  confirmedLineupGames: 1,
+  unconfirmedLineupGames: 0,
+  unmatchedCount: 0,
+  slateGames: 1,
+  rosterFeasibilityPass: true,
+  salaryCap: 50000,
+  hasOwnership: true,
+};
+
+function jsonResponse(body: unknown) {
+  return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
+}
+
+function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit) => Promise<Response>>> = {}) {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const impl = vi.fn((url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    if (overrides[url]) return overrides[url]!(init);
+    if (url === "/api/optimizer/slates") return jsonResponse(SLATES_READY);
+    if (url === "/api/optimizer/pool") return jsonResponse({ pool: POOL_RESULT });
+    if (url === "/api/optimizer/validate") return jsonResponse({ errors: [] });
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", impl);
+  return { calls, impl };
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("OptimizerWorkspace", () => {
+  it("auto-selects the only slate, loads its pool, and shows the mock-data badge and status stats", async () => {
+    installFetchMock();
+    render(<OptimizerWorkspace />);
+
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    expect(screen.getByText("Dev / Mock Data")).toBeInTheDocument();
+    expect(screen.getByText("Active Players")).toBeInTheDocument();
+    const activeStat = screen.getByText("Active Players").nextSibling as HTMLElement;
+    expect(activeStat.textContent).toBe("2");
+  });
+
+  it("shows a not-connected message and never crashes when the provider isn't configured", async () => {
+    installFetchMock({
+      "/api/optimizer/slates": () =>
+        jsonResponse({ date: "2026-08-12", status: "not_connected", reason: "DFS_SALARY_PROVIDER is not set.", providerName: null, isMock: false, slates: [] }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText(/DFS provider not connected/i)).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Build Lineups")).toBeDisabled();
+  });
+
+  it("shows validation errors from /api/optimizer/validate and disables Build", async () => {
+    installFetchMock({
+      "/api/optimizer/validate": () => jsonResponse({ errors: ["3 pitchers are locked but only 2 pitcher slot(s) exist."] }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    await waitFor(() => expect(screen.getByText(/3 pitchers are locked/)).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getByText("Build Lineups")).toBeDisabled();
+  });
+
+  it("locking a player highlights it in the pool table and the locked panel", async () => {
+    installFetchMock();
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Lock Leadoff Hitter" }));
+    expect(screen.getByRole("button", { name: "Unlock Leadoff Hitter" })).toBeInTheDocument();
+    expect(screen.getByText("Locked (1)")).toBeInTheDocument();
+  });
+
+  it("runs the full build flow and renders the resulting lineups", async () => {
+    const buildResult = {
+      ok: true,
+      errors: [],
+      lineupSetPath: "C:\\fake\\dk_lineups_1.json",
+      csvPath: "C:\\fake\\dk_lineups_1.csv",
+      lineupsRequested: 1,
+      lineupsGenerated: 1,
+      stoppedReason: null,
+      lineups: [
+        {
+          index: 1,
+          assignments: [],
+          salary: 40000,
+          remaining_salary: 10000,
+          projection: 100,
+          ceiling: 180,
+          floor: 50,
+          average_risk: 30,
+          average_confidence: 80,
+          team_counts: {},
+          primary_stack_team: null,
+          primary_stack_size: 0,
+          sum_ownership: null,
+          average_ownership: null,
+          max_ownership: null,
+          players_above_chalk_threshold: null,
+        },
+      ],
+      elapsedMs: 500,
+    };
+    installFetchMock({ "/api/optimizer/build": () => jsonResponse({ result: buildResult }) });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.click(screen.getByText("Build Lineups"));
+    await waitFor(() => expect(screen.getByText(/Generated/)).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/Generated/).closest("span")?.textContent).toContain("1 / 1 lineup(s)");
+  });
+
+  it("shows build errors returned by the server without crashing", async () => {
+    installFetchMock({
+      "/api/optimizer/build": () =>
+        jsonResponse({ result: { ok: false, errors: ["--objective leverage requires --ownership."], lineups: [], lineupsRequested: 20, lineupsGenerated: 0, stoppedReason: null, lineupSetPath: null, csvPath: null, elapsedMs: 10 } }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.click(screen.getByText("Build Lineups"));
+    await waitFor(() => expect(screen.getByText(/requires --ownership/)).toBeInTheDocument(), { timeout: 5000 });
+  });
+
+  it("persists locks to localStorage and restores them on the next mount", async () => {
+    installFetchMock();
+    const { unmount } = render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Lock Leadoff Hitter" }));
+    await waitFor(
+      () => {
+        const raw = window.localStorage.getItem("mlb-dfs-optimizer-workspace-v1");
+        expect(raw).toBeTruthy();
+        expect(JSON.parse(raw!).locks).toContain("d1");
+      },
+      { timeout: 5000 },
+    );
+    unmount();
+
+    render(<OptimizerWorkspace />);
+    // Once the persisted lock is restored, "Leadoff Hitter" legitimately
+    // appears twice (the pool table row AND the Locked panel entry) --
+    // wait for the unambiguous, lock-specific button instead.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Unlock Leadoff Hitter" })).toBeInTheDocument(), { timeout: 5000 });
+  }, 15000);
+
+  it("drops a stale lock with a warning when the locked player is scratched on reload", async () => {
+    installFetchMock();
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "Lock Leadoff Hitter" }));
+    await waitFor(() => expect(screen.getByText("Locked (1)")).toBeInTheDocument(), { timeout: 5000 });
+
+    // Re-render fresh (simulating navigating away and back) with the SAME
+    // slate but the previously-locked player now scratched.
+    const scratchedPool = {
+      ...POOL_RESULT,
+      players: [{ ...POOL_RESULT.players[0], lineupStatus: "lineup_not_confirmed" }, POOL_RESULT.players[1]],
+    };
+    installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: scratchedPool }) });
+    render(<OptimizerWorkspace />);
+
+    await waitFor(() => expect(screen.getByText(/no longer active/i)).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Locked (0)")).toBeInTheDocument();
+  }, 15000);
+});

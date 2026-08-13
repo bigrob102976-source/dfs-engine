@@ -147,10 +147,12 @@ def pitcher_vs_hitter_conflicts(players: List[OptimizerPlayer]) -> Dict[str, Lis
     return conflicts
 
 
-def explain_infeasibility(eligible_players: List[OptimizerPlayer], settings: OptimizerSettings) -> List[str]:
-    """Best-effort human-readable reasons a solve came back infeasible.
-    Not exhaustive (CP-SAT doesn't hand back a minimal conflict set for
-    free) -- covers the common, individually-checkable blockers."""
+def _concrete_infeasibility_reasons(eligible_players: List[OptimizerPlayer], settings: OptimizerSettings) -> List[str]:
+    """The individually-checkable blockers shared by explain_infeasibility()
+    (called after a real solve fails) and pre_solve_diagnostics() (called
+    proactively, before any solve is attempted, for a live UI panel).
+    Never includes a generic fallback message -- an empty return means
+    none of these specific checks found a problem."""
     reasons: List[str] = []
 
     by_position: Dict[str, List[OptimizerPlayer]] = {slot["slot"]: [] for slot in DK_CLASSIC_ROSTER_SLOTS}
@@ -166,6 +168,9 @@ def explain_infeasibility(eligible_players: List[OptimizerPlayer], settings: Opt
         available = by_position.get(slot["slot"], [])
         if len(available) < slot["count"]:
             reasons.append(f"Only {len(available)} eligible {slot['slot']} player(s) available (need {slot['count']}).")
+
+    if settings.min_salary is not None and settings.min_salary > settings.salary_cap:
+        reasons.append(f"Minimum salary spend (${settings.min_salary}) exceeds the salary cap (${settings.salary_cap}).")
 
     salary_floor = 0
     floor_computable = True
@@ -194,9 +199,60 @@ def explain_infeasibility(eligible_players: List[OptimizerPlayer], settings: Opt
             if not any(len(v) >= settings.stack_size for v in teams.values()):
                 reasons.append(f"No team in the eligible pool has {settings.stack_size}+ eligible hitters for the requested stack.")
 
+    return reasons
+
+
+def explain_infeasibility(eligible_players: List[OptimizerPlayer], settings: OptimizerSettings) -> List[str]:
+    """Best-effort human-readable reasons a solve came back infeasible.
+    Not exhaustive (CP-SAT doesn't hand back a minimal conflict set for
+    free) -- covers the common, individually-checkable blockers."""
+    reasons = _concrete_infeasibility_reasons(eligible_players, settings)
     if not reasons:
         reasons.append(
             "Position, salary-floor, and stack checks each look individually satisfiable, but no combination of "
             "locks, salary cap, position eligibility, stacking, team limits, and pitcher-vs-hitter rules together is legal."
         )
     return reasons
+
+
+def _locked_slot_overflow_reasons(all_active_players: List[OptimizerPlayer], locked_keys: List[str]) -> List[str]:
+    """Catches the milestone's own example ('3 pitchers are locked but
+    only 2 pitcher slots exist') for every slot where the locked
+    player's DK eligibility is unambiguous (pitchers always are; a
+    hitter only counts toward a slot here if that slot is their ONLY
+    eligible position -- a locked 1B/OF-eligible hitter could go to
+    either, so it isn't counted against either slot's overflow check,
+    left instead for the solver itself to resolve)."""
+    by_key = {p.key: p for p in all_active_players}
+    locked_players = [by_key[k] for k in locked_keys if k in by_key]
+
+    reasons: List[str] = []
+    for slot in DK_CLASSIC_ROSTER_SLOTS:
+        slot_name = slot["slot"]
+        if slot_name == "P":
+            locked_for_slot = [p for p in locked_players if p.player_type == "pitcher"]
+            label, slot_label = "pitchers", "pitcher"
+        else:
+            locked_for_slot = [p for p in locked_players if p.player_type == "hitter" and p.dk_positions == [slot_name]]
+            label, slot_label = f"{slot_name} players", slot_name
+        if len(locked_for_slot) > slot["count"]:
+            reasons.append(
+                f"{len(locked_for_slot)} {label} are locked but only {slot['count']} {slot_label} slot(s) exist."
+            )
+    return reasons
+
+
+def pre_solve_diagnostics(all_active_players: List[OptimizerPlayer], settings: OptimizerSettings) -> List[str]:
+    """Validates locks/excludes/exposure (via resolve_settings), locked
+    players overflowing a single-eligibility roster slot, and the same
+    concrete position/salary/stack checks explain_infeasibility() uses --
+    all WITHOUT ever calling the solver, for a "here's what's wrong"
+    panel shown before the user clicks Build. Returns [] when nothing
+    obviously wrong was found; that is NOT a feasibility guarantee (CP-SAT
+    may still find the full combined constraint set unsatisfiable), just
+    the absence of any specific, cheaply-checkable blocker."""
+    try:
+        eligible, locked_keys, _, _, _ = resolve_settings(all_active_players, settings)
+    except OptimizerConfigError as e:
+        return [str(e)]
+    return _locked_slot_overflow_reasons(all_active_players, locked_keys) + _concrete_infeasibility_reasons(eligible, settings)
