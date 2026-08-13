@@ -41,6 +41,8 @@ function stubRun(overrides: {
     slateDate: overrides.slateDate,
     status: overrides.status,
     outcome: overrides.status === "completed" ? "ready" : null,
+    mode: "full",
+    requestedSteps: null,
     startedAt: "2026-08-12T18:00:00Z",
     finishedAt: overrides.status === "completed" ? "2026-08-12T18:30:00Z" : null,
     currentStepId: null,

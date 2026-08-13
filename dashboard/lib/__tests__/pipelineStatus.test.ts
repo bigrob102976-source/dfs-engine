@@ -37,7 +37,7 @@ describe("buildPipelineStatuses", () => {
     expect(byLabel["Research Package"].state).toBe("ready");
     expect(byLabel["Pitcher Snapshot"].state).toBe("missing");
     expect(byLabel["Ownership"].state).toBe("missing");
-    expect(byLabel["Ownership"].helpCommand).toContain("project_dk_ownership.py");
+    expect(byLabel["Ownership"].detail).not.toMatch(/python |scripts\//);
   });
 
   it("marks a ready stage outdated when generated before its upstream dependency", async () => {

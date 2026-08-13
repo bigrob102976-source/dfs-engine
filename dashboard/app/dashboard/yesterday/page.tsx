@@ -54,13 +54,7 @@ export default function YesterdayPage() {
       <div>
         <h1 className="mb-1 text-lg font-semibold text-text">Yesterday</h1>
         <div className="mt-4 rounded border border-border bg-bg-panel p-6 text-sm text-text-faint">
-          No slate has been evaluated yet. Run:
-          <br />
-          <code className="text-text-muted">python scripts/evaluate_pitcher_slate.py --date YYYY-MM-DD</code>
-          <br />
-          <code className="text-text-muted">
-            python scripts/evaluate_dk_ownership.py --date YYYY-MM-DD --ownership &lt;path&gt; --results &lt;contest.csv&gt;
-          </code>
+          Historical data unavailable for this slate.
         </div>
       </div>
     );

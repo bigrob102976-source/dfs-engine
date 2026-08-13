@@ -46,8 +46,7 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       state: pipelineStageStatus({ exists: !!research.data }),
       path: research.path,
       ...researchTs,
-      detail: "Run scripts/build_research_package.py",
-      helpCommand: `python scripts/build_research_package.py --date ${date}`,
+      detail: "Research has not been generated yet.",
     },
     {
       label: "Pitcher Snapshot",
@@ -55,7 +54,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: pitcher.path,
       ...pitcherTs,
       detail: "Not generated yet.",
-      helpCommand: `python scripts/run_real_pitcher_agent.py --date ${date}`,
     },
     {
       label: "Batter Snapshot",
@@ -63,7 +61,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: batter.path,
       ...batterTs,
       detail: "Not generated yet.",
-      helpCommand: `python scripts/run_real_batter_agent.py --date ${date}`,
     },
     {
       label: "Ownership",
@@ -75,7 +72,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: ownership.path,
       ...ownershipTs,
       detail: "Ownership has not been generated yet.",
-      helpCommand: `python scripts/project_dk_ownership.py --date ${date} --pool <dk_player_pool_path>`,
     },
     {
       label: "DK Salary Import",
@@ -83,7 +79,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: pool.path,
       ...poolTs,
       detail: "No DraftKings salary file imported yet.",
-      helpCommand: `python scripts/build_dk_player_pool.py --date ${date} --csv <DKSalaries.csv>`,
     },
     {
       label: "Optimizer",
@@ -95,7 +90,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: lineups.path,
       ...lineupsTs,
       detail: "No lineups generated yet.",
-      helpCommand: `python scripts/optimize_dk_lineups.py --date ${date} --pool <dk_player_pool_path>`,
     },
     {
       label: "Evaluation",
@@ -103,7 +97,6 @@ export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
       path: evaluation.path,
       ...evalTs,
       detail: "No evaluation run yet (requires a contest results export).",
-      helpCommand: `python scripts/evaluate_dk_ownership.py --date ${date} --ownership <path> --results <contest.csv>`,
     },
   ];
 }

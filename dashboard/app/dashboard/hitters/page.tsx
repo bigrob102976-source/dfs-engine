@@ -1,3 +1,4 @@
+import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
@@ -19,17 +20,20 @@ export default async function TopHittersPage(props: PageProps<"/dashboard/hitter
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Top Hitters</h1>
-      <p className="mb-4 text-xs text-text-faint">
-        {batterSnapshot
-          ? `${rows.length} confirmed starting-lineup hitters, from ${date}'s batter snapshot.`
-          : "Batter snapshot not generated yet."}
-      </p>
+      {batterSnapshot && (
+        <p className="mb-4 text-xs text-text-faint">
+          {rows.length} confirmed starting-lineup hitters, from {date}&apos;s batter snapshot.
+        </p>
+      )}
       {batterSnapshot ? (
         <PlayerTable rows={rows} variant="hitter" initialSortKey="projection" highlightId={highlightId} />
       ) : (
-        <div className="rounded border border-border bg-bg-panel p-6 text-sm text-text-faint">
-          Run: <code className="text-text-muted">python scripts/run_real_batter_agent.py --date {date ?? "YYYY-MM-DD"}</code>
-        </div>
+        <MissingDataState
+          title="Batter research is not ready for today's slate"
+          description="Generate today's hitter research to view projections and Statcast analysis."
+          primaryActionLabel="Generate Batter Research"
+          targetSteps={["batters"]}
+        />
       )}
     </div>
   );

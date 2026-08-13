@@ -333,7 +333,6 @@ export interface ArtifactStatus {
   generatedAtUtc: string | null;
   generatedAtLocal: string | null;
   detail?: string;
-  helpCommand?: string;
 }
 
 /** One normalized table/search row, built by joining a pitcher or

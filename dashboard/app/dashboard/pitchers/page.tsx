@@ -1,3 +1,4 @@
+import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
@@ -19,15 +20,20 @@ export default async function TopPitchersPage(props: PageProps<"/dashboard/pitch
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Top Pitchers</h1>
-      <p className="mb-4 text-xs text-text-faint">
-        {pitcherSnapshot ? `${rows.length} probable starters, from ${date}'s pitcher snapshot.` : "Pitcher snapshot not generated yet."}
-      </p>
+      {pitcherSnapshot && (
+        <p className="mb-4 text-xs text-text-faint">
+          {rows.length} probable starters, from {date}&apos;s pitcher snapshot.
+        </p>
+      )}
       {pitcherSnapshot ? (
         <PlayerTable rows={rows} variant="pitcher" initialSortKey="projection" highlightId={highlightId} />
       ) : (
-        <div className="rounded border border-border bg-bg-panel p-6 text-sm text-text-faint">
-          Run: <code className="text-text-muted">python scripts/run_real_pitcher_agent.py --date {date ?? "YYYY-MM-DD"}</code>
-        </div>
+        <MissingDataState
+          title="Pitcher research is not ready for today's slate"
+          description="Generate today's pitcher research to view projections and matchup analysis."
+          primaryActionLabel="Generate Pitcher Research"
+          targetSteps={["pitchers"]}
+        />
       )}
     </div>
   );

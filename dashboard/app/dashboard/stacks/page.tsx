@@ -1,3 +1,4 @@
+import { MissingDataState } from "@/components/MissingDataState";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { buildHitterRows } from "@/lib/normalize";
@@ -25,7 +26,12 @@ export default function StacksPage() {
       </p>
 
       {!batterSnapshot ? (
-        <div className="rounded border border-border bg-bg-panel p-6 text-sm text-text-faint">Batter snapshot not generated yet.</div>
+        <MissingDataState
+          title="Stack data is not ready for today's slate"
+          description="Generate today's hitter research to view team stacks and popularity."
+          primaryActionLabel="Refresh Required Data"
+          targetSteps={["batters"]}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {stacks.map((s) => (

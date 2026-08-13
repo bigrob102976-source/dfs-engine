@@ -98,6 +98,14 @@ export interface ChangeReport {
 
 export type RunStatus = "running" | "completed" | "failed" | "needs_selection" | "cancelled";
 
+/** Milestone 16: a run is either "full" (the original one-click Refresh
+ * Today's Slate button -- every step always re-runs, unconditionally,
+ * exactly as before) or "smart" (a missing-data-only refresh -- each
+ * step in `requestedSteps`' dependency closure is skipped, not
+ * re-invoked, if its artifact is already present). `requestedSteps` is
+ * null for a full run (every step is implicitly requested). */
+export type RunMode = "full" | "smart";
+
 export interface RunState {
   runId: string;
   slateDate: string;
@@ -111,4 +119,6 @@ export interface RunState {
   summary: RunSummary | null;
   changeReport: ChangeReport | null;
   error: string | null;
+  mode: RunMode;
+  requestedSteps: PipelineStepId[] | null;
 }

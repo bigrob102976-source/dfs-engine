@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { getTodayChicagoDate } from "../../currentDate";
 import type { PythonRunner, PythonRunResult } from "../pythonRunner";
 
 // This file never spawns a real Python process or touches the network --
@@ -42,7 +43,11 @@ function argValue(args: string[], flag: string): string | undefined {
 
 type Handler = (args: string[]) => PythonRunResult | Promise<PythonRunResult>;
 
-const DATE = "2026-08-12";
+// startRefresh() always resolves the slate date via getTodayChicagoDate()
+// internally (never client-supplied) -- fixtures must use the SAME value
+// so the run's slateDate matches where these fake handlers write, or
+// every fingerprint check "sees" a different date and reports missing.
+const DATE = getTodayChicagoDate();
 
 function defaultHandlers(): Record<string, Handler> {
   return {
@@ -523,5 +528,149 @@ describe("mlb_data_failure and disk-persisted state", () => {
     expect(recovered).not.toBeNull();
     expect(recovered!.runId).toBe(started.run.runId);
     expect(recovered!.status).toBe("completed");
+  }, 15000);
+});
+
+// Pre-seeds every pregame artifact EXCEPT the batter snapshot, so a smart
+// refresh targeting "everything" (Milestone 16's "Refresh Missing Data")
+// has exactly one real gap to fill.
+function seedEverythingExceptBatters() {
+  writeJson(`research_output/${DATE}/slate.json`, { slate_date: DATE, counts: { games: 1 } });
+  writeJson(`predictions/${DATE}/pitcher_board_0000000001.json`, { slate_date: DATE, pitcher_count: 2 });
+  writeJson(`dfs_input/${DATE}/provider_slate_0000000001.json`, {
+    status: "ready",
+    provider_name: "mock_dev_provider",
+    selected_slate_id: "mock-main",
+    slates: [{ slate_id: "mock-main", slate_name: "Mock Main (Dev)", game_count: 1, start_time: null }],
+    players: [],
+  });
+  writeJson(`dfs_input/${DATE}/dk_player_pool_0000000001.json`, { roster_feasibility_pass: true, player_count: 2, players: [] });
+  writeJson(`dfs_input/${DATE}/dk_match_report_0000000001.json`, { dk_entries: 2, matched_to_mlb: 2, unmatched_count: 0 });
+  writeJson(`ownership_predictions/${DATE}/ownership_0000000001.json`, { players: [] });
+  writeJson(`lineups/${DATE}/dk_lineups_0000000001.json`, { lineups_generated: 20, lineups: [] });
+}
+
+describe("smart (missing-data-only) refresh", () => {
+  it("skips a step whose artifact already exists instead of re-invoking its script", async () => {
+    writeJson(`research_output/${DATE}/slate.json`, { slate_date: DATE, counts: { games: 1 } });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    const started = startRefresh({ targetSteps: ["research"], smart: true });
+    await __waitForActiveRunToSettleForTests();
+
+    expect(calls.map((c) => c.script)).not.toContain("scripts/build_research_package.py");
+    const research = started.run.steps.find((s) => s.id === "research")!;
+    expect(research.status).toBe("ready");
+    expect(research.message).toBe("Already up to date.");
+    expect(started.run.status).toBe("completed");
+    expect(started.run.mode).toBe("smart");
+    expect(started.run.requestedSteps).toEqual(["research"]);
+  });
+
+  it("a targeted refresh only touches its own dependency chain -- unrelated steps are marked skipped, not attempted", async () => {
+    writeJson(`research_output/${DATE}/slate.json`, { slate_date: DATE, counts: { games: 1 } });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    // "Generate Batter Research": target = batters only.
+    const started = startRefresh({ targetSteps: ["batters"], smart: true });
+    await __waitForActiveRunToSettleForTests();
+
+    expect(calls.map((c) => c.script)).toEqual(["scripts/run_real_batter_agent.py"]);
+    const byId = Object.fromEntries(started.run.steps.map((s) => [s.id, s]));
+    expect(byId.research.status).toBe("ready"); // already existed, skipped-as-ready
+    expect(byId.batters.status).toBe("ready"); // actually ran
+    expect(byId.pitchers.status).toBe("skipped");
+    expect(byId.dfsSalaries.status).toBe("skipped");
+    expect(byId.playerPool.status).toBe("skipped");
+    expect(byId.ownership.status).toBe("skipped");
+    expect(byId.optimizer.status).toBe("skipped");
+    expect(byId.pitchers.message).toBe("Not required for this action.");
+    expect(started.run.status).toBe("completed");
+  });
+
+  it("'Refresh Missing Data' (target = everything) runs only the one genuinely missing step when everything else is already ready", async () => {
+    seedEverythingExceptBatters();
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    const started = startRefresh({ targetSteps: ["optimizer"], smart: true });
+    await __waitForActiveRunToSettleForTests();
+
+    // Only the Batter Agent script should have actually been invoked --
+    // every other already-ready step must NOT be unnecessarily rebuilt.
+    expect(calls.map((c) => c.script)).toEqual(["scripts/run_real_batter_agent.py"]);
+    const byId = Object.fromEntries(started.run.steps.map((s) => [s.id, s]));
+    for (const id of ["research", "pitchers", "dfsSalaries", "playerPool", "ownership", "optimizer"]) {
+      expect(byId[id].status).toBe("ready");
+      expect(byId[id].message).toBe("Already up to date.");
+    }
+    expect(byId.batters.status).toBe("ready");
+    expect(byId.batters.message).toBeNull(); // actually ran, normal success message shape
+    expect(started.run.status).toBe("completed");
+    expect(started.run.outcome).toBe("ready");
+  });
+
+  it("runs dependencies in correct pipeline order when nothing is ready yet", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    const started = startRefresh({ targetSteps: ["playerPool"], smart: true });
+    await __waitForActiveRunToSettleForTests();
+
+    expect(calls.map((c) => c.script)).toEqual([
+      "scripts/build_research_package.py",
+      "scripts/run_real_pitcher_agent.py",
+      "scripts/run_real_batter_agent.py",
+      "scripts/fetch_dfs_slate.py",
+      "scripts/build_dfs_pool_from_provider.py",
+    ]);
+    const byId = Object.fromEntries(started.run.steps.map((s) => [s.id, s]));
+    expect(byId.ownership.status).toBe("skipped");
+    expect(byId.optimizer.status).toBe("skipped");
+    expect(started.run.status).toBe("completed");
+  });
+
+  it("a failed dependency blocks every downstream step from even being attempted", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const handlers = { ...defaultHandlers(), "scripts/run_real_batter_agent.py": () => fail("batter agent crashed") };
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    const started = startRefresh({ targetSteps: ["playerPool"], smart: true });
+    await __waitForActiveRunToSettleForTests();
+
+    expect(started.run.status).toBe("failed");
+    expect(started.run.outcome).toBe("batter_agent_failure");
+    expect(calls.map((c) => c.script)).toEqual(["scripts/build_research_package.py", "scripts/run_real_pitcher_agent.py", "scripts/run_real_batter_agent.py"]);
+    expect(calls.map((c) => c.script)).not.toContain("scripts/fetch_dfs_slate.py");
+    expect(calls.map((c) => c.script)).not.toContain("scripts/build_dfs_pool_from_provider.py");
+  });
+
+  it("a full (non-smart) refresh still rebuilds already-ready artifacts unconditionally -- the original Refresh Today's Slate behavior is unchanged", async () => {
+    writeJson(`research_output/${DATE}/slate.json`, { slate_date: DATE, counts: { games: 1 } });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+    const { startRefresh, __waitForActiveRunToSettleForTests } = await import("../runner");
+
+    const started = startRefresh(); // no options -- the plain "Refresh Today's Slate" button
+    await __waitForActiveRunToSettleForTests();
+
+    expect(calls.map((c) => c.script)).toContain("scripts/build_research_package.py");
+    expect(started.run.mode).toBe("full");
+    expect(started.run.requestedSteps).toBeNull();
+    const research = started.run.steps.find((s) => s.id === "research")!;
+    expect(research.message).not.toBe("Already up to date.");
   }, 15000);
 });

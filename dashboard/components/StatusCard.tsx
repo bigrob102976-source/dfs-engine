@@ -32,14 +32,7 @@ export function StatusCard({ status }: { status: ArtifactStatus }) {
           Generated: {formatTimestamp(status.generatedAtLocal ?? status.generatedAtUtc)}
         </span>
       ) : (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-text-faint">{status.detail ?? "Not generated yet."}</span>
-          {status.helpCommand && (
-            <code className="rounded bg-bg-panel-raised px-2 py-1 font-mono text-[11px] text-text-muted">
-              {status.helpCommand}
-            </code>
-          )}
-        </div>
+        <span className="text-xs text-text-faint">{status.detail ?? "Not generated yet."}</span>
       )}
     </div>
   );

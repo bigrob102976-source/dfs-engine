@@ -6,6 +6,7 @@ import { ARTIFACT_DIRS, artifactPath } from "../artifactRoot";
 import { getTodayChicagoDate } from "../currentDate";
 import { safeReadJson } from "../discovery";
 import type { BatterSnapshot, DKPlayerPool, PitcherSnapshot, SlateIndex } from "../types";
+import { getArtifactStatus, type ArtifactReadiness } from "./artifactStatus";
 import {
   batterSnapshotFingerprint,
   fingerprintChanged,
@@ -19,6 +20,7 @@ import {
   type Fingerprint,
 } from "./artifacts";
 import { buildChangeReport } from "./changeReport";
+import { resolveStepChain, STEP_ORDER } from "./dependencies";
 import { runPythonScript, tail } from "./pythonRunner";
 import { initialSteps, STEP_DEFINITIONS } from "./steps";
 import type { PipelineStepId, RunOutcome, RunState, SlateOption, StepStatus } from "./types";
@@ -147,6 +149,35 @@ async function runStep(
   });
 
   return { ok, artifactPath: after.path };
+}
+
+/** Wraps a step so it can participate in a "smart" (missing-data-only)
+ * run: if the step isn't in `chain` (not needed for whatever was
+ * requested), it's marked "skipped" and never invoked; if it IS in
+ * chain but `smart` is on and `isReady` says its artifact already
+ * exists, it's marked "ready" without re-running the script at all. A
+ * full ("Refresh Today's Slate") run passes smart=false, so this always
+ * falls through to actually running `run()` -- identical to the
+ * pre-Milestone-16 behavior. */
+async function runOrSkip(
+  state: RunState,
+  id: PipelineStepId,
+  chain: Set<PipelineStepId>,
+  smart: boolean,
+  isReady: boolean,
+  fingerprintFn: (date: string) => Fingerprint,
+  run: () => Promise<{ ok: boolean; artifactPath: string | null }>,
+): Promise<{ ok: boolean; artifactPath: string | null }> {
+  if (!chain.has(id)) {
+    markStepStatus(state, id, "skipped", { message: "Not required for this action.", artifactPath: fingerprintFn(state.slateDate).path });
+    return { ok: true, artifactPath: fingerprintFn(state.slateDate).path };
+  }
+  if (smart && isReady) {
+    const existing = fingerprintFn(state.slateDate);
+    markStepStatus(state, id, "ready", { finishedAt: new Date().toISOString(), artifactPath: existing.path, message: "Already up to date." });
+    return { ok: true, artifactPath: existing.path };
+  }
+  return run();
 }
 
 type LineupCounts = { projection: number | null; balanced: number | null; leverage: number | null };
@@ -356,8 +387,19 @@ async function runOptimizerStep(
   return { ok: allOk, lineupCounts, lineupSetPaths };
 }
 
-async function continueAfterDfsSalaries(state: RunState) {
-  const poolResult = await runStep(state, "playerPool", "scripts/build_dfs_pool_from_provider.py", ["--date", state.slateDate], poolFingerprint);
+async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStepId>, smart: boolean, readiness: ArtifactReadiness | null) {
+  const poolResult = await runOrSkip(state, "playerPool", chain, smart, Boolean(readiness?.playerPool), poolFingerprint, () =>
+    runStep(state, "playerPool", "scripts/build_dfs_pool_from_provider.py", ["--date", state.slateDate], poolFingerprint),
+  );
+
+  if (!chain.has("playerPool")) {
+    // Player Pool (and everything that depends on it) wasn't requested.
+    markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFingerprint(state.slateDate).path });
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
+    finalize(state, "completed", "ready");
+    return;
+  }
+
   if (!poolResult.ok || !poolResult.artifactPath) {
     finalize(state, "failed", "player_matching_failure", "Player pool build failed or produced no pool.");
     return;
@@ -378,9 +420,31 @@ async function continueAfterDfsSalaries(state: RunState) {
     return;
   }
 
-  const ownershipResult = await runStep(state, "ownership", "scripts/project_dk_ownership.py", ["--date", state.slateDate, "--pool", poolResult.artifactPath], ownershipFingerprint);
+  const ownershipResult = await runOrSkip(state, "ownership", chain, smart, Boolean(readiness?.ownership), ownershipFingerprint, () =>
+    runStep(state, "ownership", "scripts/project_dk_ownership.py", ["--date", state.slateDate, "--pool", poolResult.artifactPath!], ownershipFingerprint),
+  );
+
+  if (!chain.has("ownership")) {
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
+    finalize(state, "completed", "ready");
+    return;
+  }
+
   if (!ownershipResult.ok) {
     finalize(state, "failed", "ownership_failure", "Ownership projection failed or produced no snapshot.");
+    return;
+  }
+
+  if (!chain.has("optimizer")) {
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
+    finalize(state, "completed", "ready");
+    return;
+  }
+
+  if (smart && readiness?.optimizer) {
+    const existing = lineupSetFingerprint(state.slateDate);
+    markStepStatus(state, "optimizer", "ready", { finishedAt: new Date().toISOString(), artifactPath: existing.path, message: "Already up to date." });
+    finalize(state, "completed", "ready");
     return;
   }
 
@@ -400,29 +464,61 @@ async function continueAfterDfsSalaries(state: RunState) {
   finalize(state, "completed", "ready", undefined, optimizer.lineupCounts, optimizer.lineupSetPaths);
 }
 
-async function executeRun(state: RunState, resumeSlateId?: string) {
+async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<PipelineStepId> = new Set(STEP_ORDER), smart = false) {
   try {
+    const readiness = smart ? getArtifactStatus(state.slateDate) : null;
+
     if (!resumeSlateId) {
-      const research = await runStep(state, "research", "scripts/build_research_package.py", ["--date", state.slateDate], researchSlateFingerprint);
+      const research = await runOrSkip(state, "research", chain, smart, Boolean(readiness?.research), researchSlateFingerprint, () =>
+        runStep(state, "research", "scripts/build_research_package.py", ["--date", state.slateDate], researchSlateFingerprint),
+      );
       if (!research.ok) {
         finalize(state, "failed", "mlb_data_failure", "Research package build failed.");
         return;
       }
 
-      const pitchers = await runStep(state, "pitchers", "scripts/run_real_pitcher_agent.py", ["--date", state.slateDate], pitcherSnapshotFingerprint);
+      const pitchers = await runOrSkip(state, "pitchers", chain, smart, Boolean(readiness?.pitchers), pitcherSnapshotFingerprint, () =>
+        runStep(state, "pitchers", "scripts/run_real_pitcher_agent.py", ["--date", state.slateDate], pitcherSnapshotFingerprint),
+      );
       if (!pitchers.ok) {
         finalize(state, "failed", "pitcher_agent_failure", "Pitcher Agent run failed.");
         return;
       }
 
-      const batters = await runStep(state, "batters", "scripts/run_real_batter_agent.py", ["--date", state.slateDate], batterSnapshotFingerprint);
+      const batters = await runOrSkip(state, "batters", chain, smart, Boolean(readiness?.batters), batterSnapshotFingerprint, () =>
+        runStep(state, "batters", "scripts/run_real_batter_agent.py", ["--date", state.slateDate], batterSnapshotFingerprint),
+      );
       if (!batters.ok) {
         finalize(state, "failed", "batter_agent_failure", "Batter Agent run failed.");
         return;
       }
     }
 
-    const dfsResult = await runDfsSalariesStep(state, resumeSlateId);
+    if (!chain.has("dfsSalaries")) {
+      markStepStatus(state, "dfsSalaries", "skipped", {
+        message: "Not required for this action.",
+        artifactPath: providerSlateFingerprint(state.slateDate).path,
+      });
+      markStepStatus(state, "playerPool", "skipped", { message: "Not required for this action.", artifactPath: poolFingerprint(state.slateDate).path });
+      markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFingerprint(state.slateDate).path });
+      markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
+      finalize(state, "completed", "ready");
+      return;
+    }
+
+    let dfsResult: { status: string; doc: Record<string, unknown> | null; path: string | null };
+    if (smart && !resumeSlateId && readiness?.dfsSalaries) {
+      const existing = providerSlateFingerprint(state.slateDate);
+      const doc = safeReadJson<Record<string, unknown>>(existing.path);
+      markStepStatus(state, "dfsSalaries", "ready", {
+        finishedAt: new Date().toISOString(),
+        artifactPath: existing.path,
+        message: "Already up to date.",
+      });
+      dfsResult = { status: "ready", doc, path: existing.path };
+    } else {
+      dfsResult = await runDfsSalariesStep(state, resumeSlateId);
+    }
 
     if (dfsResult.status === "needs_selection") {
       const slates = Array.isArray(dfsResult.doc?.slates) ? (dfsResult.doc!.slates as Record<string, unknown>[]) : [];
@@ -447,7 +543,7 @@ async function executeRun(state: RunState, resumeSlateId?: string) {
       return;
     }
 
-    await continueAfterDfsSalaries(state);
+    await continueAfterDfsSalaries(state, chain, smart, readiness);
   } catch (err) {
     finalize(state, "failed", "unexpected_error", err instanceof Error ? err.message : String(err));
   }
@@ -459,10 +555,25 @@ export interface StartRefreshResult {
   run: RunState;
 }
 
-export function startRefresh(): StartRefreshResult {
+/** targetSteps + smart=true is a "missing-data-only" refresh (Milestone
+ * 16): only the dependency closure of targetSteps runs, and within that
+ * closure, any step whose artifact already exists is skipped rather
+ * than re-invoked. Omitting options (or smart=false) is the original
+ * "Refresh Today's Slate" behavior -- every one of the 7 steps always
+ * runs, unconditionally, exactly as before this milestone. */
+export interface StartRefreshOptions {
+  targetSteps?: PipelineStepId[];
+  smart?: boolean;
+}
+
+export function startRefresh(options?: StartRefreshOptions): StartRefreshResult {
   if (activeRun && (activeRun.status === "running" || activeRun.status === "needs_selection")) {
     return { accepted: false, conflict: true, run: activeRun };
   }
+
+  const requestedSteps = options?.targetSteps && options.targetSteps.length > 0 ? options.targetSteps : null;
+  const smart = Boolean(options?.smart);
+  const chain = new Set(resolveStepChain(requestedSteps ?? ["optimizer"]));
 
   const state: RunState = {
     runId: crypto.randomUUID(),
@@ -477,11 +588,13 @@ export function startRefresh(): StartRefreshResult {
     summary: null,
     changeReport: null,
     error: null,
+    mode: smart ? "smart" : "full",
+    requestedSteps,
   };
 
   activeRun = state;
   persistRunState(state);
-  activeRunPromise = executeRun(state);
+  activeRunPromise = executeRun(state, undefined, chain, smart);
 
   return { accepted: true, conflict: false, run: state };
 }
@@ -505,7 +618,8 @@ export function resumeWithSlateSelection(slateId: string): ResumeResult {
   state.status = "running";
   state.slateOptions = null;
   persistRunState(state);
-  activeRunPromise = executeRun(state, slateId);
+  const chain = new Set(resolveStepChain(state.requestedSteps ?? ["optimizer"]));
+  activeRunPromise = executeRun(state, slateId, chain, state.mode === "smart");
 
   return { ok: true, run: state };
 }

@@ -21,7 +21,7 @@ describe("StatusCard", () => {
     expect(screen.getByText(/Generated:/)).toBeInTheDocument();
   });
 
-  it("renders MISSING with a help command", () => {
+  it("renders MISSING with a user-facing detail and no developer command", () => {
     render(
       <StatusCard
         status={{
@@ -31,13 +31,13 @@ describe("StatusCard", () => {
           generatedAtUtc: null,
           generatedAtLocal: null,
           detail: "Ownership has not been generated yet.",
-          helpCommand: "python scripts/project_dk_ownership.py --date 2026-08-11 --pool <path>",
         }}
       />,
     );
     expect(screen.getByText("MISSING")).toBeInTheDocument();
     expect(screen.getByText("Ownership has not been generated yet.")).toBeInTheDocument();
-    expect(screen.getByText(/project_dk_ownership.py/)).toBeInTheDocument();
+    expect(screen.queryByText(/python /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/scripts\//)).not.toBeInTheDocument();
   });
 
   it("renders OUTDATED distinctly from READY/MISSING", () => {

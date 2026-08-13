@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { MissingDataState } from "@/components/MissingDataState";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
 import type { OptimizerBuildResult, OptimizerPoolResult, SlateOption } from "@/lib/optimizerWorkspace/types";
@@ -146,9 +147,11 @@ export function OptimizerWorkspace() {
 
   // 4. Load the selected slate's player pool. Reconciles existing
   // locks/exclusions/exposures/stackTeam against the new pool (Milestone
-  // 14's "SLATE CHANGE" / "REFRESH BEHAVIOR" requirements).
-  useEffect(() => {
-    if (!hydrated || !selectedSlateId) return;
+  // 14's "SLATE CHANGE" / "REFRESH BEHAVIOR" requirements). Pulled out of
+  // the effect below so Milestone 16's "Prepare Optimizer Data" action can
+  // also call it directly, once its background orchestrator run finishes,
+  // to reload the pool without a manual browser refresh.
+  const loadPool = useCallback((slateId: string) => {
     Promise.resolve()
       .then(() => {
         setPoolLoading(true);
@@ -158,7 +161,7 @@ export function OptimizerWorkspace() {
         return fetch("/api/optimizer/pool", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slateId: selectedSlateId }),
+          body: JSON.stringify({ slateId }),
         });
       })
       .then((res) => res.json())
@@ -174,9 +177,8 @@ export function OptimizerWorkspace() {
 
         // Reads the CURRENT (not necessarily latest-latest, but close
         // enough for a user-driven, infrequent slate change) locks/
-        // exclusions/exposures via closure -- intentionally not in this
-        // effect's dependency array, since re-running the pool fetch on
-        // every lock/exclude toggle would be wrong.
+        // exclusions/exposures via this callback's closure -- deliberately
+        // a dependency below rather than re-fetched on every toggle.
         const reconciled = reconcileConstraintsWithPool(newPool, { locks, exclusions, maxExposure });
         setLocks(reconciled.state.locks);
         setExclusions(reconciled.state.exclusions);
@@ -190,6 +192,11 @@ export function OptimizerWorkspace() {
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
+  }, [locks, exclusions, maxExposure]);
+
+  useEffect(() => {
+    if (!hydrated || !selectedSlateId) return;
+    loadPool(selectedSlateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, selectedSlateId]);
 
@@ -420,7 +427,15 @@ export function OptimizerWorkspace() {
         </div>
 
         <div className="min-w-0">
-          {pool ? (
+          {pool && pool.activePlayers === 0 ? (
+            <MissingDataState
+              title="Optimizer data is not ready for this slate"
+              description="The player pool has no active players yet -- pitcher and hitter research needs to be generated first."
+              primaryActionLabel="Prepare Optimizer Data"
+              targetSteps={["pitchers", "batters"]}
+              onReady={() => selectedSlateId && loadPool(selectedSlateId)}
+            />
+          ) : pool ? (
             <PoolTable
               players={pool.players}
               locks={new Set(locks)}

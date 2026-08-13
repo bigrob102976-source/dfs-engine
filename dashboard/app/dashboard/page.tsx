@@ -1,6 +1,8 @@
 import { RefreshPanel } from "@/components/RefreshPanel";
+import { SlateReadiness } from "@/components/SlateReadiness";
 import { StatusCard } from "@/components/StatusCard";
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +25,11 @@ export default function TodaysSlatePage() {
   const date = getTodayChicagoDate();
   const summary = buildSlateSummary(date);
   const statuses = buildPipelineStatuses(date);
+  const readiness = getArtifactStatus(date);
 
   return (
     <div>
+      <SlateReadiness readiness={readiness} />
       <RefreshPanel />
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
