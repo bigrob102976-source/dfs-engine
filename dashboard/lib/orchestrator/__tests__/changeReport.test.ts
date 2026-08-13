@@ -74,6 +74,8 @@ function stubRun(overrides: {
             lineupCounts: { projection: 20, balanced: 20, leverage: 20 },
             lineupSetPaths: { projection: overrides.projectionLineupsPath ?? null, balanced: null, leverage: null },
             providerName: "mock_dev_provider",
+            isMock: true,
+            providerSource: "automatic_fallback",
             selectedSlateId: "mock-main",
           }
         : null,

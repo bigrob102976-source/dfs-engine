@@ -8,8 +8,12 @@ const SLATES_READY = {
   status: "ready",
   reason: null,
   providerName: "mock_dev_provider",
+  providerType: "mock",
   isMock: true,
+  isConnected: true,
+  source: "automatic_fallback",
   slates: [{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }],
+  slatesAvailable: 1,
 };
 
 const POOL_RESULT = {
@@ -103,26 +107,91 @@ afterEach(() => {
 });
 
 describe("OptimizerWorkspace", () => {
-  it("auto-selects the only slate, loads its pool, and shows the mock-data badge and status stats", async () => {
+  it("auto-selects the only slate, loads its pool, and shows the mock-data badge and status stats -- with no DFS_SALARY_PROVIDER set at all (automatic fallback)", async () => {
     installFetchMock();
     render(<OptimizerWorkspace />);
 
     await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-    expect(screen.getByText("Dev / Mock Data")).toBeInTheDocument();
+    expect(screen.getByText("DEV / MOCK DATA")).toBeInTheDocument();
     expect(screen.getByText("Active Players")).toBeInTheDocument();
     const activeStat = screen.getByText("Active Players").nextSibling as HTMLElement;
     expect(activeStat.textContent).toBe("2");
+
+    // The old developer-facing "configure DFS_SALARY_PROVIDER" warning must
+    // never appear when the automatic mock fallback is what's active.
+    expect(screen.queryByText(/unrecognized value/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not connected/i)).not.toBeInTheDocument();
   });
 
-  it("shows a not-connected message and never crashes when the provider isn't configured", async () => {
+  it("shows a clear message (never crashes) when DFS_SALARY_PROVIDER is explicitly set to an unrecognized value", async () => {
     installFetchMock({
       "/api/optimizer/slates": () =>
-        jsonResponse({ date: "2026-08-12", status: "not_connected", reason: "DFS_SALARY_PROVIDER is not set.", providerName: null, isMock: false, slates: [] }),
+        jsonResponse({
+          date: "2026-08-12",
+          status: "not_connected",
+          reason: "DFS_SALARY_PROVIDER='bogus' is not a recognized provider. Supported: ['mock'].",
+          providerName: null,
+          providerType: null,
+          isMock: false,
+          isConnected: false,
+          source: "explicit",
+          slates: [],
+          slatesAvailable: 0,
+        }),
     });
     render(<OptimizerWorkspace />);
-    await waitFor(() => expect(screen.getByText(/DFS provider not connected/i)).toBeInTheDocument(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByText(/unrecognized value/i)).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByText("Build Lineups")).toBeDisabled();
+  });
+
+  it("shows a clean empty state (never crashes) when the provider returns zero slates", async () => {
+    installFetchMock({
+      "/api/optimizer/slates": () =>
+        jsonResponse({
+          date: "2026-08-12",
+          status: "no_slate",
+          reason: "Provider returned zero slates for this date.",
+          providerName: "mock_dev_provider",
+          providerType: "mock",
+          isMock: true,
+          isConnected: false,
+          source: "automatic_fallback",
+          slates: [],
+          slatesAvailable: 0,
+        }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("No slates available")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Build Lineups")).toBeDisabled();
+    expect(screen.queryByText("Leadoff Hitter")).not.toBeInTheDocument();
+  });
+
+  it("shows the dropdown (without auto-selecting) when the provider exposes multiple slates", async () => {
+    installFetchMock({
+      "/api/optimizer/slates": () =>
+        jsonResponse({
+          date: "2026-08-12",
+          status: "ready",
+          reason: null,
+          providerName: "mock_dev_provider",
+          providerType: "mock",
+          isMock: true,
+          isConnected: true,
+          source: "automatic_fallback",
+          slates: [
+            { slateId: "main", slateName: "Main", gameCount: 9, startTime: "7:05 PM" },
+            { slateId: "turbo", slateName: "Turbo", gameCount: 4, startTime: "8:10 PM" },
+          ],
+          slatesAvailable: 2,
+        }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Select a slate")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/Main -- 7:05 PM -- 9 games/)).toBeInTheDocument();
+    expect(screen.getByText(/Turbo -- 8:10 PM -- 4 games/)).toBeInTheDocument();
+    // Nothing auto-selected -- no pool fetch should have happened yet.
+    expect(screen.queryByText("Leadoff Hitter")).not.toBeInTheDocument();
   });
 
   it("shows validation errors from /api/optimizer/validate and disables Build", async () => {

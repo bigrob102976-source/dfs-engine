@@ -43,8 +43,12 @@ function defaultHandlers(): Record<string, Handler> {
           status: "ready",
           reason: null,
           provider_name: "mock_dev_provider",
+          provider_type: "mock",
           is_mock: true,
+          is_connected: true,
+          source: "automatic_fallback",
           slates: [{ slate_id: "mock-main", slate_name: "Mock Main (Dev)", game_count: 15, start_time: null }],
+          slates_available: 1,
         }),
       ),
     "scripts/fetch_dfs_slate.py": (args) => {
@@ -52,6 +56,9 @@ function defaultHandlers(): Record<string, Handler> {
       writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
         status: "ready",
         provider_name: "mock_dev_provider",
+        provider_type: "mock",
+        is_mock: true,
+        source: "automatic_fallback",
         selected_slate_id: slateId,
         slates: [{ slate_id: slateId, slate_name: "Mock Main (Dev)", game_count: 1, start_time: null }],
         players: [],
@@ -158,15 +165,31 @@ describe("listSlates", () => {
     expect(result.status).toBe("ready");
     expect(result.isMock).toBe(true);
     expect(result.providerName).toBe("mock_dev_provider");
+    expect(result.providerType).toBe("mock");
+    expect(result.isConnected).toBe(true);
+    expect(result.source).toBe("automatic_fallback");
+    expect(result.slatesAvailable).toBe(1);
     expect(result.slates).toEqual([{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }]);
   });
 
-  it("reports not_connected cleanly", async () => {
+  it("reports not_connected cleanly for an explicit, unrecognized provider name (never falls back silently)", async () => {
     const calls: Array<{ script: string; args: string[] }> = [];
     const handlers = {
       ...defaultHandlers(),
       "scripts/list_dfs_slates.py": () =>
-        ok(JSON.stringify({ status: "not_connected", reason: "DFS_SALARY_PROVIDER is not set.", provider_name: null, is_mock: false, slates: [] })),
+        ok(
+          JSON.stringify({
+            status: "not_connected",
+            reason: "DFS_SALARY_PROVIDER='bogus' is not a recognized provider. Supported: ['mock'].",
+            provider_name: null,
+            provider_type: null,
+            is_mock: false,
+            is_connected: false,
+            source: "explicit",
+            slates: [],
+            slates_available: 0,
+          }),
+        ),
     };
     const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
     __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
@@ -174,6 +197,7 @@ describe("listSlates", () => {
     const { listSlates } = await import("../poolCache");
     const result = await listSlates(DATE);
     expect(result.status).toBe("not_connected");
+    expect(result.source).toBe("explicit");
     expect(result.slates).toEqual([]);
   });
 
@@ -211,6 +235,7 @@ describe("loadPool", () => {
     expect(pool.rosterFeasibilityPass).toBe(true);
     expect(pool.hasOwnership).toBe(true);
     expect(pool.isMock).toBe(true);
+    expect(pool.providerSource).toBe("automatic_fallback");
     expect(pool.slateGames).toBe(1);
 
     const hitter = pool.players.find((p) => p.dkPlayerId === "d1")!;

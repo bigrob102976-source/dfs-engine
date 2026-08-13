@@ -25,6 +25,23 @@ from dfs.providers.base import ProviderAuthenticationError, ProviderNoSlateError
 from dfs.providers.config import get_configured_provider
 
 
+def _status_doc(status, reason, provider, source, slates=None, warnings=None):
+    is_mock = provider is not None and provider.name == "mock_dev_provider"
+    slates = slates or []
+    return {
+        "status": status,
+        "reason": reason,
+        "provider_name": provider.name if provider is not None else None,
+        "provider_type": "mock" if is_mock else ("real" if provider is not None else None),
+        "is_mock": is_mock,
+        "is_connected": provider is not None and status == "ready",
+        "source": source,
+        "slates": slates,
+        "slates_available": len(slates),
+        "warnings": warnings or [],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="List every DFS slate the configured provider exposes for a date (read-only).")
     parser.add_argument("--date", required=True)
@@ -32,34 +49,29 @@ def main() -> None:
     parser.add_argument("--site", default="draftkings")
     args = parser.parse_args()
 
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     if provider is None:
-        print(json.dumps({"status": "not_connected", "reason": reason, "provider_name": None, "is_mock": False, "slates": []}))
+        print(json.dumps(_status_doc("not_connected", reason, None, source)))
         return
-
-    is_mock = provider.name == "mock_dev_provider"
 
     try:
         result = provider.get_slate(args.date, sport=args.sport, site=args.site)
     except ProviderAuthenticationError as e:
-        print(json.dumps({"status": "auth_failed", "reason": str(e), "provider_name": provider.name, "is_mock": is_mock, "slates": []}))
+        print(json.dumps(_status_doc("auth_failed", str(e), provider, source)))
         return
     except ProviderUnavailableError as e:
-        print(json.dumps({"status": "unavailable", "reason": str(e), "provider_name": provider.name, "is_mock": is_mock, "slates": []}))
+        print(json.dumps(_status_doc("unavailable", str(e), provider, source)))
         return
     except ProviderNoSlateError as e:
-        print(json.dumps({"status": "no_slate", "reason": str(e), "provider_name": provider.name, "is_mock": is_mock, "slates": []}))
+        print(json.dumps(_status_doc("no_slate", str(e), provider, source)))
         return
 
     status = "ready" if result.slates else "no_slate"
-    print(json.dumps({
-        "status": status,
-        "reason": None if result.slates else "Provider returned zero slates for this date.",
-        "provider_name": provider.name,
-        "is_mock": is_mock,
-        "slates": [s.to_dict() for s in result.slates],
-        "warnings": result.warnings,
-    }))
+    reason = None if result.slates else "Provider returned zero slates for this date."
+    print(json.dumps(_status_doc(
+        status, reason, provider, source,
+        slates=[s.to_dict() for s in result.slates], warnings=result.warnings,
+    )))
 
 
 if __name__ == "__main__":

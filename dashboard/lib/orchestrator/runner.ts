@@ -216,6 +216,11 @@ function buildRunSummary(state: RunState, lineupCounts: LineupCounts, lineupSetP
     lineupCounts,
     lineupSetPaths,
     providerName: typeof providerSlate?.provider_name === "string" ? (providerSlate.provider_name as string) : null,
+    isMock: Boolean(providerSlate?.is_mock),
+    providerSource:
+      providerSlate?.source === "explicit" || providerSlate?.source === "automatic_fallback"
+        ? (providerSlate.source as "explicit" | "automatic_fallback")
+        : null,
     selectedSlateId: typeof providerSlate?.selected_slate_id === "string" ? (providerSlate.selected_slate_id as string) : null,
   };
 }

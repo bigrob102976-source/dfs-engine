@@ -22,10 +22,24 @@ paid third-party odds/DFS-data API) would mean:
      which passes environment variables to the Python subprocess but
      never returns them in any API response).
 
-This module deliberately never raises for the "nothing configured"
-case -- that is the expected default state this milestone, and callers
-(scripts/fetch_dfs_slate.py) are required to handle it as a normal,
-reportable outcome ("DFS SALARIES: NOT CONNECTED"), not a crash.
+Milestone 15: the dashboard must work immediately on startup without
+any manual terminal configuration. Resolution priority is:
+
+  1. An explicitly configured, valid provider (DFS_SALARY_PROVIDER set
+     to a registered name, with DFS_PROVIDER_API_KEY if that provider
+     requires one) -- always wins.
+  2. DFS_SALARY_PROVIDER explicitly set but invalid (unrecognized name,
+     or a required API key missing) -- this is a real misconfiguration
+     and is reported as such (None, reason, "explicit"), never silently
+     replaced by the mock fallback -- masking a typo would be worse than
+     surfacing it.
+  3. DFS_SALARY_PROVIDER unset or empty -- automatically falls back to
+     the mock provider (source="automatic_fallback") so the dashboard
+     and optimizer work immediately without any PowerShell/terminal
+     setup. This module still never raises for this case, exactly as
+     before -- callers (scripts/fetch_dfs_slate.py,
+     scripts/list_dfs_slates.py) branch on the returned status/source,
+     never on an exception.
 """
 
 import os
@@ -38,23 +52,29 @@ PROVIDER_FACTORIES: Dict[str, Callable[[], DFSSalaryProvider]] = {
     "mock": MockProvider,
 }
 
+DEFAULT_FALLBACK_PROVIDER_KEY = "mock"
 
-def get_configured_provider() -> Tuple[Optional[DFSSalaryProvider], Optional[str]]:
-    """Returns (provider, None) if DFS_SALARY_PROVIDER names a
-    registered, sufficiently-configured provider, else (None, reason)."""
+
+def get_configured_provider() -> Tuple[Optional[DFSSalaryProvider], Optional[str], str]:
+    """Returns (provider, reason, source).
+
+    `source` is "explicit" when DFS_SALARY_PROVIDER named the result
+    (successfully or not), or "automatic_fallback" when nothing was
+    configured and the mock provider was used as the default. Explicit
+    configuration always takes priority over the automatic fallback --
+    see the module docstring for the full resolution order."""
     name = (os.environ.get("DFS_SALARY_PROVIDER") or "").strip().lower()
+
     if not name:
-        return None, (
-            "DFS_SALARY_PROVIDER is not set. Configure it to enable automatic salary ingestion "
-            "(e.g. DFS_SALARY_PROVIDER=mock for local pipeline testing with mock/dev salary data)."
-        )
+        provider = PROVIDER_FACTORIES[DEFAULT_FALLBACK_PROVIDER_KEY]()
+        return provider, None, "automatic_fallback"
 
     factory = PROVIDER_FACTORIES.get(name)
     if factory is None:
-        return None, f"DFS_SALARY_PROVIDER={name!r} is not a recognized provider. Supported: {sorted(PROVIDER_FACTORIES)}."
+        return None, f"DFS_SALARY_PROVIDER={name!r} is not a recognized provider. Supported: {sorted(PROVIDER_FACTORIES)}.", "explicit"
 
     provider = factory()
     if provider.requires_api_key and not os.environ.get("DFS_PROVIDER_API_KEY"):
-        return None, f"Provider {name!r} requires DFS_PROVIDER_API_KEY, which is not set."
+        return None, f"Provider {name!r} requires DFS_PROVIDER_API_KEY, which is not set.", "explicit"
 
-    return provider, None
+    return provider, None, "explicit"

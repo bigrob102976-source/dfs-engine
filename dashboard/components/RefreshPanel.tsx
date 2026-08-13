@@ -21,7 +21,10 @@ const OUTCOME_MESSAGES: Partial<Record<RunOutcome, string>> = {
   mlb_data_failure: "MLB data failure -- the research package could not be built.",
   pitcher_agent_failure: "Pitcher Agent run failed.",
   batter_agent_failure: "Batter Agent run failed.",
-  dfs_not_connected: "DFS SALARIES NOT CONNECTED -- configure DFS_SALARY_PROVIDER to enable automatic salary ingestion.",
+  // Unset DFS_SALARY_PROVIDER now falls back to the mock provider automatically
+  // (see dfs/providers/config.py) -- this outcome only fires when it's explicitly
+  // set to something invalid, so the message points at fixing/clearing it.
+  dfs_not_connected: "DFS SALARIES NOT CONNECTED -- DFS_SALARY_PROVIDER is set to an unrecognized value. Fix it, or unset it to use the automatic mock fallback.",
   dfs_unavailable: "DFS salary provider unavailable.",
   dfs_auth_failed: "DFS salary provider authentication failed.",
   dfs_no_slate: "DFS salary provider returned no slate for today.",

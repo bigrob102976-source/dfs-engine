@@ -39,13 +39,14 @@ def _no_overwrite(path: Path) -> None:
         raise FileExistsError(f"Refusing to overwrite existing provider slate artifact: {path}")
 
 
-def _save_document(args, status: str, reason, provider_name=None, raw_result=None, chosen_slate_id=None) -> Path:
+def _save_document(args, status: str, reason, provider_name=None, source=None, raw_result=None, chosen_slate_id=None) -> Path:
     generated_at = datetime.now(timezone.utc).isoformat()
     ts = timestamp_tag(generated_at)
     players = []
     if raw_result is not None and chosen_slate_id:
         players = [p.to_dict() for p in raw_result.players_by_slate.get(chosen_slate_id, [])]
 
+    is_mock = provider_name == "mock_dev_provider"
     document = {
         "slate_date": args.date,
         "generated_at_utc": generated_at,
@@ -55,6 +56,10 @@ def _save_document(args, status: str, reason, provider_name=None, raw_result=Non
         "status": status,
         "reason": reason,
         "provider_name": provider_name,
+        "provider_type": "mock" if is_mock else ("real" if provider_name else None),
+        "is_mock": is_mock,
+        # "explicit" (DFS_SALARY_PROVIDER was set) | "automatic_fallback" (unset -- defaulted to mock)
+        "source": source,
         "slates": [s.to_dict() for s in raw_result.slates] if raw_result is not None else [],
         "warnings": raw_result.warnings if raw_result is not None else [],
         "selected_slate_id": chosen_slate_id,
@@ -79,30 +84,30 @@ def main() -> None:
     print("DFS SALARY PROVIDER FETCH")
     print("=" * 70)
 
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     if provider is None:
         print("\nDFS SALARIES: NOT CONNECTED")
         print(reason)
-        path = _save_document(args, status="not_connected", reason=reason)
+        path = _save_document(args, status="not_connected", reason=reason, source=source)
         print(f"\nFile written:\n  - {path}")
         return
 
-    print(f"\nProvider: {provider.name}")
+    print(f"\nProvider: {provider.name} (source: {source})")
     try:
         result = provider.get_slate(args.date, sport=args.sport, site=args.site)
     except ProviderAuthenticationError as e:
         print(f"\nDFS SALARIES: AUTHENTICATION FAILED\n{e}")
-        path = _save_document(args, status="auth_failed", reason=str(e), provider_name=provider.name)
+        path = _save_document(args, status="auth_failed", reason=str(e), provider_name=provider.name, source=source)
         print(f"\nFile written:\n  - {path}")
         return
     except ProviderUnavailableError as e:
         print(f"\nDFS SALARIES: PROVIDER UNAVAILABLE\n{e}")
-        path = _save_document(args, status="unavailable", reason=str(e), provider_name=provider.name)
+        path = _save_document(args, status="unavailable", reason=str(e), provider_name=provider.name, source=source)
         print(f"\nFile written:\n  - {path}")
         return
     except ProviderNoSlateError as e:
         print(f"\nDFS SALARIES: NO SLATE AVAILABLE\n{e}")
-        path = _save_document(args, status="no_slate", reason=str(e), provider_name=provider.name)
+        path = _save_document(args, status="no_slate", reason=str(e), provider_name=provider.name, source=source)
         print(f"\nFile written:\n  - {path}")
         return
 
@@ -112,7 +117,7 @@ def main() -> None:
             print(f"  - {w}")
         path = _save_document(
             args, status="no_slate", reason="Provider returned zero slates for this date.",
-            provider_name=provider.name, raw_result=result,
+            provider_name=provider.name, source=source, raw_result=result,
         )
         print(f"\nFile written:\n  - {path}")
         return
@@ -126,7 +131,7 @@ def main() -> None:
                 print(f"  - {s.slate_id}")
             path = _save_document(
                 args, status="invalid_slate_id", reason=f"{args.slate_id!r} not found among discovered slates",
-                provider_name=provider.name, raw_result=result,
+                provider_name=provider.name, source=source, raw_result=result,
             )
             print(f"\nFile written:\n  - {path}")
             return
@@ -137,7 +142,7 @@ def main() -> None:
         print(f"\n{len(result.slates)} slates available -- selection required:")
         for s in result.slates:
             print(f"  - {s.slate_id}: {s.slate_name} ({s.game_count} games)")
-        path = _save_document(args, status="needs_selection", reason=None, provider_name=provider.name, raw_result=result)
+        path = _save_document(args, status="needs_selection", reason=None, provider_name=provider.name, source=source, raw_result=result)
         print(f"\nFile written:\n  - {path}")
         return
 
@@ -150,7 +155,8 @@ def main() -> None:
             print(f"  - {w}")
 
     path = _save_document(
-        args, status="ready", reason=None, provider_name=provider.name, raw_result=result, chosen_slate_id=chosen.slate_id,
+        args, status="ready", reason=None, provider_name=provider.name, source=source,
+        raw_result=result, chosen_slate_id=chosen.slate_id,
     )
     print(f"\nFile written:\n  - {path}")
 

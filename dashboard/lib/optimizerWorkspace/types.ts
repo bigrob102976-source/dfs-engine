@@ -13,8 +13,12 @@ export interface SlateListResult {
   status: "ready" | "not_connected" | "unavailable" | "auth_failed" | "no_slate";
   reason: string | null;
   providerName: string | null;
+  providerType: "mock" | "real" | null;
   isMock: boolean;
+  isConnected: boolean;
+  source: "explicit" | "automatic_fallback" | null;
   slates: SlateOption[];
+  slatesAvailable: number;
 }
 
 /** One row in the player-pool table -- a flattened, UI-friendly view of
@@ -49,6 +53,7 @@ export interface OptimizerPoolResult {
   slateName: string | null;
   providerName: string | null;
   isMock: boolean;
+  providerSource: "explicit" | "automatic_fallback" | null;
   generatedAt: string;
   players: PoolPlayerRow[];
   activePlayers: number;

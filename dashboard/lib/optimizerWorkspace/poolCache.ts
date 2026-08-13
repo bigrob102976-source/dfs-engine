@@ -14,6 +14,7 @@ interface CachedPool {
   slateName: string | null;
   providerName: string | null;
   isMock: boolean;
+  source: "explicit" | "automatic_fallback" | null;
   poolPath: string;
   ownershipPath: string | null;
   builtAt: string;
@@ -44,8 +45,12 @@ export async function listSlates(date: string): Promise<SlateListResult> {
       status: "unavailable",
       reason: `Unexpected slate-listing failure: ${tail(result.stdout + result.stderr, 500)}`,
       providerName: null,
+      providerType: null,
       isMock: false,
+      isConnected: false,
+      source: null,
       slates: [],
+      slatesAvailable: 0,
     };
   }
 
@@ -60,8 +65,12 @@ export async function listSlates(date: string): Promise<SlateListResult> {
     status: (doc.status as SlateListResult["status"]) ?? "unavailable",
     reason: (doc.reason as string | null) ?? null,
     providerName: (doc.provider_name as string | null) ?? null,
+    providerType: doc.provider_type === "mock" || doc.provider_type === "real" ? (doc.provider_type as "mock" | "real") : null,
     isMock: Boolean(doc.is_mock),
+    isConnected: Boolean(doc.is_connected),
+    source: doc.source === "explicit" || doc.source === "automatic_fallback" ? (doc.source as "explicit" | "automatic_fallback") : null,
     slates,
+    slatesAvailable: typeof doc.slates_available === "number" ? (doc.slates_available as number) : slates.length,
   };
 }
 
@@ -118,6 +127,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     slateName: entry.slateName,
     providerName: entry.providerName,
     isMock: entry.isMock,
+    providerSource: entry.source,
     generatedAt: entry.builtAt,
     players,
     activePlayers: activePlayers.length,
@@ -191,13 +201,18 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   const providerName = typeof providerDoc?.provider_name === "string" ? (providerDoc.provider_name as string) : null;
   const slates = Array.isArray(providerDoc?.slates) ? (providerDoc!.slates as Record<string, unknown>[]) : [];
   const slateName = (slates.find((s) => s.slate_id === slateId)?.slate_name as string | undefined) ?? null;
+  const providerSource =
+    providerDoc?.source === "explicit" || providerDoc?.source === "automatic_fallback"
+      ? (providerDoc.source as "explicit" | "automatic_fallback")
+      : null;
 
   const entry: CachedPool = {
     date,
     slateId,
     slateName,
     providerName,
-    isMock: providerName === "mock_dev_provider",
+    isMock: Boolean(providerDoc?.is_mock),
+    source: providerSource,
     poolPath: poolAfter.path,
     ownershipPath,
     builtAt: new Date().toISOString(),

@@ -14,7 +14,10 @@ import { PoolTable } from "./PoolTable";
 type Objective = "projection" | "ceiling" | "balanced" | "leverage";
 
 const SLATE_STATUS_MESSAGES: Record<string, string> = {
-  not_connected: "DFS provider not connected. Configure DFS_SALARY_PROVIDER to enable slate selection.",
+  // Unset DFS_SALARY_PROVIDER now falls back to the mock provider automatically
+  // (dfs/providers/config.py) -- this only fires when it's explicitly set to
+  // something invalid, so the message points at fixing/clearing it, not "configure it".
+  not_connected: "DFS_SALARY_PROVIDER is set to an unrecognized value. Fix it, or unset it to use the automatic mock fallback.",
   unavailable: "DFS provider unavailable.",
   auth_failed: "DFS provider authentication failed.",
   no_slate: "DFS provider returned no slate for today.",
@@ -311,7 +314,7 @@ export function OptimizerWorkspace() {
           </select>
         </label>
 
-        {providerIsMock && <span className="rounded bg-yellow/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow">Dev / Mock Data</span>}
+        {providerIsMock && <span className="rounded bg-yellow/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow">DEV / MOCK DATA</span>}
 
         <span className="text-[11px] text-text-faint">Updated: {pool ? formatTime(pool.generatedAt) : "--"}</span>
 

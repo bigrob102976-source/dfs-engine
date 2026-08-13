@@ -27,8 +27,13 @@ export function ProviderStatusCard({ summary, dfsStep }: { summary: RunSummary |
     <div className="rounded border border-border-subtle bg-bg-panel-raised p-3">
       <div className="text-[11px] uppercase tracking-wide text-text-muted">DFS Data Provider</div>
       {connected ? (
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span className="text-green">Provider: Connected ({summary!.providerName})</span>
+          {summary!.isMock && (
+            <span className="rounded bg-yellow/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow">
+              DEV / MOCK DATA
+            </span>
+          )}
           <span className="text-text">Slate: {summary!.selectedSlateId ?? "--"}</span>
           <span className="text-text">Players: {summary!.dkEntries ?? "--"}</span>
           <span className="text-text-faint">Updated: {formatTime(dfsStep.finishedAt)}</span>

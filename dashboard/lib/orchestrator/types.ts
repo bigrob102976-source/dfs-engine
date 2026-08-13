@@ -68,6 +68,8 @@ export interface RunSummary {
   lineupCounts: { projection: number | null; balanced: number | null; leverage: number | null };
   lineupSetPaths: { projection: string | null; balanced: string | null; leverage: string | null };
   providerName: string | null;
+  isMock: boolean;
+  providerSource: "explicit" | "automatic_fallback" | null;
   selectedSlateId: string | null;
 }
 

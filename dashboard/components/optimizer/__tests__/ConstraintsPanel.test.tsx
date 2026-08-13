@@ -36,6 +36,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     slateName: "Mock Main (Dev)",
     providerName: "mock_dev_provider",
     isMock: true,
+    providerSource: "automatic_fallback",
     generatedAt: "2026-08-12T18:00:00Z",
     players,
     activePlayers: players.length,

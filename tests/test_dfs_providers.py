@@ -91,36 +91,74 @@ def test_mock_provider_implements_interface():
 # ----------------------------------------------------------------------------
 
 
-def test_config_returns_none_when_unset(monkeypatch):
+def test_config_falls_back_to_mock_when_unset(monkeypatch):
+    """Milestone 15: unset must never leave the dashboard stuck asking
+    for a terminal command -- it defaults to the mock provider."""
     monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
-    provider, reason = get_configured_provider()
-    assert provider is None
-    assert "not set" in reason
+    provider, reason, source = get_configured_provider()
+    assert provider is not None
+    assert provider.name == "mock_dev_provider"
+    assert reason is None
+    assert source == "automatic_fallback"
 
 
-def test_config_resolves_mock_provider(monkeypatch):
+def test_config_falls_back_to_mock_when_only_whitespace(monkeypatch):
+    monkeypatch.setenv("DFS_SALARY_PROVIDER", "   ")
+    provider, reason, source = get_configured_provider()
+    assert provider is not None
+    assert provider.name == "mock_dev_provider"
+    assert source == "automatic_fallback"
+
+
+def test_config_resolves_explicit_mock_provider(monkeypatch):
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "mock")
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     assert reason is None
     assert provider is not None
     assert provider.name == "mock_dev_provider"
+    assert source == "explicit"
 
 
 def test_config_is_case_insensitive(monkeypatch):
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "MOCK")
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     assert provider is not None
+    assert source == "explicit"
 
 
-def test_config_reports_unknown_provider_name(monkeypatch):
+def test_config_explicit_provider_overrides_fallback(monkeypatch):
+    """A registered non-mock provider, once configured, must be used
+    instead of the automatic mock fallback (Milestone 15's explicit
+    override requirement)."""
+    class _FakeRealProvider(DFSSalaryProvider):
+        name = "real_provider"
+        requires_api_key = False
+
+        def get_slate(self, date, sport="MLB", site="draftkings"):
+            raise NotImplementedError
+
+    monkeypatch.setitem(PROVIDER_FACTORIES, "real_provider", _FakeRealProvider)
+    monkeypatch.setenv("DFS_SALARY_PROVIDER", "real_provider")
+    provider, reason, source = get_configured_provider()
+    assert provider is not None
+    assert provider.name == "real_provider"
+    assert source == "explicit"
+    assert reason is None
+
+
+def test_config_reports_unknown_provider_name_without_falling_back_to_mock(monkeypatch):
+    """An explicit but invalid provider name is a real misconfiguration
+    -- it must be reported, never silently masked by the mock fallback
+    (a typo should be visible, not quietly replaced)."""
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "sportsdataio")
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     assert provider is None
     assert "not a recognized provider" in reason
     assert "sportsdataio" in reason
+    assert source == "explicit"
 
 
-def test_config_reports_missing_api_key_for_a_provider_that_requires_one(monkeypatch):
+def test_config_reports_missing_api_key_without_falling_back_to_mock(monkeypatch):
     class _FakeKeyedProvider(DFSSalaryProvider):
         name = "fake_keyed"
         requires_api_key = True
@@ -131,14 +169,21 @@ def test_config_reports_missing_api_key_for_a_provider_that_requires_one(monkeyp
     monkeypatch.setitem(PROVIDER_FACTORIES, "fake_keyed", _FakeKeyedProvider)
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "fake_keyed")
     monkeypatch.delenv("DFS_PROVIDER_API_KEY", raising=False)
-    provider, reason = get_configured_provider()
+    provider, reason, source = get_configured_provider()
     assert provider is None
     assert "DFS_PROVIDER_API_KEY" in reason
+    assert source == "explicit"
 
 
-def test_config_never_raises_for_unconfigured_state(monkeypatch):
+def test_config_never_raises_when_unset(monkeypatch):
     monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
-    # Must not raise -- "not configured" is an expected, reportable state.
+    # Must not raise -- automatic mock fallback is the expected, reportable state.
+    get_configured_provider()
+
+
+def test_config_never_raises_for_explicit_misconfiguration(monkeypatch):
+    monkeypatch.setenv("DFS_SALARY_PROVIDER", "totally-unknown")
+    # Must not raise -- an explicit-but-invalid provider is also a normal, reportable state.
     get_configured_provider()
 
 
