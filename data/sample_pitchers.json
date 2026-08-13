@@ -1,0 +1,322 @@
+{
+  "slate_id": "SAMPLE_SLATE_2026_TEST",
+  "note": "SAMPLE / TEST DATA. All player names and stat lines below are fictional and constructed for testing the Pitcher Agent. They are NOT real MLB players, real statistics, or real results.",
+  "pitchers": [
+    {
+      "player_id": "SAMPLE_P1",
+      "name": "Sample Ace Alpha",
+      "team": "SEA",
+      "opponent": "OAK",
+      "salary": 10800,
+      "throwing_hand": "R",
+      "season": {
+        "innings": 120.0,
+        "era": 2.85,
+        "fip": 3.10,
+        "xfip": 3.05,
+        "siera": 2.95,
+        "k_percent": 32.5,
+        "bb_percent": 5.5,
+        "k_minus_bb_percent": 27.0,
+        "swinging_strike_percent": 14.2,
+        "csw_percent": 31.5,
+        "ground_ball_percent": 45.0,
+        "hard_hit_percent": 32.0,
+        "barrel_percent": 5.5,
+        "xera": 2.90,
+        "xwoba_allowed": 0.275
+      },
+      "recent": {
+        "innings": 18.0,
+        "k_percent": 33.0,
+        "bb_percent": 5.0,
+        "velocity": 95.8,
+        "season_velocity": 95.5,
+        "pitch_count_average": 98.0
+      },
+      "opponent_stats": {
+        "team": "OAK",
+        "strikeout_percent_vs_hand": 26.5,
+        "woba_vs_hand": 0.295,
+        "iso_vs_hand": 0.140,
+        "implied_runs": 3.4
+      },
+      "game": {
+        "park_factor": 92.0,
+        "weather_pitching_factor": 101.0,
+        "umpire_pitching_factor": 100.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 100.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P2",
+      "name": "Sample Flamethrower Bravo",
+      "team": "NYY",
+      "opponent": "BAL",
+      "salary": 9200,
+      "throwing_hand": "R",
+      "season": {
+        "innings": 110.0,
+        "era": 3.95,
+        "fip": 3.85,
+        "xfip": 3.75,
+        "siera": 3.70,
+        "k_percent": 30.0,
+        "bb_percent": 10.5,
+        "k_minus_bb_percent": 19.5,
+        "swinging_strike_percent": 13.5,
+        "csw_percent": 30.0,
+        "ground_ball_percent": 38.0,
+        "hard_hit_percent": 36.0,
+        "barrel_percent": 7.5,
+        "xera": 3.80,
+        "xwoba_allowed": 0.300
+      },
+      "recent": {
+        "innings": 17.0,
+        "k_percent": 31.0,
+        "bb_percent": 11.0,
+        "velocity": 96.2,
+        "season_velocity": 96.0,
+        "pitch_count_average": 95.0
+      },
+      "opponent_stats": {
+        "team": "BAL",
+        "strikeout_percent_vs_hand": 24.0,
+        "woba_vs_hand": 0.320,
+        "iso_vs_hand": 0.170,
+        "implied_runs": 4.3
+      },
+      "game": {
+        "park_factor": 103.0,
+        "weather_pitching_factor": 99.0,
+        "umpire_pitching_factor": 101.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 92.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P3",
+      "name": "Sample Steady Charlie",
+      "team": "STL",
+      "opponent": "PIT",
+      "salary": 7600,
+      "throwing_hand": "L",
+      "season": {
+        "innings": 115.0,
+        "era": 3.75,
+        "fip": 3.90,
+        "xfip": 3.95,
+        "siera": 3.88,
+        "k_percent": 22.5,
+        "bb_percent": 7.0,
+        "k_minus_bb_percent": 15.5,
+        "swinging_strike_percent": 10.8,
+        "csw_percent": 28.5,
+        "ground_ball_percent": 46.0,
+        "hard_hit_percent": 34.0,
+        "barrel_percent": 6.8,
+        "xera": 3.85,
+        "xwoba_allowed": 0.310
+      },
+      "recent": {
+        "innings": 18.0,
+        "k_percent": 23.0,
+        "bb_percent": 6.5,
+        "velocity": 93.0,
+        "season_velocity": 92.9,
+        "pitch_count_average": 90.0
+      },
+      "opponent_stats": {
+        "team": "PIT",
+        "strikeout_percent_vs_hand": 22.0,
+        "woba_vs_hand": 0.305,
+        "iso_vs_hand": 0.150,
+        "implied_runs": 3.9
+      },
+      "game": {
+        "park_factor": 98.0,
+        "weather_pitching_factor": 100.0,
+        "umpire_pitching_factor": 99.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 92.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P4",
+      "name": "Sample Groundball Delta",
+      "team": "CLE",
+      "opponent": "KC",
+      "salary": 6800,
+      "throwing_hand": "R",
+      "season": {
+        "innings": 130.0,
+        "era": 3.60,
+        "fip": 4.05,
+        "xfip": 4.10,
+        "siera": 4.15,
+        "k_percent": 16.5,
+        "bb_percent": 6.0,
+        "k_minus_bb_percent": 10.5,
+        "swinging_strike_percent": 8.0,
+        "csw_percent": 25.5,
+        "ground_ball_percent": 54.0,
+        "hard_hit_percent": 33.0,
+        "barrel_percent": 5.0,
+        "xera": 3.90,
+        "xwoba_allowed": 0.300
+      },
+      "recent": {
+        "innings": 19.0,
+        "k_percent": 16.0,
+        "bb_percent": 5.5,
+        "velocity": 91.5,
+        "season_velocity": 91.6,
+        "pitch_count_average": 94.0
+      },
+      "opponent_stats": {
+        "team": "KC",
+        "strikeout_percent_vs_hand": 18.5,
+        "woba_vs_hand": 0.300,
+        "iso_vs_hand": 0.140,
+        "implied_runs": 3.7
+      },
+      "game": {
+        "park_factor": 96.0,
+        "weather_pitching_factor": 100.0,
+        "umpire_pitching_factor": 100.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 96.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P5",
+      "name": "Sample Volatile Echo",
+      "team": "MIA",
+      "opponent": "ATL",
+      "salary": 5200,
+      "throwing_hand": "R",
+      "season": {
+        "innings": 60.0,
+        "era": 4.85,
+        "fip": 4.70,
+        "xfip": 4.60,
+        "siera": 4.55,
+        "k_percent": 24.0,
+        "bb_percent": 11.5,
+        "k_minus_bb_percent": 12.5,
+        "swinging_strike_percent": 11.5,
+        "csw_percent": 27.0,
+        "ground_ball_percent": 39.0,
+        "hard_hit_percent": 41.0,
+        "barrel_percent": 11.5,
+        "xera": 4.75,
+        "xwoba_allowed": 0.335
+      },
+      "recent": {
+        "innings": 14.0,
+        "k_percent": 25.0,
+        "bb_percent": 12.0,
+        "velocity": 94.0,
+        "season_velocity": 93.8,
+        "pitch_count_average": 78.0
+      },
+      "opponent_stats": {
+        "team": "ATL",
+        "strikeout_percent_vs_hand": 21.0,
+        "woba_vs_hand": 0.345,
+        "iso_vs_hand": 0.190,
+        "implied_runs": 5.1
+      },
+      "game": {
+        "park_factor": 105.0,
+        "weather_pitching_factor": 103.0,
+        "umpire_pitching_factor": 100.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 80.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P6",
+      "name": "Sample Fading Foxtrot",
+      "team": "TOR",
+      "opponent": "BOS",
+      "salary": 8400,
+      "throwing_hand": "L",
+      "season": {
+        "innings": 125.0,
+        "era": 3.40,
+        "fip": 3.55,
+        "xfip": 3.60,
+        "siera": 3.58,
+        "k_percent": 26.0,
+        "bb_percent": 7.5,
+        "k_minus_bb_percent": 18.5,
+        "swinging_strike_percent": 12.0,
+        "csw_percent": 29.5,
+        "ground_ball_percent": 43.0,
+        "hard_hit_percent": 35.0,
+        "barrel_percent": 7.0,
+        "xera": 3.65,
+        "xwoba_allowed": 0.305
+      },
+      "recent": {
+        "innings": 16.0,
+        "k_percent": 22.0,
+        "bb_percent": 8.0,
+        "velocity": 92.5,
+        "season_velocity": 94.8,
+        "pitch_count_average": 88.0
+      },
+      "opponent_stats": {
+        "team": "BOS",
+        "strikeout_percent_vs_hand": 20.5,
+        "woba_vs_hand": 0.325,
+        "iso_vs_hand": 0.175,
+        "implied_runs": 4.6
+      },
+      "game": {
+        "park_factor": 104.0,
+        "weather_pitching_factor": 102.0,
+        "umpire_pitching_factor": 101.0
+      },
+      "availability": {
+        "confirmed_starter": true,
+        "expected_pitch_count": 90.0
+      }
+    },
+    {
+      "player_id": "SAMPLE_P7",
+      "name": "Sample Sparse-Data Golf",
+      "team": "CIN",
+      "opponent": "MIL",
+      "salary": 6200,
+      "throwing_hand": "R",
+      "season": {
+        "innings": 40.0,
+        "era": 4.10,
+        "k_percent": 21.0,
+        "bb_percent": 8.5
+      },
+      "recent": {},
+      "opponent_stats": {
+        "team": "MIL"
+      },
+      "game": {},
+      "availability": {
+        "confirmed_starter": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,251 @@
+"""CLI entry point: generate mathematically valid DraftKings Classic MLB
+lineups (OR-Tools CP-SAT) from a saved, unified DFS player pool
+(dfs_input/<date>/dk_player_pool_<timestamp>.json, built by
+scripts/build_dk_player_pool.py).
+
+    Unified DFS Player Pool -> Optimizer Config -> CP-SAT -> Legal Lineups
+        -> independent validation -> Saved Lineup Set (JSON + CSV)
+
+Usage:
+    python scripts/optimize_dk_lineups.py --date YYYY-MM-DD --pool PATH --lineups 1
+    python scripts/optimize_dk_lineups.py --date YYYY-MM-DD --pool PATH --lineups 20 \
+        --objective balanced --min-unique 2 --stack-size 5 --stack-team PHI \
+        --lock "Paul Skenes" --exclude "Some Player" --max-exposure "Kyle Schwarber=0.5" \
+        --min-confidence 60 --min-season-pa 50 --max-player-risk 70
+    python scripts/optimize_dk_lineups.py --date YYYY-MM-DD --pool PATH \
+        --ownership ownership_predictions/YYYY-MM-DD/ownership_<timestamp>.json \
+        --lineups 20 --objective leverage --stack-size 5 --max-total-ownership 150
+
+--ownership is optional (Milestone 10). Every objective mode and
+constraint that existed before it behaves identically without it --
+only --objective leverage and the --*-ownership filters/constraint
+require it.
+"""
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from config.optimizer_config import OPTIMIZER_VERSION
+from optimizer.constraints import OptimizerConfigError
+from optimizer.lineup_generator import generate_lineups
+from optimizer.models import OptimizerPlayer, OptimizerSettings
+from optimizer.persistence import build_lineup_set_document, save_lineup_set_csv, save_lineup_set_json
+from optimizer.validator import validate_lineup_set
+from research.prediction_snapshot import timestamp_tag
+
+
+def _load_pool(pool_path: str):
+    with Path(pool_path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _build_optimizer_players(pool_doc: dict):
+    players = []
+    skipped = []
+    for record in pool_doc.get("players", []):
+        if record.get("lineup_status") != "active":
+            continue
+        if record.get("projection") is None or record.get("ceiling") is None:
+            skipped.append(record["name"])
+            continue
+        players.append(OptimizerPlayer(
+            key=record["dk_player_id"], mlb_player_id=record.get("mlb_player_id"), name=record["name"],
+            team=record["team"], opponent=record.get("opponent"), game_id=record.get("game_id"),
+            player_type=record["player_type"], dk_positions=list(record.get("dk_positions") or []),
+            salary=record["salary"], projection=record["projection"], ceiling=record["ceiling"],
+            floor=record.get("floor"), risk_score=record.get("risk_score"), confidence=record.get("confidence"),
+            season_sample_size=record.get("season_sample_size"),
+        ))
+    return players, skipped
+
+
+def _load_ownership(ownership_path: str):
+    with Path(ownership_path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _merge_ownership(players, ownership_doc: dict):
+    """Attaches projected_ownership / leverage_score / ownership_confidence
+    onto each OptimizerPlayer by dk_player_id (mlb_player_id fallback).
+    Never touches projection/ceiling/floor -- ownership is joined data,
+    not a re-score. Players absent from the ownership snapshot simply
+    keep their default None ownership fields."""
+    by_dk_id = {r["dk_player_id"]: r for r in ownership_doc.get("players", [])}
+    by_mlb_id = {r["mlb_player_id"]: r for r in ownership_doc.get("players", []) if r.get("mlb_player_id")}
+    matched = 0
+    for p in players:
+        record = by_dk_id.get(p.key) or (by_mlb_id.get(p.mlb_player_id) if p.mlb_player_id else None)
+        if record is None:
+            continue
+        p.projected_ownership = record.get("projected_ownership")
+        p.leverage_score = record.get("leverage_score")
+        p.ownership_confidence = record.get("ownership_confidence")
+        matched += 1
+    return matched
+
+
+def _parse_key_value(arg: str, flag: str):
+    if "=" not in arg:
+        raise SystemExit(f"{flag} expects NAME=FRACTION (e.g. \"Paul Skenes=0.5\"), got {arg!r}")
+    name, _, value = arg.rpartition("=")
+    try:
+        fraction = float(value)
+    except ValueError:
+        raise SystemExit(f"{flag} fraction must be numeric, got {value!r} in {arg!r}")
+    return name, fraction
+
+
+def _fmt(value, digits=1):
+    return f"{value:.{digits}f}" if value is not None else "--"
+
+
+def _print_lineup(lineup) -> None:
+    print(f"LINEUP {lineup.index}")
+    print()
+    for a in lineup.assignments:
+        print(f"{a.slot:<4}{a.name}")
+    print()
+    print(f"Salary: {lineup.salary}")
+    print(f"Projection: {_fmt(lineup.projection)}")
+    print(f"Ceiling: {_fmt(lineup.ceiling)}")
+    print(f"Average Confidence: {_fmt(lineup.average_confidence)}")
+    print(f"Average Risk: {_fmt(lineup.average_risk)}")
+    if lineup.sum_ownership is not None:
+        print(f"Sum Ownership: {_fmt(lineup.sum_ownership)}%")
+        print(f"Average Ownership: {_fmt(lineup.average_ownership)}%")
+        print(f"Max Ownership: {_fmt(lineup.max_ownership)}%")
+        print(f"Players Above Chalk Threshold: {lineup.players_above_chalk_threshold}")
+    print()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate legal DraftKings Classic MLB lineups from a saved DFS player pool.")
+    parser.add_argument("--date", required=True)
+    parser.add_argument("--pool", required=True, help="Path to a dk_player_pool_<timestamp>.json file")
+    parser.add_argument("--ownership", default=None, help="Optional path to an ownership_<timestamp>.json snapshot")
+    parser.add_argument("--lineups", type=int, default=1)
+    parser.add_argument("--objective", choices=["projection", "ceiling", "balanced", "leverage"], default="projection")
+    parser.add_argument("--min-unique", type=int, default=1)
+    parser.add_argument("--stack-size", type=int, default=None)
+    parser.add_argument("--stack-team", default=None)
+    parser.add_argument("--lock", action="append", default=[])
+    parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument("--max-exposure", action="append", default=[])
+    parser.add_argument("--max-exposure-default", type=float, default=1.0)
+    parser.add_argument("--min-exposure", action="append", default=[])
+    parser.add_argument("--min-confidence", type=float, default=None)
+    parser.add_argument("--min-season-pa", type=float, default=None)
+    parser.add_argument("--max-player-risk", type=float, default=None)
+    parser.add_argument("--max-total-ownership", type=float, default=None)
+    parser.add_argument("--max-player-ownership", type=float, default=None)
+    parser.add_argument("--min-player-ownership", type=float, default=None)
+    parser.add_argument("--output-root", default="lineups")
+    args = parser.parse_args()
+
+    pool_doc = _load_pool(args.pool)
+    players, skipped = _build_optimizer_players(pool_doc)
+
+    print("=" * 70)
+    print("DRAFTKINGS LINEUP OPTIMIZER")
+    print("=" * 70)
+    print(f"\nSlate date: {args.date}")
+    print(f"Player pool: {args.pool}")
+    print(f"Active players available: {len(players)}")
+    if skipped:
+        print(f"Skipped (active but missing projection/ceiling -- never invented): {len(skipped)}")
+
+    ownership_doc = None
+    if args.ownership:
+        ownership_doc = _load_ownership(args.ownership)
+        matched = _merge_ownership(players, ownership_doc)
+        print(f"Ownership snapshot: {args.ownership} ({matched}/{len(players)} players matched)")
+    print()
+
+    if args.objective == "leverage" and not any(p.leverage_score is not None for p in players):
+        print("CONFIGURATION ERROR: --objective leverage requires --ownership (no player has a leverage_score).")
+        return
+
+    settings = OptimizerSettings(
+        objective_mode=args.objective, num_lineups=args.lineups, min_unique=args.min_unique,
+        stack_size=args.stack_size, stack_team=args.stack_team, locks=list(args.lock), excludes=list(args.exclude),
+        max_exposure=dict(_parse_key_value(a, "--max-exposure") for a in args.max_exposure),
+        max_exposure_default=args.max_exposure_default,
+        min_exposure=dict(_parse_key_value(a, "--min-exposure") for a in args.min_exposure),
+        min_confidence=args.min_confidence, min_season_pa=args.min_season_pa, max_player_risk=args.max_player_risk,
+        max_total_ownership=args.max_total_ownership, max_player_ownership=args.max_player_ownership,
+        min_player_ownership=args.min_player_ownership,
+    )
+
+    try:
+        output = generate_lineups(players, settings)
+    except OptimizerConfigError as e:
+        print(f"CONFIGURATION ERROR: {e}")
+        return
+
+    result = output.result
+    for lineup in result.lineups:
+        _print_lineup(lineup)
+
+    print(f"Generated {result.generated} / {result.requested} requested lineup(s).")
+    if result.stopped_reason:
+        print(f"NOTE: {result.stopped_reason}")
+    print()
+
+    if result.lineups:
+        violations = validate_lineup_set(
+            result.lineups, output.players_by_key, settings, output.locked_keys, output.excluded_keys,
+            output.exposure_caps, settings.min_unique,
+        )
+        bad = {idx: v for idx, v in violations.items() if v}
+        if bad:
+            print("INDEPENDENT VALIDATION FAILED (this should never happen -- reporting anyway):")
+            for idx, probs in bad.items():
+                for p in probs:
+                    print(f"  Lineup {idx}: {p}")
+        else:
+            print(f"Independent validation: all {len(result.lineups)} lineup(s) PASSED.")
+        print()
+
+        exposure_counts = {}
+        for lineup in result.lineups:
+            for key in lineup.player_keys():
+                exposure_counts[key] = exposure_counts.get(key, 0) + 1
+        print("Exposure table:")
+        for key, count in sorted(exposure_counts.items(), key=lambda kv: -kv[1]):
+            player = output.players_by_key[key]
+            pct = 100.0 * count / len(result.lineups)
+            print(f"  {player.name:<28} {count}/{len(result.lineups)} ({pct:.0f}%)")
+        print()
+
+        stack_counts = {}
+        for lineup in result.lineups:
+            if lineup.primary_stack_team:
+                key = f"{lineup.primary_stack_team} ({lineup.primary_stack_size})"
+                stack_counts[key] = stack_counts.get(key, 0) + 1
+        print("Stack distribution:")
+        for key, count in sorted(stack_counts.items(), key=lambda kv: -kv[1]):
+            print(f"  {key}: {count} lineup(s)")
+        print()
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    ts = timestamp_tag(generated_at)
+    document = build_lineup_set_document(
+        args.date, generated_at, args.pool, pool_doc.get("pitcher_snapshot_path"), pool_doc.get("batter_snapshot_path"),
+        OPTIMIZER_VERSION, settings.to_dict(), result, output.players_by_key,
+        ownership_snapshot_path=args.ownership,
+    )
+    json_path = save_lineup_set_json(document, args.date, ts, output_root=args.output_root)
+    csv_path = save_lineup_set_csv(document, args.date, ts, output_root=args.output_root)
+
+    print("Files written:")
+    print(f"  - {json_path}")
+    print(f"  - {csv_path}")
+
+
+if __name__ == "__main__":
+    main()

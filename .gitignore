@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node / dashboard (dashboard/ has its own .gitignore for its own build
+# artifacts; these top-level entries catch the same paths when run from
+# the repo root)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.runstate/
+dashboard/*.tsbuildinfo
+dashboard/next-env.d.ts
+
+# Generated pipeline artifacts -- reproducible from source via the
+# scripts in scripts/, not source code. Immutable/timestamped and can
+# grow large and numerous with routine use, so they don't belong in
+# version control (see CLAUDE.md's "Raw source data should be preserved
+# whenever practical" -- that's what these directories already do on
+# disk; git isn't the right tool for that kind of high-churn generated
+# data). Reintroduce a specific file with `git add -f` if you ever want
+# one committed as a fixture.
+/research_output/
+/predictions/
+/ownership_predictions/
+/dfs_input/
+/lineups/
+/evaluations/
+/ownership_evaluations/
+/actual_ownership/
+/results/
+
+# local external-API response cache (e.g. data/cache/mlb_stats/) -- large,
+# reproducible by re-fetching, not source. data/sample_pitchers.json itself
+# (a small fixture referenced by services/pitcher_data.py) stays tracked.
+/data/cache/
+
+# env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.pem
