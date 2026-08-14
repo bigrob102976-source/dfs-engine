@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { EnvironmentSectionToggles } from "@/components/environment/EnvironmentSectionToggles";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
@@ -89,6 +91,25 @@ export default async function SettingsPage() {
         <div className="mt-3 flex items-center justify-between rounded border border-border-subtle bg-bg-panel-raised px-4 py-3">
           <span className="text-sm font-medium text-text">Big Money Independent</span>
           <span className="text-xs font-semibold uppercase tracking-wide text-green">READY</span>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">External Data</h2>
+        <div className="flex items-center justify-between rounded border border-border-subtle bg-bg-panel-raised px-4 py-3">
+          <div>
+            <div className="text-sm font-medium text-text">Import Projections</div>
+            <p className="mt-0.5 text-xs text-text-faint">
+              Upload a projection CSV from BlueCollar, FantasyCruncher, SaberSim, or any other provider as an immutable
+              baseline snapshot.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/import"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] bg-accent px-3.5 py-2 text-xs font-semibold text-white transition-colors duration-150 hover:bg-accent-hover"
+          >
+            Import Projections
+          </Link>
         </div>
       </div>
 
