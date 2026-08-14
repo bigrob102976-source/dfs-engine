@@ -48,3 +48,33 @@ export function TagBadge({ children }: { children: React.ReactNode }) {
 export function PremiumBadge({ children }: { children: React.ReactNode }) {
   return <span className={`${BADGE_BASE} bg-gold/15 text-gold`}>{children}</span>;
 }
+
+/** Game Environment score (Overall/Hitter/Pitcher/Stack), colored per the
+ * Game Environment color system: red = great hitting environment, green =
+ * great pitching environment, amber = worth a closer look, blue = truly
+ * neutral. `orientation` accounts for the Pitcher Score being the
+ * deterministic complement of the Hitter Score (scoring.py) -- a high
+ * Pitcher Score is pitcher-favorable (green), not hitter-favorable, even
+ * though the raw number is high. */
+export function EnvironmentScoreBadge({
+  score,
+  label,
+  orientation = "hitting-high",
+}: {
+  score: number;
+  label?: string;
+  orientation?: "hitting-high" | "pitching-high";
+}) {
+  const hittingLeaning = orientation === "hitting-high" ? score : 100 - score;
+  let tone: "positive" | "negative" | "neutral" | "interactive";
+  if (hittingLeaning >= 70) tone = "negative"; // red -- great hitting
+  else if (hittingLeaning <= 30) tone = "positive"; // green -- great pitching
+  else if (hittingLeaning > 45 && hittingLeaning < 55) tone = "interactive"; // blue -- neutral
+  else tone = "neutral"; // amber -- watch
+  return (
+    <span className={`${BADGE_BASE} ${toneClasses(tone)}`}>
+      {label ? `${label} ` : ""}
+      {score.toFixed(0)}
+    </span>
+  );
+}

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { AIInsightBadge, OwnershipBadge, PremiumBadge, ProjectionBadge, TagBadge } from "../Badge";
+import { AIInsightBadge, EnvironmentScoreBadge, OwnershipBadge, PremiumBadge, ProjectionBadge, TagBadge } from "../Badge";
 
 describe("Badge components", () => {
   it("ProjectionBadge renders its formatted value with a positive tone", () => {
@@ -40,5 +40,30 @@ describe("Badge components", () => {
   it("PremiumBadge uses the gold accent exclusively", () => {
     render(<PremiumBadge>PRO</PremiumBadge>);
     expect(screen.getByText("PRO").className).toContain("text-gold");
+  });
+
+  it("EnvironmentScoreBadge colors a high hitter-leaning score red (great hitting)", () => {
+    render(<EnvironmentScoreBadge score={85} label="HIT" />);
+    expect(screen.getByText("HIT 85").className).toContain("text-red");
+  });
+
+  it("EnvironmentScoreBadge colors a low hitter-leaning score green (great pitching)", () => {
+    render(<EnvironmentScoreBadge score={15} label="HIT" />);
+    expect(screen.getByText("HIT 15").className).toContain("text-green");
+  });
+
+  it("EnvironmentScoreBadge colors a truly neutral score blue", () => {
+    render(<EnvironmentScoreBadge score={50} />);
+    expect(screen.getByText("50").className).toContain("text-accent");
+  });
+
+  it("EnvironmentScoreBadge colors a watch-tier score amber", () => {
+    render(<EnvironmentScoreBadge score={60} />);
+    expect(screen.getByText("60").className).toContain("text-yellow");
+  });
+
+  it("EnvironmentScoreBadge flips its color logic for pitching-high orientation (a high Pitcher Score is pitcher-favorable)", () => {
+    render(<EnvironmentScoreBadge score={85} label="PIT" orientation="pitching-high" />);
+    expect(screen.getByText("PIT 85").className).toContain("text-green");
   });
 });

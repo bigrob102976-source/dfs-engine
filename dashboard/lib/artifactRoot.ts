@@ -27,6 +27,7 @@ export const ARTIFACT_DIRS = {
   actualOwnership: "actual_ownership",
   externalProjectionSnapshots: "external_projection_snapshots",
   adjustedProjectionSnapshots: "adjusted_projection_snapshots",
+  gameEnvironmentSnapshots: "game_environment_snapshots",
 } as const;
 
 export function artifactPath(...segments: string[]): string {

@@ -1,6 +1,8 @@
+import { EnvironmentSectionToggles } from "@/components/environment/EnvironmentSectionToggles";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
+import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,7 @@ function formatTimestamp(iso: string | null): string {
  * for the documented, non-network-touching reason why. */
 export default async function SettingsPage() {
   const date = getTodayChicagoDate();
-  const status = await getExternalProjectionsStatus(date);
+  const [status, environmentStatus] = await Promise.all([getExternalProjectionsStatus(date), getGameEnvironmentStatus(date)]);
 
   if ("error" in status) {
     return (
@@ -88,6 +90,43 @@ export default async function SettingsPage() {
           <span className="text-sm font-medium text-text">Big Money Independent</span>
           <span className="text-xs font-semibold uppercase tracking-wide text-green">READY</span>
         </div>
+      </div>
+
+      <div className="mt-4 rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Game Environment</h2>
+
+        {"error" in environmentStatus ? (
+          <div className="rounded-[var(--radius-control)] border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
+            {environmentStatus.error}
+          </div>
+        ) : (
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {(
+              [
+                ["Weather", environmentStatus.providers.weather],
+                ["Vegas", environmentStatus.providers.vegas],
+                ["Umpire", environmentStatus.providers.umpire],
+                ["Bullpen", environmentStatus.providers.bullpen],
+              ] as const
+            ).map(([label, p]) => (
+              <div key={label} className="rounded border border-border-subtle bg-bg-panel-raised p-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs font-medium text-text">{label}</span>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${p.is_mock ? "text-yellow" : p.provider_name.startsWith("No ") ? "text-text-faint" : "text-green"}`}>
+                    {p.is_mock ? "MOCK" : p.provider_name.startsWith("No ") ? "UNCONFIGURED" : "CONNECTED"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-text-faint">{p.provider_name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="mb-2 text-xs text-text-faint">
+          Section visibility on the Game Environment page and detail drawer -- a display preference only, saved in this
+          browser. It never changes which providers the engine calls above.
+        </p>
+        <EnvironmentSectionToggles />
       </div>
     </div>
   );
