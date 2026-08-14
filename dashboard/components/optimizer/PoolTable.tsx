@@ -6,6 +6,8 @@ import { POSITION_TABS, type PositionTab } from "@/lib/dkRosterRules";
 import { sortRows, type SortDirection } from "@/lib/sortFilter";
 import type { PoolPlayerRow } from "@/lib/optimizerWorkspace/types";
 
+import { PlayerDetailModal } from "./PlayerDetailModal";
+
 interface Column {
   key: string;
   label: string;
@@ -32,6 +34,15 @@ const COLUMNS: Column[] = [
   { key: "exposure", label: "Exposure" },
 ];
 
+// Milestone 17: optional projection comparison columns, spliced in
+// right after "Proj" only when the caller (OptimizerWorkspace) has
+// "Show comparison columns" checked.
+const COMPARISON_COLUMNS: Column[] = [
+  { key: "externalProjection", label: "Ext", sortKey: "externalProjection", align: "right" },
+  { key: "adjustedProjection", label: "Adj", sortKey: "adjustedProjection", align: "right" },
+  { key: "adjustmentDelta", label: "Δ", sortKey: "adjustmentDelta", align: "right" },
+];
+
 function fmt(v: number | null, digits = 1): string {
   return v === null ? "--" : v.toFixed(digits);
 }
@@ -44,6 +55,7 @@ export function PoolTable({
   onToggleLock,
   onToggleExclude,
   onExposureChange,
+  showProjectionComparison = false,
 }: {
   players: PoolPlayerRow[];
   locks: Set<string>;
@@ -52,11 +64,19 @@ export function PoolTable({
   onToggleLock: (dkPlayerId: string) => void;
   onToggleExclude: (dkPlayerId: string) => void;
   onExposureChange: (dkPlayerId: string, fraction: number) => void;
+  showProjectionComparison?: boolean;
 }) {
   const [positionTab, setPositionTab] = useState<PositionTab>("ALL");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<keyof PoolPlayerRow>("projection");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
+  const [detailPlayer, setDetailPlayer] = useState<PoolPlayerRow | null>(null);
+
+  const columns = useMemo(() => {
+    if (!showProjectionComparison) return COLUMNS;
+    const projIndex = COLUMNS.findIndex((c) => c.key === "projection");
+    return [...COLUMNS.slice(0, projIndex + 1), ...COMPARISON_COLUMNS, ...COLUMNS.slice(projIndex + 1)];
+  }, [showProjectionComparison]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -111,7 +131,7 @@ export function PoolTable({
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-bg-panel-raised">
             <tr>
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <th
                   key={col.key}
                   onClick={col.sortKey ? () => handleSort(col.sortKey!) : undefined}
@@ -164,12 +184,25 @@ export function PoolTable({
                     </button>
                   </td>
                   <td className="px-2 py-1 text-text-muted">{p.playerType === "pitcher" ? "P" : p.positions.join("/")}</td>
-                  <td className="px-2 py-1 font-medium text-text">{p.name}</td>
+                  <td className="px-2 py-1 font-medium text-text">
+                    <button type="button" onClick={() => setDetailPlayer(p)} className="text-left hover:underline">
+                      {p.name}
+                    </button>
+                  </td>
                   <td className="px-2 py-1 text-text-muted">{p.team}</td>
                   <td className="px-2 py-1 text-text-muted">{p.opponent ?? "--"}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{p.playerType === "pitcher" ? "" : (p.battingOrder ?? "--")}</td>
                   <td className="px-2 py-1 text-right text-text">${p.salary.toLocaleString()}</td>
                   <td className="px-2 py-1 text-right text-text">{fmt(p.projection)}</td>
+                  {showProjectionComparison && (
+                    <>
+                      <td className="px-2 py-1 text-right text-text-muted">{fmt(p.externalProjection)}</td>
+                      <td className="px-2 py-1 text-right text-text-muted">{fmt(p.adjustedProjection)}</td>
+                      <td className={`px-2 py-1 text-right ${p.adjustmentDelta !== null && p.adjustmentDelta >= 0 ? "text-green" : p.adjustmentDelta !== null ? "text-red" : "text-text-muted"}`}>
+                        {p.adjustmentDelta !== null ? `${p.adjustmentDelta >= 0 ? "+" : ""}${fmt(p.adjustmentDelta)}` : "--"}
+                      </td>
+                    </>
+                  )}
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.ceiling)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.value, 2)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{p.ownership !== null ? `${fmt(p.ownership)}%` : "--"}</td>
@@ -197,7 +230,7 @@ export function PoolTable({
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-2 py-6 text-center text-text-faint">
+                <td colSpan={columns.length} className="px-2 py-6 text-center text-text-faint">
                   No players match the current filters.
                 </td>
               </tr>
@@ -205,6 +238,8 @@ export function PoolTable({
           </tbody>
         </table>
       </div>
+
+      {detailPlayer && <PlayerDetailModal player={detailPlayer} onClose={() => setDetailPlayer(null)} />}
     </div>
   );
 }

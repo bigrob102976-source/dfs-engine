@@ -18,6 +18,10 @@ export interface PersistedWorkspaceState {
   minUnique: number;
   lineups: number;
   objective: "projection" | "ceiling" | "balanced" | "leverage";
+  // Milestone 17. Optional so state persisted before this milestone still
+  // loads cleanly -- callers must default both when absent.
+  projectionSource?: "independent" | "external" | "adjusted";
+  showProjectionComparison?: boolean;
 }
 
 export function loadWorkspaceState(): PersistedWorkspaceState | null {

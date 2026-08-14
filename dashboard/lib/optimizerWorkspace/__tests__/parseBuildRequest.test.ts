@@ -111,4 +111,22 @@ describe("parseBuildRequest", () => {
     expect(parseBuildRequest("nope").ok).toBe(false);
     expect(parseBuildRequest(42).ok).toBe(false);
   });
+
+  it("defaults projectionSource to independent when omitted (backward compatible)", () => {
+    const result = parseBuildRequest(baseBody());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.projectionSource).toBe("independent");
+  });
+
+  it("accepts every real projection source", () => {
+    for (const projectionSource of ["independent", "external", "adjusted"]) {
+      const result = parseBuildRequest(baseBody({ projectionSource }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.request.projectionSource).toBe(projectionSource);
+    }
+  });
+
+  it("rejects an unknown projectionSource", () => {
+    expect(parseBuildRequest(baseBody({ projectionSource: "made_up_source" })).ok).toBe(false);
+  });
 });

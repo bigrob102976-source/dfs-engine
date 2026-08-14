@@ -24,6 +24,11 @@ function player(overrides: Partial<PoolPlayerRow> = {}): PoolPlayerRow {
     confidence: 80,
     lineupStatus: "active",
     matchStatus: "matched",
+    externalProjection: null,
+    adjustedProjection: null,
+    adjustmentDelta: null,
+    adjustmentPercent: null,
+    adjustmentReasons: [],
     ...overrides,
   };
 }
@@ -41,6 +46,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     activePlayers: players.filter((p) => p.lineupStatus === "active").length,
     pitcherCount: 0,
     hitterCount: 0,
+    hasExternalProjections: false,
     confirmedLineupGames: 0,
     unconfirmedLineupGames: 0,
     unmatchedCount: 0,

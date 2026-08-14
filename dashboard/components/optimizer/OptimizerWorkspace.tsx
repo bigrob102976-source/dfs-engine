@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MissingDataState } from "@/components/MissingDataState";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
-import type { OptimizerBuildResult, OptimizerPoolResult, SlateOption } from "@/lib/optimizerWorkspace/types";
+import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
 import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
 
 import { ConstraintsPanel } from "./ConstraintsPanel";
@@ -63,6 +63,8 @@ export function OptimizerWorkspace() {
   const [minUnique, setMinUnique] = useState(2);
   const [lineups, setLineups] = useState(20);
   const [objective, setObjective] = useState<Objective>("projection");
+  const [projectionSource, setProjectionSource] = useState<ProjectionSource>("independent");
+  const [showProjectionComparison, setShowProjectionComparison] = useState(false);
 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [building, setBuilding] = useState(false);
@@ -90,6 +92,8 @@ export function OptimizerWorkspace() {
         setMinUnique(persisted.minUnique);
         setLineups(persisted.lineups);
         setObjective(persisted.objective);
+        setProjectionSource(persisted.projectionSource ?? "independent");
+        setShowProjectionComparison(persisted.showProjectionComparison ?? false);
       }
       setHydrated(true);
     });
@@ -111,8 +115,13 @@ export function OptimizerWorkspace() {
       minUnique,
       lineups,
       objective,
+      projectionSource,
+      showProjectionComparison,
     });
-  }, [hydrated, selectedSlateId, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, lineups, objective]);
+  }, [
+    hydrated, selectedSlateId, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, lineups,
+    objective, projectionSource, showProjectionComparison,
+  ]);
 
   // 3. Discover today's slates once, right after hydration (so we know
   // whether a persisted selection still exists among them).
@@ -221,8 +230,21 @@ export function OptimizerWorkspace() {
       allowPitcherVsHitter,
       minSalary,
       minUnique,
+      projectionSource,
     };
-  }, [pool, locks, exclusions, maxExposure, selectedSlateId, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique]);
+  }, [
+    pool, locks, exclusions, maxExposure, selectedSlateId, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique,
+    projectionSource,
+  ]);
+
+  // Milestone 17: if the newly-selected slate has no external/adjusted
+  // projection data, fall back to Big Money Independent rather than
+  // silently building against a source that doesn't exist for it.
+  useEffect(() => {
+    if (pool && !pool.hasExternalProjections && projectionSource !== "independent") {
+      Promise.resolve().then(() => setProjectionSource("independent"));
+    }
+  }, [pool, projectionSource]);
 
   // 5. Debounced, authoritative pre-solve validation (reuses the real
   // optimizer's own resolve_settings()/pre_solve_diagnostics() via
@@ -359,6 +381,42 @@ export function OptimizerWorkspace() {
         </div>
       </div>
 
+      {/* Milestone 17: PROJECTION SOURCE SELECTOR */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-panel p-3">
+        <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Projection Source</span>
+        <div className="flex gap-1" role="group" aria-label="Projection Source">
+          {(
+            [
+              { value: "independent" as ProjectionSource, label: "Big Money Independent" },
+              { value: "external" as ProjectionSource, label: "External Baseline" },
+              { value: "adjusted" as ProjectionSource, label: "Big Money Adjusted" },
+            ]
+          ).map((opt) => {
+            const disabled = opt.value !== "independent" && !pool?.hasExternalProjections;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setProjectionSource(opt.value)}
+                disabled={disabled}
+                aria-pressed={projectionSource === opt.value}
+                className={`rounded px-2 py-1 text-xs font-medium ${
+                  projectionSource === opt.value ? "bg-accent-dim text-text" : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {!pool?.hasExternalProjections && <span className="text-[11px] text-text-faint">External projection provider not connected.</span>}
+
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
+          <input type="checkbox" checked={showProjectionComparison} onChange={(e) => setShowProjectionComparison(e.target.checked)} />
+          Show comparison columns
+        </label>
+      </div>
+
       {slateStatus && slateStatus !== "ready" && (
         <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
           {SLATE_STATUS_MESSAGES[slateStatus] ?? slateReason ?? `Slate status: ${slateStatus}`}
@@ -444,6 +502,7 @@ export function OptimizerWorkspace() {
               onToggleLock={toggleLock}
               onToggleExclude={toggleExclude}
               onExposureChange={setExposure}
+              showProjectionComparison={showProjectionComparison}
             />
           ) : (
             <div className="rounded border border-border bg-bg-panel p-6 text-center text-sm text-text-faint">

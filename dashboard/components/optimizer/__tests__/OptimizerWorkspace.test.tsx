@@ -119,9 +119,12 @@ describe("OptimizerWorkspace", () => {
     expect(activeStat.textContent).toBe("2");
 
     // The old developer-facing "configure DFS_SALARY_PROVIDER" warning must
-    // never appear when the automatic mock fallback is what's active.
+    // never appear when the automatic mock fallback is what's active. (Not a
+    // blanket /not connected/i check -- Milestone 17's unrelated "External
+    // projection provider not connected." helper text is expected here,
+    // since this fixture's pool has no external/adjusted projection data.)
     expect(screen.queryByText(/unrecognized value/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/not connected/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/DFS.*not connected/i)).not.toBeInTheDocument();
   });
 
   it("shows a clear message (never crashes) when DFS_SALARY_PROVIDER is explicitly set to an unrecognized value", async () => {
@@ -309,4 +312,63 @@ describe("OptimizerWorkspace", () => {
     await waitFor(() => expect(screen.getByText(/no longer active/i)).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByText("Locked (0)")).toBeInTheDocument();
   }, 15000);
+
+  describe("Milestone 17: Projection Source selector", () => {
+    const POOL_WITH_COMPARISON = {
+      ...POOL_RESULT,
+      hasExternalProjections: true,
+      players: [
+        { ...POOL_RESULT.players[0], externalProjection: 9.2, adjustedProjection: 10.6, adjustmentDelta: 0.6, adjustmentPercent: 6.0, adjustmentReasons: ["positive recent hard-hit trend"] },
+        { ...POOL_RESULT.players[1], externalProjection: 18.5, adjustedProjection: 20.3, adjustmentDelta: 0.3, adjustmentPercent: 1.5, adjustmentReasons: [] },
+      ],
+    };
+
+    it("External Baseline and Big Money Adjusted are disabled when the pool has no external projection data", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "External Baseline" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Big Money Adjusted" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Big Money Independent" })).toBeEnabled();
+      expect(screen.getByText("External projection provider not connected.")).toBeInTheDocument();
+    });
+
+    it("Big Money Independent is the default selection", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByRole("button", { name: "Big Money Independent" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("enables External Baseline / Big Money Adjusted when the pool has comparison data, and switching sources is reflected in the build request", async () => {
+      const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_COMPARISON }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "External Baseline" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Big Money Adjusted" })).toBeEnabled();
+      expect(screen.queryByText("External projection provider not connected.")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Big Money Adjusted" }));
+      expect(screen.getByRole("button", { name: "Big Money Adjusted" })).toHaveAttribute("aria-pressed", "true");
+
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).toBe("adjusted");
+      });
+    });
+
+    it("does not show comparison columns until Show comparison columns is checked", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_COMPARISON }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.queryByRole("columnheader", { name: "Ext" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Show comparison columns"));
+      expect(screen.getByRole("columnheader", { name: "Ext" })).toBeInTheDocument();
+    });
+  });
 });

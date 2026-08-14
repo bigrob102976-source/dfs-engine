@@ -32,6 +32,8 @@ dashboard/next-env.d.ts
 /ownership_evaluations/
 /actual_ownership/
 /results/
+/external_projection_snapshots/
+/adjusted_projection_snapshots/
 
 # local external-API response cache (e.g. data/cache/mlb_stats/) -- large,
 # reproducible by re-fetching, not source. data/sample_pitchers.json itself

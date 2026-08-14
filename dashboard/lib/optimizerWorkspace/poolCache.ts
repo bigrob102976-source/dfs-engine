@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { safeReadJson } from "../discovery";
+import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
 import type { DKPlayerPool, OwnershipSnapshot } from "../types";
@@ -90,8 +91,11 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     if (p.mlb_player_id) ownershipByMlbId.set(p.mlb_player_id, p);
   }
 
+  const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
+
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
     const own = ownershipByDkId.get(p.dk_player_id) ?? (p.mlb_player_id ? ownershipByMlbId.get(p.mlb_player_id) : undefined);
+    const comparison = p.mlb_player_id ? comparisonByPlayerId.get(p.mlb_player_id) : undefined;
     return {
       dkPlayerId: p.dk_player_id,
       mlbPlayerId: p.mlb_player_id,
@@ -112,6 +116,11 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       confidence: p.confidence,
       lineupStatus: p.lineup_status,
       matchStatus: p.match_status,
+      externalProjection: comparison?.externalProjection ?? null,
+      adjustedProjection: comparison?.adjustedProjection ?? null,
+      adjustmentDelta: comparison?.adjustmentDelta ?? null,
+      adjustmentPercent: comparison?.adjustmentPercent ?? null,
+      adjustmentReasons: comparison?.adjustmentReasons ?? [],
     };
   });
 
@@ -138,6 +147,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     unmatchedCount: typeof matchReport?.unmatched_count === "number" ? (matchReport.unmatched_count as number) : 0,
     slateGames: typeof matchReport?.dk_games_total === "number" ? (matchReport.dk_games_total as number) : 0,
     rosterFeasibilityPass: pool?.roster_feasibility_pass ?? false,
+    hasExternalProjections: comparisonByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
   };

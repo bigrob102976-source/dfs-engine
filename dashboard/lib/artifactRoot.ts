@@ -25,6 +25,8 @@ export const ARTIFACT_DIRS = {
   ownershipEvaluations: "ownership_evaluations",
   pitcherEvaluations: "evaluations",
   actualOwnership: "actual_ownership",
+  externalProjectionSnapshots: "external_projection_snapshots",
+  adjustedProjectionSnapshots: "adjusted_projection_snapshots",
 } as const;
 
 export function artifactPath(...segments: string[]): string {

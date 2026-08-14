@@ -44,21 +44,40 @@ def _load_pool(pool_path: str):
         return json.load(f)
 
 
-def _build_optimizer_players(pool_doc: dict):
+def _load_projection_overrides(path: str):
+    """{"<mlb_player_id>": {"projection": x, "ceiling": y, "floor": z}, ...}
+    -- an ephemeral, dashboard-generated file (Milestone 17's Projection
+    Source selector), never a persisted artifact. Substitutes these
+    values in place of the pool's own projection/ceiling/floor for
+    matching players, for THIS solve only -- the pool file on disk is
+    never touched, so Big Money Independent projections are never
+    modified by selecting a different projection source."""
+    with Path(path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None):
+    projection_overrides = projection_overrides or {}
     players = []
     skipped = []
     for record in pool_doc.get("players", []):
         if record.get("lineup_status") != "active":
             continue
-        if record.get("projection") is None or record.get("ceiling") is None:
+
+        override = projection_overrides.get(record.get("mlb_player_id")) if record.get("mlb_player_id") else None
+        projection = override.get("projection") if override and override.get("projection") is not None else record.get("projection")
+        ceiling = override.get("ceiling") if override and override.get("ceiling") is not None else record.get("ceiling")
+        floor = override.get("floor") if override and override.get("floor") is not None else record.get("floor")
+
+        if projection is None or ceiling is None:
             skipped.append(record["name"])
             continue
         players.append(OptimizerPlayer(
             key=record["dk_player_id"], mlb_player_id=record.get("mlb_player_id"), name=record["name"],
             team=record["team"], opponent=record.get("opponent"), game_id=record.get("game_id"),
             player_type=record["player_type"], dk_positions=list(record.get("dk_positions") or []),
-            salary=record["salary"], projection=record["projection"], ceiling=record["ceiling"],
-            floor=record.get("floor"), risk_score=record.get("risk_score"), confidence=record.get("confidence"),
+            salary=record["salary"], projection=projection, ceiling=ceiling,
+            floor=floor, risk_score=record.get("risk_score"), confidence=record.get("confidence"),
             season_sample_size=record.get("season_sample_size"),
         ))
     return players, skipped
@@ -128,6 +147,12 @@ def main() -> None:
     parser.add_argument("--date", required=True)
     parser.add_argument("--pool", required=True, help="Path to a dk_player_pool_<timestamp>.json file")
     parser.add_argument("--ownership", default=None, help="Optional path to an ownership_<timestamp>.json snapshot")
+    parser.add_argument(
+        "--projection-overrides", default=None,
+        help="Optional path to a {mlb_player_id: {projection, ceiling, floor}} JSON file (Milestone 17 Projection "
+             "Source selector) -- substitutes these values for matching players for THIS solve only; never "
+             "modifies the pool file on disk.",
+    )
     parser.add_argument("--lineups", type=int, default=1)
     parser.add_argument("--objective", choices=["projection", "ceiling", "balanced", "leverage"], default="projection")
     parser.add_argument("--min-unique", type=int, default=1)
@@ -166,7 +191,8 @@ def main() -> None:
     args = parser.parse_args()
 
     pool_doc = _load_pool(args.pool)
-    players, skipped = _build_optimizer_players(pool_doc)
+    projection_overrides = _load_projection_overrides(args.projection_overrides) if args.projection_overrides else None
+    players, skipped = _build_optimizer_players(pool_doc, projection_overrides)
 
     if not args.validate_only:
         print("=" * 70)
@@ -175,6 +201,8 @@ def main() -> None:
         print(f"\nSlate date: {args.date}")
         print(f"Player pool: {args.pool}")
         print(f"Active players available: {len(players)}")
+        if projection_overrides:
+            print(f"Projection overrides: {args.projection_overrides} ({len(projection_overrides)} player(s))")
         if skipped:
             print(f"Skipped (active but missing projection/ceiling -- never invented): {len(skipped)}")
 

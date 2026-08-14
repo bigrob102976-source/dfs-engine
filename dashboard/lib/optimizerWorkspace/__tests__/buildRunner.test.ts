@@ -54,6 +54,7 @@ function baseRequest(overrides: Partial<OptimizerBuildRequest> = {}): OptimizerB
     minUnique: 2,
     minConfidence: null,
     maxPlayerRisk: null,
+    projectionSource: "independent",
     ...overrides,
   };
 }
@@ -313,5 +314,128 @@ describe("buildLineups", () => {
     await buildLineups(baseRequest({ lineups: 1, maxExposure: { "Full Exposure Guy": 1 } }));
     const buildCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py" && !c.args.includes("--validate-only"))!;
     expect(buildCall.args).not.toContain("--max-exposure");
+  });
+
+  describe("Milestone 17: projectionSource -> --projection-overrides", () => {
+    function seedAdjustedSnapshot() {
+      writeJson(`adjusted_projection_snapshots/${DATE}/adjusted_20260812T200000.json`, {
+        slate_date: DATE,
+        generated_at: "2026-08-12T20:00:00Z",
+        records: [
+          {
+            independent_player_id: "h1", name: "Kyle Schwarber", team: "PHI", player_type: "hitter",
+            external_projection: 11.2, adjusted_projection: 12.1, adjustment_delta: 0.9, adjustment_percent: 8.0,
+            adjustment_confidence: 85, adjustment_reasons: ["positive recent hard-hit trend"], adjustments: [],
+          },
+        ],
+      });
+    }
+
+    it("independent (the default) never passes --projection-overrides -- byte-identical to pre-M17 behavior", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      seedAdjustedSnapshot();
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "independent" }));
+      const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+      expect(call.args).not.toContain("--projection-overrides");
+    });
+
+    it("external/adjusted write a --projection-overrides file with the chosen source's values", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      seedAdjustedSnapshot();
+      let capturedOverrides: Record<string, { projection: number }> | null = null;
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner(
+          {
+            "scripts/optimize_dk_lineups.py": (args) => {
+              // Must read the overrides file WHILE the script is "running" --
+              // buildRunner.ts deletes it immediately after this call returns.
+              const overridesPath = argValue(args, "--projection-overrides");
+              if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+              return ok(JSON.stringify({ errors: [] }));
+            },
+          },
+          calls,
+        ),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "adjusted" }));
+
+      const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+      expect(argValue(call.args, "--projection-overrides")).toBeTruthy();
+      expect(capturedOverrides).not.toBeNull();
+      expect(capturedOverrides!.h1.projection).toBe(12.1);
+    });
+
+    it("external source uses external_projection, not adjusted_projection", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      seedAdjustedSnapshot();
+      let capturedOverrides: Record<string, { projection: number }> | null = null;
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner(
+          {
+            "scripts/optimize_dk_lineups.py": (args) => {
+              const overridesPath = argValue(args, "--projection-overrides");
+              if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+              return ok(JSON.stringify({ errors: [] }));
+            },
+          },
+          calls,
+        ),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "external" }));
+
+      expect(capturedOverrides).not.toBeNull();
+      expect(capturedOverrides!.h1.projection).toBe(11.2);
+    });
+
+    it("cleans up the temp overrides file after the run", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      seedAdjustedSnapshot();
+      let overridesPath: string | undefined;
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner(
+          {
+            "scripts/optimize_dk_lineups.py": (args) => {
+              overridesPath = argValue(args, "--projection-overrides");
+              return ok(JSON.stringify({ errors: [] }));
+            },
+          },
+          calls,
+        ),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "adjusted" }));
+
+      expect(overridesPath).toBeTruthy();
+      expect(fs.existsSync(overridesPath!)).toBe(false);
+    });
+
+    it("adjusted/external with no adjusted snapshot at all never passes --projection-overrides (graceful fallback)", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      // Deliberately no seedAdjustedSnapshot() here.
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      const errors = await validateBuildRequest(baseRequest({ projectionSource: "adjusted" }));
+      expect(errors).toEqual([]);
+      const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+      expect(call.args).not.toContain("--projection-overrides");
+    });
   });
 });

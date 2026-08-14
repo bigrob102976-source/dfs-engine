@@ -25,6 +25,11 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     confidence: 90,
     lineupStatus: "active",
     matchStatus: "matched",
+    externalProjection: null,
+    adjustedProjection: null,
+    adjustmentDelta: null,
+    adjustmentPercent: null,
+    adjustmentReasons: [],
     ...overrides,
   };
 }
@@ -146,5 +151,68 @@ describe("PoolTable", () => {
     const cells = Array.from(row.querySelectorAll("td")).map((td) => td.textContent);
     // Ord column is the 7th cell (Lock, Exclude, Pos, Name, Team, Opp, Ord, ...)
     expect(cells[6]).toBe("");
+  });
+
+  it("does not show projection comparison columns by default", () => {
+    renderTable();
+    expect(screen.queryByRole("columnheader", { name: "Ext" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Δ" })).not.toBeInTheDocument();
+  });
+
+  it("shows External/Adjusted/Δ columns when showProjectionComparison is true", () => {
+    const comparisonPlayers = [
+      player({ dkPlayerId: "d1", name: "Schwarber", projection: 11.9, externalProjection: 11.2, adjustedProjection: 12.1, adjustmentDelta: 0.9 }),
+    ];
+    render(
+      <PoolTable
+        players={comparisonPlayers}
+        locks={new Set()}
+        exclusions={new Set()}
+        maxExposure={{}}
+        onToggleLock={vi.fn()}
+        onToggleExclude={vi.fn()}
+        onExposureChange={vi.fn()}
+        showProjectionComparison
+      />,
+    );
+    expect(screen.getByRole("columnheader", { name: "Ext" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Adj" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Δ" })).toBeInTheDocument();
+    const row = screen.getByText("Schwarber").closest("tr")!;
+    expect(row.textContent).toContain("11.2");
+    expect(row.textContent).toContain("12.1");
+    expect(row.textContent).toContain("+0.9");
+  });
+
+  it("clicking a player name opens the detail modal with the projection comparison", () => {
+    const comparisonPlayers = [
+      player({
+        dkPlayerId: "d1", name: "Schwarber", team: "PHI", projection: 11.9, externalProjection: 11.2,
+        adjustedProjection: 12.1, adjustmentDelta: 0.9, adjustmentPercent: 8.0, adjustmentReasons: ["positive recent hard-hit trend"],
+      }),
+    ];
+    render(
+      <PoolTable
+        players={comparisonPlayers}
+        locks={new Set()}
+        exclusions={new Set()}
+        maxExposure={{}}
+        onToggleLock={vi.fn()}
+        onToggleExclude={vi.fn()}
+        onExposureChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Schwarber" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Projection Comparison")).toBeInTheDocument();
+    expect(screen.getByText("positive recent hard-hit trend")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("the detail modal shows a plain message when a player has no external projection data", () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: "Bravo Hitter" }));
+    expect(screen.getByText("No external projection data available for this player.")).toBeInTheDocument();
   });
 });

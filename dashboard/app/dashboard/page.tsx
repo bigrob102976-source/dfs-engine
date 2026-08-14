@@ -1,3 +1,4 @@
+import { ExternalProjectionsStatusCard } from "@/components/ExternalProjectionsStatusCard";
 import { RefreshPanel } from "@/components/RefreshPanel";
 import { SlateReadiness } from "@/components/SlateReadiness";
 import { StatusCard } from "@/components/StatusCard";
@@ -40,11 +41,13 @@ export default function TodaysSlatePage() {
       </div>
 
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">Artifact Detail</h2>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         {statuses.map((status) => (
           <StatusCard key={status.label} status={status} />
         ))}
       </div>
+
+      <ExternalProjectionsStatusCard />
     </div>
   );
 }

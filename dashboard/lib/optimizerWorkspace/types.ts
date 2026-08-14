@@ -45,7 +45,19 @@ export interface PoolPlayerRow {
   confidence: number | null;
   lineupStatus: string;
   matchStatus: string;
+
+  // Milestone 17: optional three-way projection comparison, joined in
+  // from the latest adjusted-projection snapshot by mlbPlayerId. `projection`
+  // above is ALWAYS the independent (Big Money) value, unaffected by any
+  // of these -- see lib/externalProjections.ts.
+  externalProjection: number | null;
+  adjustedProjection: number | null;
+  adjustmentDelta: number | null;
+  adjustmentPercent: number | null;
+  adjustmentReasons: string[];
 }
+
+export type ProjectionSource = "independent" | "external" | "adjusted";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -66,6 +78,7 @@ export interface OptimizerPoolResult {
   rosterFeasibilityPass: boolean;
   salaryCap: number;
   hasOwnership: boolean;
+  hasExternalProjections: boolean;
 }
 
 export interface OptimizerBuildRequest {
@@ -83,6 +96,7 @@ export interface OptimizerBuildRequest {
   minUnique: number;
   minConfidence: number | null;
   maxPlayerRisk: number | null;
+  projectionSource: ProjectionSource;
 }
 
 export interface OptimizerBuildResult {

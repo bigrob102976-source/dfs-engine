@@ -3,6 +3,7 @@ import { isValidSlateId } from "./validateSlateId";
 import type { OptimizerBuildRequest } from "./types";
 
 const OBJECTIVES = new Set(["projection", "ceiling", "balanced", "leverage"]);
+const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted"]);
 
 export type ParseResult = { ok: true; request: OptimizerBuildRequest } | { ok: false; error: string };
 
@@ -83,6 +84,11 @@ export function parseBuildRequest(body: unknown): ParseResult {
     return { ok: false, error: "\"maxPlayerRisk\" must be a number, or null." };
   }
 
+  const projectionSource = b.projectionSource === undefined ? "independent" : b.projectionSource;
+  if (typeof projectionSource !== "string" || !PROJECTION_SOURCES.has(projectionSource)) {
+    return { ok: false, error: `"projectionSource" must be one of ${[...PROJECTION_SOURCES].join(", ")}.` };
+  }
+
   return {
     ok: true,
     request: {
@@ -100,6 +106,7 @@ export function parseBuildRequest(body: unknown): ParseResult {
       minUnique,
       minConfidence,
       maxPlayerRisk,
+      projectionSource: projectionSource as OptimizerBuildRequest["projectionSource"],
     },
   };
 }

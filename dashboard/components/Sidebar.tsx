@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/yesterday", label: "Yesterday" },
   { href: "/dashboard/history", label: "History" },
   { href: "/dashboard/health", label: "Model Health" },
+  { href: "/dashboard/settings", label: "Settings" },
 ];
 
 export function Sidebar() {

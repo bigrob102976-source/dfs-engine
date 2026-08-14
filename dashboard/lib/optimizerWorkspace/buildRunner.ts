@@ -1,6 +1,9 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { safeReadJson } from "../discovery";
+import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
 import type { LineupSet } from "../types";
@@ -8,9 +11,52 @@ import { parseLastJsonLine } from "./jsonLine";
 import { getCachedPoolPath } from "./poolCache";
 import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
 
-function buildArgv(request: OptimizerBuildRequest, poolPath: string, ownershipPath: string | null, extra: string[]): string[] {
+/** Milestone 17's Projection Source selector: "independent" (the
+ * default -- Big Money's own projections, exactly as before this
+ * milestone) never writes anything and passes no extra flag, so that
+ * path is byte-identical to pre-M17 behavior. "external"/"adjusted"
+ * write a small, ephemeral {mlb_player_id: {projection, ceiling,
+ * floor}} JSON file under the OS temp directory and pass it via
+ * --projection-overrides -- the persisted dk_player_pool_<ts>.json
+ * (Big Money's independent projections) is NEVER written to. A player
+ * missing from the chosen source simply has no override entry, so
+ * scripts/optimize_dk_lineups.py falls back to their independent value
+ * rather than dropping them. */
+function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
+  if (request.projectionSource === "independent") return null;
+
+  const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
+  const overrides: Record<string, { projection: number | null; ceiling: number | null; floor: number | null }> = {};
+  for (const [mlbPlayerId, row] of comparisonByPlayerId) {
+    const projection = request.projectionSource === "external" ? row.externalProjection : row.adjustedProjection;
+    if (projection === null) continue;
+    // ceiling/floor stay null -- scripts/optimize_dk_lineups.py falls back to
+    // the pool's own (independent) ceiling/floor for those two fields.
+    overrides[mlbPlayerId] = { projection, ceiling: null, floor: null };
+  }
+  if (Object.keys(overrides).length === 0) return null;
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mlb-dfs-projection-overrides-"));
+  const filePath = path.join(dir, "overrides.json");
+  fs.writeFileSync(filePath, JSON.stringify(overrides), "utf-8");
+  return filePath;
+}
+
+function cleanupProjectionOverridesFile(filePath: string | null): void {
+  if (!filePath) return;
+  try {
+    fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup of an OS temp file -- never fail a build over this.
+  }
+}
+
+function buildArgv(
+  request: OptimizerBuildRequest, poolPath: string, ownershipPath: string | null, projectionOverridesPath: string | null, extra: string[],
+): string[] {
   const args: string[] = ["--date", request.date, "--pool", poolPath];
   if (ownershipPath) args.push("--ownership", ownershipPath);
+  if (projectionOverridesPath) args.push("--projection-overrides", projectionOverridesPath);
   args.push("--lineups", String(request.lineups));
   args.push("--objective", request.objective);
   args.push("--min-unique", String(request.minUnique));
@@ -45,13 +91,18 @@ export async function validateBuildRequest(request: OptimizerBuildRequest): Prom
   if (!cached) {
     return ["No player pool loaded for this slate yet -- select a slate first."];
   }
-  const args = buildArgv(request, cached.poolPath, cached.ownershipPath, ["--validate-only"]);
-  const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
-  const doc = parseLastJsonLine(result.stdout);
-  if (!doc) {
-    return [`Unexpected validation failure: ${tail(result.stdout + result.stderr, 500)}`];
+  const overridesPath = writeProjectionOverridesFile(request);
+  try {
+    const args = buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, ["--validate-only"]);
+    const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
+    const doc = parseLastJsonLine(result.stdout);
+    if (!doc) {
+      return [`Unexpected validation failure: ${tail(result.stdout + result.stderr, 500)}`];
+    }
+    return Array.isArray(doc.errors) ? (doc.errors as string[]) : [];
+  } finally {
+    cleanupProjectionOverridesFile(overridesPath);
   }
-  return Array.isArray(doc.errors) ? (doc.errors as string[]) : [];
 }
 
 /** Runs the real interactive build: a fast authoritative pre-check
@@ -93,8 +144,14 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
   }
 
   const before = lineupSetFingerprint(request.date);
-  const args = buildArgv(request, cached.poolPath, cached.ownershipPath, []);
-  const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
+  const overridesPath = writeProjectionOverridesFile(request);
+  let result;
+  try {
+    const args = buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, []);
+    result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
+  } finally {
+    cleanupProjectionOverridesFile(overridesPath);
+  }
   const after = lineupSetFingerprint(request.date);
   const elapsedMs = Date.now() - startedAt;
 
