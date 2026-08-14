@@ -36,6 +36,10 @@ dashboard/next-env.d.ts
 /adjusted_projection_snapshots/
 /game_environment_snapshots/
 
+# Live, mutable dashboard-controlled settings (Milestone 19's Mock Mode
+# toggle) -- local runtime state, not a reproducible artifact or source.
+/runtime_settings/
+
 # local external-API response cache (e.g. data/cache/mlb_stats/) -- large,
 # reproducible by re-fetching, not source. data/sample_pitchers.json itself
 # (a small fixture referenced by services/pitcher_data.py) stays tracked.

@@ -5,9 +5,15 @@ import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
+import type { ProviderSource } from "../orchestrator/types";
 import type { DKPlayerPool, OwnershipSnapshot } from "../types";
 import { parseLastJsonLine } from "./jsonLine";
 import type { OptimizerPoolResult, PoolPlayerRow, SlateListResult, SlateOption } from "./types";
+
+const PROVIDER_SOURCE_VALUES = new Set<ProviderSource>(["explicit", "real_dk_csv", "csv_import_pool", "mock_explicit", "unconfigured"]);
+function asProviderSource(value: unknown): ProviderSource | null {
+  return typeof value === "string" && PROVIDER_SOURCE_VALUES.has(value as ProviderSource) ? (value as ProviderSource) : null;
+}
 
 interface CachedPool {
   date: string;
@@ -15,7 +21,7 @@ interface CachedPool {
   slateName: string | null;
   providerName: string | null;
   isMock: boolean;
-  source: "explicit" | "automatic_fallback" | null;
+  source: ProviderSource | null;
   poolPath: string;
   ownershipPath: string | null;
   builtAt: string;
@@ -69,7 +75,7 @@ export async function listSlates(date: string): Promise<SlateListResult> {
     providerType: doc.provider_type === "mock" || doc.provider_type === "real" ? (doc.provider_type as "mock" | "real") : null,
     isMock: Boolean(doc.is_mock),
     isConnected: Boolean(doc.is_connected),
-    source: doc.source === "explicit" || doc.source === "automatic_fallback" ? (doc.source as "explicit" | "automatic_fallback") : null,
+    source: asProviderSource(doc.source),
     slates,
     slatesAvailable: typeof doc.slates_available === "number" ? (doc.slates_available as number) : slates.length,
   };
@@ -211,10 +217,7 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   const providerName = typeof providerDoc?.provider_name === "string" ? (providerDoc.provider_name as string) : null;
   const slates = Array.isArray(providerDoc?.slates) ? (providerDoc!.slates as Record<string, unknown>[]) : [];
   const slateName = (slates.find((s) => s.slate_id === slateId)?.slate_name as string | undefined) ?? null;
-  const providerSource =
-    providerDoc?.source === "explicit" || providerDoc?.source === "automatic_fallback"
-      ? (providerDoc.source as "explicit" | "automatic_fallback")
-      : null;
+  const providerSource = asProviderSource(providerDoc?.source);
 
   const entry: CachedPool = {
     date,

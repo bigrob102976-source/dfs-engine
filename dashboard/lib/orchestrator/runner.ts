@@ -23,7 +23,7 @@ import { buildChangeReport } from "./changeReport";
 import { resolveStepChain, STEP_ORDER } from "./dependencies";
 import { runPythonScript, tail } from "./pythonRunner";
 import { initialSteps, STEP_DEFINITIONS } from "./steps";
-import type { PipelineStepId, RunOutcome, RunState, SlateOption, StepStatus } from "./types";
+import type { PipelineStepId, ProviderSource, RunOutcome, RunState, RunSummary, SlateOption, StepStatus } from "./types";
 
 // --------------------------------------------------------------------------
 // Disk-persisted run state (crash visibility + cross-request GET status).
@@ -186,6 +186,9 @@ type LineupSetPaths = { projection: string | null; balanced: string | null; leve
 const EMPTY_LINEUP_COUNTS: LineupCounts = { projection: null, balanced: null, leverage: null };
 const EMPTY_LINEUP_PATHS: LineupSetPaths = { projection: null, balanced: null, leverage: null };
 
+type ExternalProjectionRefreshResult = { status: RunSummary["externalProjectionStatus"]; recordCount: number | null };
+const NOT_ATTEMPTED: ExternalProjectionRefreshResult = { status: "not_attempted", recordCount: null };
+
 function finalize(
   state: RunState,
   status: RunState["status"],
@@ -193,6 +196,7 @@ function finalize(
   error?: string,
   lineupCounts: LineupCounts = EMPTY_LINEUP_COUNTS,
   lineupSetPaths: LineupSetPaths = EMPTY_LINEUP_PATHS,
+  externalProjection: ExternalProjectionRefreshResult = NOT_ATTEMPTED,
 ) {
   state.status = status;
   state.outcome = outcome;
@@ -206,7 +210,7 @@ function finalize(
   }
 
   if (status === "completed") {
-    state.summary = buildRunSummary(state, lineupCounts, lineupSetPaths);
+    state.summary = buildRunSummary(state, lineupCounts, lineupSetPaths, externalProjection);
     const previous = lastCompletedRun ?? readPersistedLastCompletedRun();
     state.changeReport = buildChangeReport(previous, state);
     lastCompletedRun = state;
@@ -217,7 +221,45 @@ function finalize(
   activeRun = status === "needs_selection" ? state : null;
 }
 
-function buildRunSummary(state: RunState, lineupCounts: LineupCounts, lineupSetPaths: LineupSetPaths): RunState["summary"] {
+/** Milestone 19, step 8-9 of the "REAL SLATE WORKFLOW": re-runs the Big
+ * Money Research Adjustment Layer against whatever External Projection
+ * baseline exists for this date (a CSV import, or a future live
+ * provider fetch) using the just-refreshed Pitcher/Batter Agent
+ * snapshots -- exactly what the dashboard's CSV import flow already
+ * does at import time (dashboard/lib/csvImport.ts), just re-run here so
+ * it stays current with fresh research on every "Refresh Today's
+ * Slate". Best-effort and never fails the run: no baseline yet (nothing
+ * imported) is a completely normal state, not a pipeline error. Not a
+ * tracked pipeline step -- see the module-level comment on
+ * RunSummary.externalProjectionStatus for why. */
+async function runExternalProjectionRefresh(state: RunState): Promise<ExternalProjectionRefreshResult> {
+  const result = await runPythonScript("scripts/run_projection_adjustment.py", ["--date", state.slateDate]);
+  const doc = parseJsonLine(result.stdout);
+  const status = doc?.status;
+  if (status === "ready" || status === "no_baseline" || status === "no_research") {
+    return { status, recordCount: typeof doc?.record_count === "number" ? (doc.record_count as number) : null };
+  }
+  return { status: "error", recordCount: null };
+}
+
+function parseJsonLine(stdout: string): Record<string, unknown> | null {
+  const lines = stdout.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function buildRunSummary(
+  state: RunState,
+  lineupCounts: LineupCounts,
+  lineupSetPaths: LineupSetPaths,
+  externalProjection: ExternalProjectionRefreshResult = NOT_ATTEMPTED,
+): RunState["summary"] {
   const date = state.slateDate;
   const slate = safeReadJson<SlateIndex>(artifactPath(ARTIFACT_DIRS.research, date, "slate.json"));
   const pitcherSnap = safeReadJson<PitcherSnapshot>(findStep(state, "pitchers").artifactPath);
@@ -248,12 +290,16 @@ function buildRunSummary(state: RunState, lineupCounts: LineupCounts, lineupSetP
     lineupSetPaths,
     providerName: typeof providerSlate?.provider_name === "string" ? (providerSlate.provider_name as string) : null,
     isMock: Boolean(providerSlate?.is_mock),
-    providerSource:
-      providerSlate?.source === "explicit" || providerSlate?.source === "automatic_fallback"
-        ? (providerSlate.source as "explicit" | "automatic_fallback")
-        : null,
+    providerSource: isProviderSource(providerSlate?.source) ? providerSlate!.source : null,
     selectedSlateId: typeof providerSlate?.selected_slate_id === "string" ? (providerSlate.selected_slate_id as string) : null,
+    externalProjectionStatus: externalProjection.status,
+    externalProjectionRecordCount: externalProjection.recordCount,
   };
+}
+
+const PROVIDER_SOURCE_VALUES = new Set<ProviderSource>(["explicit", "real_dk_csv", "csv_import_pool", "mock_explicit", "unconfigured"]);
+function isProviderSource(value: unknown): value is ProviderSource {
+  return typeof value === "string" && PROVIDER_SOURCE_VALUES.has(value as ProviderSource);
 }
 
 async function runDfsSalariesStep(
@@ -435,16 +481,23 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
     return;
   }
 
+  // Milestone 19: best-effort, not a tracked step -- see runExternalProjectionRefresh's
+  // docstring. Skipped when a smart refresh found Ownership already up to date: nothing
+  // upstream of the adjustment layer changed, so re-running it would be pure waste --
+  // the same "existence, not staleness" shortcut the Optimizer step's own skip already takes.
+  const ownershipAlreadyReady = smart && Boolean(readiness?.ownership);
+  const externalProjection = ownershipAlreadyReady ? NOT_ATTEMPTED : await runExternalProjectionRefresh(state);
+
   if (!chain.has("optimizer")) {
     markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
-    finalize(state, "completed", "ready");
+    finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
     return;
   }
 
   if (smart && readiness?.optimizer) {
     const existing = lineupSetFingerprint(state.slateDate);
     markStepStatus(state, "optimizer", "ready", { finishedAt: new Date().toISOString(), artifactPath: existing.path, message: "Already up to date." });
-    finalize(state, "completed", "ready");
+    finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
     return;
   }
 
@@ -461,7 +514,7 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
     return;
   }
 
-  finalize(state, "completed", "ready", undefined, optimizer.lineupCounts, optimizer.lineupSetPaths);
+  finalize(state, "completed", "ready", undefined, optimizer.lineupCounts, optimizer.lineupSetPaths, externalProjection);
 }
 
 async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<PipelineStepId> = new Set(STEP_ORDER), smart = false) {

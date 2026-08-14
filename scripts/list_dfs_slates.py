@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--site", default="draftkings")
     args = parser.parse_args()
 
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(args.date)
     if provider is None:
         print(json.dumps(_status_doc("not_connected", reason, None, source)))
         return

@@ -1,80 +1,91 @@
-"""Resolves which DFS salary provider is configured, from environment
-variables only -- never hardcoded credentials, never read from a file
-checked into the repo.
+"""Resolves which DFS salary provider to use for a given slate date.
 
-    DFS_SALARY_PROVIDER=<provider name>     e.g. "mock"
+Milestone 19: normal operation must use REAL DraftKings data whenever
+it's available, and must never silently substitute mock data. Since
+dfs/providers/base.py forbids a live/scraped DraftKings connection
+(see that module's docstring), resolution is an automatic, date-aware
+priority cascade rather than a single environment-variable selection:
+
+  1. DraftKingsCsvProvider -- at least one real DraftKings salary CSV
+     has been uploaded for `date` (dfs/providers/draftkings_csv_storage.py,
+     via the dashboard's "Upload DraftKings CSV" flow).
+  2. CsvImportPoolProvider -- a CSV-imported projection snapshot
+     (Milestone 18, external_projections/csv_import/) with real salaries
+     exists for `date`, even though it isn't DraftKings' own file.
+  3. MockProvider -- ONLY if Mock Mode has been explicitly enabled
+     (config/runtime_settings.py; OFF by default). Never used silently.
+
+If none of the three apply, returns
+(None, "No live DraftKings salary provider configured.", "unconfigured")
+-- callers show this message verbatim and offer "Import CSV" /
+"Enable Mock Mode", never a silent mock substitution.
+
+DFS_SALARY_PROVIDER remains available as an explicit power-user/CI
+override (e.g. forcing "mock" without touching the dashboard's Mock
+Mode toggle, or forcing one specific provider by name) -- when set, it
+skips the cascade entirely:
+
+    DFS_SALARY_PROVIDER=<provider name>     e.g. "mock", "draftkings_csv"
     DFS_PROVIDER_API_KEY=<key>              only required by providers that need one
-
-No live third-party DFS-salary API is configured or credentialed in
-this environment. `mock` (dfs/providers/mock_provider.py) is the only
-provider registered today -- it builds slate/player structure from the
-REAL Research Package (real names, teams, positions, game times) but
-assigns deterministic, clearly-labeled MOCK salaries, since no real DK
-pricing source is available. Wiring up a genuine live provider (e.g. a
-paid third-party odds/DFS-data API) would mean:
-
-  1. Registering a new DFSSalaryProvider subclass in PROVIDER_FACTORIES
-     below that calls that provider's documented, credentialed API.
-  2. Setting DFS_SALARY_PROVIDER to its registered name.
-  3. Setting DFS_PROVIDER_API_KEY (and any other required secret) as an
-     environment variable -- never committed, never logged, never sent
-     to the browser (see dashboard/lib/orchestrator/pythonRunner.ts,
-     which passes environment variables to the Python subprocess but
-     never returns them in any API response).
-
-Milestone 15: the dashboard must work immediately on startup without
-any manual terminal configuration. Resolution priority is:
-
-  1. An explicitly configured, valid provider (DFS_SALARY_PROVIDER set
-     to a registered name, with DFS_PROVIDER_API_KEY if that provider
-     requires one) -- always wins.
-  2. DFS_SALARY_PROVIDER explicitly set but invalid (unrecognized name,
-     or a required API key missing) -- this is a real misconfiguration
-     and is reported as such (None, reason, "explicit"), never silently
-     replaced by the mock fallback -- masking a typo would be worse than
-     surfacing it.
-  3. DFS_SALARY_PROVIDER unset or empty -- automatically falls back to
-     the mock provider (source="automatic_fallback") so the dashboard
-     and optimizer work immediately without any PowerShell/terminal
-     setup. This module still never raises for this case, exactly as
-     before -- callers (scripts/fetch_dfs_slate.py,
-     scripts/list_dfs_slates.py) branch on the returned status/source,
-     never on an exception.
 """
 
 import os
 from typing import Callable, Dict, Optional, Tuple
 
-from dfs.providers.base import DFSSalaryProvider
+from config.runtime_settings import is_mock_mode_enabled
+from dfs.providers.base import DFSSalaryProvider, ProviderUnavailableError
+from dfs.providers.csv_import_pool_provider import CsvImportPoolProvider
+from dfs.providers.draftkings_csv_provider import DraftKingsCsvProvider
 from dfs.providers.mock_provider import MockProvider
 
 PROVIDER_FACTORIES: Dict[str, Callable[[], DFSSalaryProvider]] = {
     "mock": MockProvider,
+    "draftkings_csv": DraftKingsCsvProvider,
+    "csv_import_pool": CsvImportPoolProvider,
 }
 
-DEFAULT_FALLBACK_PROVIDER_KEY = "mock"
+NO_PROVIDER_CONFIGURED_MESSAGE = "No live DraftKings salary provider configured."
 
 
-def get_configured_provider() -> Tuple[Optional[DFSSalaryProvider], Optional[str], str]:
+def get_configured_provider(date: str) -> Tuple[Optional[DFSSalaryProvider], Optional[str], str]:
     """Returns (provider, reason, source).
 
-    `source` is "explicit" when DFS_SALARY_PROVIDER named the result
-    (successfully or not), or "automatic_fallback" when nothing was
-    configured and the mock provider was used as the default. Explicit
-    configuration always takes priority over the automatic fallback --
-    see the module docstring for the full resolution order."""
+    `source` is one of:
+      - "explicit": DFS_SALARY_PROVIDER named the result (successfully
+        or not) -- always wins over the automatic cascade below.
+      - "real_dk_csv": a real, user-uploaded DraftKings CSV was found
+        for `date`.
+      - "csv_import_pool": no real DK CSV, but a usable CSV-imported
+        projection snapshot was found for `date`.
+      - "mock_explicit": neither real source was available AND Mock
+        Mode is explicitly enabled.
+      - "unconfigured": nothing is available -- `provider` is None.
+    """
     name = (os.environ.get("DFS_SALARY_PROVIDER") or "").strip().lower()
+    if name:
+        factory = PROVIDER_FACTORIES.get(name)
+        if factory is None:
+            return None, f"DFS_SALARY_PROVIDER={name!r} is not a recognized provider. Supported: {sorted(PROVIDER_FACTORIES)}.", "explicit"
+        provider = factory()
+        if provider.requires_api_key and not os.environ.get("DFS_PROVIDER_API_KEY"):
+            return None, f"Provider {name!r} requires DFS_PROVIDER_API_KEY, which is not set.", "explicit"
+        return provider, None, "explicit"
 
-    if not name:
-        provider = PROVIDER_FACTORIES[DEFAULT_FALLBACK_PROVIDER_KEY]()
-        return provider, None, "automatic_fallback"
+    dk_csv = DraftKingsCsvProvider()
+    try:
+        dk_csv.get_slate(date)
+        return dk_csv, None, "real_dk_csv"
+    except ProviderUnavailableError:
+        pass
 
-    factory = PROVIDER_FACTORIES.get(name)
-    if factory is None:
-        return None, f"DFS_SALARY_PROVIDER={name!r} is not a recognized provider. Supported: {sorted(PROVIDER_FACTORIES)}.", "explicit"
+    csv_pool = CsvImportPoolProvider()
+    try:
+        csv_pool.get_slate(date)
+        return csv_pool, None, "csv_import_pool"
+    except ProviderUnavailableError:
+        pass
 
-    provider = factory()
-    if provider.requires_api_key and not os.environ.get("DFS_PROVIDER_API_KEY"):
-        return None, f"Provider {name!r} requires DFS_PROVIDER_API_KEY, which is not set.", "explicit"
+    if is_mock_mode_enabled():
+        return MockProvider(), None, "mock_explicit"
 
-    return provider, None, "explicit"
+    return None, NO_PROVIDER_CONFIGURED_MESSAGE, "unconfigured"

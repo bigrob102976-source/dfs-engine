@@ -46,7 +46,7 @@ function defaultHandlers(): Record<string, Handler> {
           provider_type: "mock",
           is_mock: true,
           is_connected: true,
-          source: "automatic_fallback",
+          source: "mock_explicit",
           slates: [{ slate_id: "mock-main", slate_name: "Mock Main (Dev)", game_count: 15, start_time: null }],
           slates_available: 1,
         }),
@@ -58,7 +58,7 @@ function defaultHandlers(): Record<string, Handler> {
         provider_name: "mock_dev_provider",
         provider_type: "mock",
         is_mock: true,
-        source: "automatic_fallback",
+        source: "mock_explicit",
         selected_slate_id: slateId,
         slates: [{ slate_id: slateId, slate_name: "Mock Main (Dev)", game_count: 1, start_time: null }],
         players: [],
@@ -167,7 +167,7 @@ describe("listSlates", () => {
     expect(result.providerName).toBe("mock_dev_provider");
     expect(result.providerType).toBe("mock");
     expect(result.isConnected).toBe(true);
-    expect(result.source).toBe("automatic_fallback");
+    expect(result.source).toBe("mock_explicit");
     expect(result.slatesAvailable).toBe(1);
     expect(result.slates).toEqual([{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }]);
   });
@@ -235,7 +235,7 @@ describe("loadPool", () => {
     expect(pool.rosterFeasibilityPass).toBe(true);
     expect(pool.hasOwnership).toBe(true);
     expect(pool.isMock).toBe(true);
-    expect(pool.providerSource).toBe("automatic_fallback");
+    expect(pool.providerSource).toBe("mock_explicit");
     expect(pool.slateGames).toBe(1);
 
     const hitter = pool.players.find((p) => p.dkPlayerId === "d1")!;

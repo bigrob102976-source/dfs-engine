@@ -77,8 +77,10 @@ function stubRun(overrides: {
             lineupSetPaths: { projection: overrides.projectionLineupsPath ?? null, balanced: null, leverage: null },
             providerName: "mock_dev_provider",
             isMock: true,
-            providerSource: "automatic_fallback",
+            providerSource: "mock_explicit",
             selectedSlateId: "mock-main",
+            externalProjectionStatus: "not_attempted",
+            externalProjectionRecordCount: null,
           }
         : null,
     changeReport: null,

@@ -11,7 +11,7 @@ const SLATES_READY = {
   providerType: "mock",
   isMock: true,
   isConnected: true,
-  source: "automatic_fallback",
+  source: "mock_explicit",
   slates: [{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }],
   slatesAvailable: 1,
 };
@@ -159,7 +159,7 @@ describe("OptimizerWorkspace", () => {
           providerType: "mock",
           isMock: true,
           isConnected: false,
-          source: "automatic_fallback",
+          source: "mock_explicit",
           slates: [],
           slatesAvailable: 0,
         }),
@@ -181,7 +181,7 @@ describe("OptimizerWorkspace", () => {
           providerType: "mock",
           isMock: true,
           isConnected: true,
-          source: "automatic_fallback",
+          source: "mock_explicit",
           slates: [
             { slateId: "main", slateName: "Main", gameCount: 9, startTime: "7:05 PM" },
             { slateId: "turbo", slateName: "Turbo", gameCount: 4, startTime: "8:10 PM" },

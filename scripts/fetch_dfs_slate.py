@@ -84,7 +84,7 @@ def main() -> None:
     print("DFS SALARY PROVIDER FETCH")
     print("=" * 70)
 
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(args.date)
     if provider is None:
         print("\nDFS SALARIES: NOT CONNECTED")
         print(reason)

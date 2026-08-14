@@ -151,6 +151,7 @@ function defaultHandlers(): Record<string, Handler> {
       });
       return ok();
     },
+    "scripts/run_projection_adjustment.py": () => ok(JSON.stringify({ status: "no_baseline", reason: "No external baseline snapshot found." })),
   };
 }
 
@@ -199,7 +200,8 @@ describe("one-click orchestration: happy path", () => {
       expect(run.steps.every((s) => s.status === "ready")).toBe(true);
 
       // Pipeline ordering: research -> pitchers -> batters -> dfs salaries ->
-      // player pool -> ownership -> optimizer x3 (Projection, Balanced, Leverage).
+      // player pool -> ownership -> external projection refresh (Milestone 19,
+      // best-effort) -> optimizer x3 (Projection, Balanced, Leverage).
       expect(calls.map((c) => c.script)).toEqual([
         "scripts/build_research_package.py",
         "scripts/run_real_pitcher_agent.py",
@@ -207,6 +209,7 @@ describe("one-click orchestration: happy path", () => {
         "scripts/fetch_dfs_slate.py",
         "scripts/build_dfs_pool_from_provider.py",
         "scripts/project_dk_ownership.py",
+        "scripts/run_projection_adjustment.py",
         "scripts/optimize_dk_lineups.py",
         "scripts/optimize_dk_lineups.py",
         "scripts/optimize_dk_lineups.py",
@@ -225,6 +228,7 @@ describe("one-click orchestration: happy path", () => {
       expect(summary.lineupCounts).toEqual({ projection: 20, balanced: 20, leverage: 20 });
       expect(summary.providerName).toBe("mock_dev_provider");
       expect(summary.selectedSlateId).toBe("mock-main");
+      expect(summary.externalProjectionStatus).toBe("no_baseline");
 
       // No manual DK CSV upload anywhere in this flow -- every arg passed to
       // every script came from server-resolved state (today's date, a

@@ -3,10 +3,13 @@ from pathlib import Path
 
 import pytest
 
+import dfs.providers.config as config_module
 from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
-from dfs.providers.config import PROVIDER_FACTORIES, get_configured_provider
+from dfs.providers.config import NO_PROVIDER_CONFIGURED_MESSAGE, PROVIDER_FACTORIES, get_configured_provider
 from dfs.providers.mock_provider import MockProvider, _mock_salary
 from dfs.providers.models import ProviderPlayer, ProviderSlateInfo, ProviderSlateResult
+
+TEST_DATE = "2026-08-14"
 
 
 def _write_research_package(root: Path, date: str, include_batters: bool = True):
@@ -87,32 +90,86 @@ def test_mock_provider_implements_interface():
 
 
 # ----------------------------------------------------------------------------
-# Config
+# Config -- Milestone 19's automatic, date-aware priority cascade:
+# real uploaded DraftKings CSV -> CSV-imported projection pool -> mock
+# (only if explicitly enabled) -> unconfigured. Fake provider classes are
+# monkeypatched onto the config module's own imported names so these
+# tests exercise ordering/gating logic only, never real file I/O -- see
+# tests/test_draftkings_csv_provider.py and
+# tests/test_csv_import_pool_provider.py for each real provider's own
+# behavior.
 # ----------------------------------------------------------------------------
 
 
-def test_config_falls_back_to_mock_when_unset(monkeypatch):
-    """Milestone 15: unset must never leave the dashboard stuck asking
-    for a terminal command -- it defaults to the mock provider."""
+def _fake_provider_class(provider_name, available):
+    class _Fake(DFSSalaryProvider):
+        name = provider_name
+        requires_api_key = False
+
+        def get_slate(self, date, sport="MLB", site="draftkings"):
+            if not available:
+                raise ProviderUnavailableError(f"{provider_name} has nothing for {date}.")
+            return ProviderSlateResult(slates=[], players_by_slate={}, source=provider_name, retrieved_at="now")
+
+    return _Fake
+
+
+def _patch_cascade(monkeypatch, dk_csv_available, csv_pool_available, mock_mode_enabled):
+    monkeypatch.setattr(config_module, "DraftKingsCsvProvider", _fake_provider_class("draftkings_csv", dk_csv_available))
+    monkeypatch.setattr(config_module, "CsvImportPoolProvider", _fake_provider_class("csv_import_pool", csv_pool_available))
+    monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: mock_mode_enabled)
     monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
-    provider, reason, source = get_configured_provider()
+
+
+def test_config_prefers_real_dk_csv_when_available(monkeypatch):
+    _patch_cascade(monkeypatch, dk_csv_available=True, csv_pool_available=True, mock_mode_enabled=True)
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
-    assert provider.name == "mock_dev_provider"
+    assert provider.name == "draftkings_csv"
     assert reason is None
-    assert source == "automatic_fallback"
+    assert source == "real_dk_csv"
 
 
-def test_config_falls_back_to_mock_when_only_whitespace(monkeypatch):
-    monkeypatch.setenv("DFS_SALARY_PROVIDER", "   ")
-    provider, reason, source = get_configured_provider()
+def test_config_falls_back_to_csv_import_pool_when_no_real_dk_csv(monkeypatch):
+    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=True, mock_mode_enabled=True)
+    provider, reason, source = get_configured_provider(TEST_DATE)
+    assert provider is not None
+    assert provider.name == "csv_import_pool"
+    assert source == "csv_import_pool"
+
+
+def test_config_falls_back_to_mock_only_when_explicitly_enabled(monkeypatch):
+    """Milestone 19: mock is never used silently -- it requires Mock
+    Mode to be explicitly turned on (config/runtime_settings.py)."""
+    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=True)
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
     assert provider.name == "mock_dev_provider"
-    assert source == "automatic_fallback"
+    assert source == "mock_explicit"
+
+
+def test_config_reports_unconfigured_when_nothing_is_available_and_mock_mode_is_off(monkeypatch):
+    """The headline Milestone 19 requirement: no real provider and Mock
+    Mode off must NEVER silently fall back to mock data."""
+    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=False)
+    provider, reason, source = get_configured_provider(TEST_DATE)
+    assert provider is None
+    assert reason == NO_PROVIDER_CONFIGURED_MESSAGE
+    assert reason == "No live DraftKings salary provider configured."
+    assert source == "unconfigured"
+
+
+def test_config_never_raises_when_nothing_is_available(monkeypatch):
+    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=False)
+    # Must not raise -- "unconfigured" is a normal, reportable state.
+    get_configured_provider(TEST_DATE)
 
 
 def test_config_resolves_explicit_mock_provider(monkeypatch):
+    """DFS_SALARY_PROVIDER remains a power-user/CI override that skips
+    the cascade entirely, regardless of Mock Mode or what's uploaded."""
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "mock")
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert reason is None
     assert provider is not None
     assert provider.name == "mock_dev_provider"
@@ -121,15 +178,14 @@ def test_config_resolves_explicit_mock_provider(monkeypatch):
 
 def test_config_is_case_insensitive(monkeypatch):
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "MOCK")
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
     assert source == "explicit"
 
 
-def test_config_explicit_provider_overrides_fallback(monkeypatch):
-    """A registered non-mock provider, once configured, must be used
-    instead of the automatic mock fallback (Milestone 15's explicit
-    override requirement)."""
+def test_config_explicit_provider_overrides_cascade(monkeypatch):
+    """A registered non-mock provider, once explicitly configured, must
+    be used instead of the automatic cascade."""
     class _FakeRealProvider(DFSSalaryProvider):
         name = "real_provider"
         requires_api_key = False
@@ -139,7 +195,7 @@ def test_config_explicit_provider_overrides_fallback(monkeypatch):
 
     monkeypatch.setitem(PROVIDER_FACTORIES, "real_provider", _FakeRealProvider)
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "real_provider")
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
     assert provider.name == "real_provider"
     assert source == "explicit"
@@ -148,10 +204,10 @@ def test_config_explicit_provider_overrides_fallback(monkeypatch):
 
 def test_config_reports_unknown_provider_name_without_falling_back_to_mock(monkeypatch):
     """An explicit but invalid provider name is a real misconfiguration
-    -- it must be reported, never silently masked by the mock fallback
+    -- it must be reported, never silently masked by a mock fallback
     (a typo should be visible, not quietly replaced)."""
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "sportsdataio")
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is None
     assert "not a recognized provider" in reason
     assert "sportsdataio" in reason
@@ -169,22 +225,16 @@ def test_config_reports_missing_api_key_without_falling_back_to_mock(monkeypatch
     monkeypatch.setitem(PROVIDER_FACTORIES, "fake_keyed", _FakeKeyedProvider)
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "fake_keyed")
     monkeypatch.delenv("DFS_PROVIDER_API_KEY", raising=False)
-    provider, reason, source = get_configured_provider()
+    provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is None
     assert "DFS_PROVIDER_API_KEY" in reason
     assert source == "explicit"
 
 
-def test_config_never_raises_when_unset(monkeypatch):
-    monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
-    # Must not raise -- automatic mock fallback is the expected, reportable state.
-    get_configured_provider()
-
-
 def test_config_never_raises_for_explicit_misconfiguration(monkeypatch):
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "totally-unknown")
     # Must not raise -- an explicit-but-invalid provider is also a normal, reportable state.
-    get_configured_provider()
+    get_configured_provider(TEST_DATE)
 
 
 # ----------------------------------------------------------------------------

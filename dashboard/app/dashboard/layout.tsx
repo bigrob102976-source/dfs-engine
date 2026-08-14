@@ -10,6 +10,7 @@ import {
   loadLatestPitcherEvaluation,
   loadLatestPitcherSnapshot,
 } from "@/lib/loaders";
+import { getMockModeEnabled } from "@/lib/mockMode";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildSearchIndex } from "@/lib/search";
 
@@ -24,6 +25,7 @@ export const dynamic = "force-dynamic";
 export default async function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
   const today = getTodayChicagoDate();
   const searchDate = latestKnownSlateDate();
+  const mockModeEnabled = await getMockModeEnabled();
 
   let searchIndex: ReturnType<typeof buildSearchIndex> = [];
   if (searchDate) {
@@ -44,6 +46,14 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
     <div className="flex h-screen w-full overflow-hidden bg-bg">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
+        {mockModeEnabled && (
+          <div
+            role="status"
+            className="flex shrink-0 items-center justify-center gap-1.5 bg-yellow px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-black"
+          >
+            <span aria-hidden="true">⚠</span> DEV MODE -- Mock DFS data is active. No real DraftKings salaries.
+          </div>
+        )}
         <TopNavigation slateLabel={slateLabel} search={<GlobalSearch index={searchIndex} />} />
         <main className="min-w-0 flex-1 overflow-y-auto p-5">{children}</main>
       </div>

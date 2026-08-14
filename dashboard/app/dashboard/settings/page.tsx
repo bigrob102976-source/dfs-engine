@@ -1,10 +1,12 @@
 import Link from "next/link";
 
 import { EnvironmentSectionToggles } from "@/components/environment/EnvironmentSectionToggles";
+import { MockModeToggle } from "@/components/MockModeToggle";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
+import { getMockModeEnabled } from "@/lib/mockMode";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,11 @@ function formatTimestamp(iso: string | null): string {
  * for the documented, non-network-touching reason why. */
 export default async function SettingsPage() {
   const date = getTodayChicagoDate();
-  const [status, environmentStatus] = await Promise.all([getExternalProjectionsStatus(date), getGameEnvironmentStatus(date)]);
+  const [status, environmentStatus, mockModeEnabled] = await Promise.all([
+    getExternalProjectionsStatus(date),
+    getGameEnvironmentStatus(date),
+    getMockModeEnabled(),
+  ]);
 
   if ("error" in status) {
     return (
@@ -44,6 +50,15 @@ export default async function SettingsPage() {
         title="Settings"
         description="Provider configuration is read from server-side environment variables only -- nothing here can set or reveal a credential."
       />
+
+      <div className="mb-4 rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">DFS Salary Provider</h2>
+        <p className="mb-3 text-xs text-text-faint">
+          Priority: real uploaded DraftKings CSV → CSV-imported projection pool → Mock Mode (only if enabled below).
+          Mock is never used silently.
+        </p>
+        <MockModeToggle initialEnabled={mockModeEnabled} />
+      </div>
 
       <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">External Projections</h2>

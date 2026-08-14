@@ -4,7 +4,7 @@
 // pipeline; this one drives on-demand, user-configured lineup builds
 // against a player pool the user is actively browsing/locking/excluding.
 
-import type { SlateOption } from "../orchestrator/types";
+import type { ProviderSource, SlateOption } from "../orchestrator/types";
 import type { Lineup } from "../types";
 
 export type { SlateOption };
@@ -16,7 +16,7 @@ export interface SlateListResult {
   providerType: "mock" | "real" | null;
   isMock: boolean;
   isConnected: boolean;
-  source: "explicit" | "automatic_fallback" | null;
+  source: ProviderSource | null;
   slates: SlateOption[];
   slatesAvailable: number;
 }
@@ -65,7 +65,7 @@ export interface OptimizerPoolResult {
   slateName: string | null;
   providerName: string | null;
   isMock: boolean;
-  providerSource: "explicit" | "automatic_fallback" | null;
+  providerSource: ProviderSource | null;
   generatedAt: string;
   players: PoolPlayerRow[];
   activePlayers: number;

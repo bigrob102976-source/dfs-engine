@@ -2,11 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { DraftKingsCsvUpload } from "./DraftKingsCsvUpload";
+import { PrimaryButton, SecondaryButton } from "./ui/Button";
 import { ProviderStatusCard } from "./ProviderStatusCard";
 import { SlateSelector } from "./SlateSelector";
+import { getTodayChicagoDate } from "@/lib/currentDate";
 import type { ChangeReport, RunOutcome, RunState, RunSummary, StepStatus } from "@/lib/orchestrator/types";
 
 const POLL_INTERVAL_MS = 1500;
+
+/** Mirrors dfs/providers/config.py::NO_PROVIDER_CONFIGURED_MESSAGE
+ * exactly -- when a failed run's error is precisely this string (never
+ * merely the same outcome, e.g. an explicit misconfiguration also maps
+ * to "dfs_not_connected"), the panel shows the "Import CSV" /
+ * "Enable Mock Mode" choice instead of a plain error, per Milestone
+ * 19's VALIDATION requirement. */
+const NO_PROVIDER_CONFIGURED_MESSAGE = "No live DraftKings salary provider configured.";
 
 const STEP_STYLES: Record<StepStatus, { dot: string; text: string; label: string }> = {
   waiting: { dot: "bg-text-faint", text: "text-text-faint", label: "WAITING" },
@@ -21,10 +32,12 @@ const OUTCOME_MESSAGES: Partial<Record<RunOutcome, string>> = {
   mlb_data_failure: "MLB data failure -- the research package could not be built.",
   pitcher_agent_failure: "Pitcher Agent run failed.",
   batter_agent_failure: "Batter Agent run failed.",
-  // Unset DFS_SALARY_PROVIDER now falls back to the mock provider automatically
-  // (see dfs/providers/config.py) -- this outcome only fires when it's explicitly
-  // set to something invalid, so the message points at fixing/clearing it.
-  dfs_not_connected: "DFS SALARIES NOT CONNECTED -- DFS_SALARY_PROVIDER is set to an unrecognized value. Fix it, or unset it to use the automatic mock fallback.",
+  // Milestone 19: this generic fallback only renders for a genuine explicit
+  // misconfiguration (DFS_SALARY_PROVIDER set to an unrecognized value) --
+  // the far more common "nothing configured yet" case is caught separately
+  // below (run.error === NO_PROVIDER_CONFIGURED_MESSAGE) and shown with the
+  // Import CSV / Enable Mock Mode choice instead of this text.
+  dfs_not_connected: "DFS SALARIES NOT CONNECTED -- DFS_SALARY_PROVIDER is set to an unrecognized value.",
   dfs_unavailable: "DFS salary provider unavailable.",
   dfs_auth_failed: "DFS salary provider authentication failed.",
   dfs_no_slate: "DFS salary provider returned no slate for today.",
@@ -40,6 +53,27 @@ function stepLabel(run: RunState): string {
   return run.steps.find((s) => s.id === run.currentStepId)?.label ?? "";
 }
 
+/** Milestone 19: the Big Money Research Adjustment Layer is re-run
+ * best-effort on every refresh (see runner.ts::runExternalProjectionRefresh)
+ * -- "no baseline yet" (nothing imported under Settings -> External Data)
+ * is a normal state, not a failure, so it reads as a neutral "Not
+ * Imported" rather than an error. */
+function externalProjectionStatusLabel(summary: RunSummary): string {
+  switch (summary.externalProjectionStatus) {
+    case "ready":
+      return `READY (${summary.externalProjectionRecordCount ?? 0} players)`;
+    case "no_baseline":
+      return "Not Imported";
+    case "no_research":
+      return "Waiting on Research";
+    case "error":
+      return "Refresh Failed";
+    case "not_attempted":
+    default:
+      return "--";
+  }
+}
+
 /** The one-click "REFRESH TODAY'S SLATE" control: starts/monitors a
  * pregame pipeline run on the Node orchestrator (lib/orchestrator/) and
  * renders its live per-step status, DFS provider connectivity, a slate
@@ -51,6 +85,8 @@ export function RefreshPanel() {
   const [starting, setStarting] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showUpload, setShowUpload] = useState(false);
+  const [enablingMock, setEnablingMock] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Deliberately .then()-chained rather than async/await: an async function
@@ -103,6 +139,28 @@ export function RefreshPanel() {
     }
   }
 
+  async function handleEnableMockMode() {
+    setEnablingMock(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/settings/mock-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? "Failed to enable Mock Mode.");
+        return;
+      }
+      await handleRefresh();
+    } catch {
+      setError("Failed to enable Mock Mode.");
+    } finally {
+      setEnablingMock(false);
+    }
+  }
+
   async function handleSelectSlate(slateId: string) {
     setSelecting(true);
     setError(null);
@@ -141,6 +199,9 @@ export function RefreshPanel() {
         >
           {busy ? (run && isRunning ? `Running: ${stepLabel(run)}...` : "Starting...") : "Refresh Today's Slate"}
         </button>
+        <SecondaryButton type="button" onClick={() => setShowUpload((v) => !v)}>
+          {showUpload ? "Hide Upload" : "Upload DraftKings CSV"}
+        </SecondaryButton>
       </div>
 
       {error && <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{error}</div>}
@@ -167,11 +228,38 @@ export function RefreshPanel() {
 
       {isPaused && run?.slateOptions && <SlateSelector options={run.slateOptions} onSelect={handleSelectSlate} disabled={selecting} />}
 
-      {run?.status === "failed" && run.outcome && (
+      {run?.status === "failed" && run.outcome && run.error !== NO_PROVIDER_CONFIGURED_MESSAGE && (
         <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
           {OUTCOME_MESSAGES[run.outcome] ?? run.outcome}
           {run.error && <div className="mt-1 text-text-faint">{run.error}</div>}
         </div>
+      )}
+
+      {run?.status === "failed" && run.error === NO_PROVIDER_CONFIGURED_MESSAGE && (
+        <div className="rounded border border-yellow bg-bg-panel-raised p-3">
+          <div className="text-xs font-semibold text-yellow">{NO_PROVIDER_CONFIGURED_MESSAGE}</div>
+          <p className="mt-1 text-[11px] text-text-faint">
+            Upload today&apos;s real DraftKings salary CSV, or turn on Mock Mode for development/testing.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <PrimaryButton type="button" onClick={() => setShowUpload((v) => !v)}>
+              Import CSV
+            </PrimaryButton>
+            <SecondaryButton type="button" onClick={handleEnableMockMode} disabled={enablingMock}>
+              {enablingMock ? "Enabling..." : "Enable Mock Mode"}
+            </SecondaryButton>
+          </div>
+        </div>
+      )}
+
+      {showUpload && (
+        <DraftKingsCsvUpload
+          date={run?.slateDate ?? getTodayChicagoDate()}
+          onUploaded={() => {
+            setShowUpload(false);
+            handleRefresh();
+          }}
+        />
       )}
 
       {run?.status === "completed" && run.summary && <RunSummaryBlock summary={run.summary} />}
@@ -191,6 +279,7 @@ function RunSummaryBlock({ summary }: { summary: RunSummary }) {
     ["Salary Coverage", summary.salaryCoveragePercent != null ? `${summary.salaryCoveragePercent}%` : "--"],
     ["Position Coverage", summary.positionCoveragePercent != null ? `${summary.positionCoveragePercent}%` : "--"],
     ["Ownership", summary.ownershipReady ? "READY" : "--"],
+    ["External Projections", externalProjectionStatusLabel(summary)],
   ];
 
   return (

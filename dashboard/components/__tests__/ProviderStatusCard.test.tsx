@@ -24,8 +24,10 @@ function summary(overrides: Partial<RunSummary> = {}): RunSummary {
     lineupSetPaths: { projection: null, balanced: null, leverage: null },
     providerName: "mock_dev_provider",
     isMock: true,
-    providerSource: "automatic_fallback",
+    providerSource: "mock_explicit",
     selectedSlateId: "mock-main-2026-08-12",
+    externalProjectionStatus: "not_attempted",
+    externalProjectionRecordCount: null,
     ...overrides,
   };
 }

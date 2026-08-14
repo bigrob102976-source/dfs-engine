@@ -7,6 +7,13 @@
 
 export type PipelineStepId = "research" | "pitchers" | "batters" | "dfsSalaries" | "playerPool" | "ownership" | "optimizer";
 
+/** Milestone 19: how the DFS salary provider for a run was resolved --
+ * mirrors dfs/providers/config.py::get_configured_provider()'s `source`
+ * return value exactly (see that module's docstring for the full
+ * priority cascade). "explicit" | "automatic_fallback" (pre-M19) no
+ * longer exists as an automatic outcome -- mock is never used silently. */
+export type ProviderSource = "explicit" | "real_dk_csv" | "csv_import_pool" | "mock_explicit" | "unconfigured";
+
 export type StepStatus = "waiting" | "running" | "ready" | "failed" | "needs_input" | "skipped";
 
 export interface StepResult {
@@ -69,8 +76,17 @@ export interface RunSummary {
   lineupSetPaths: { projection: string | null; balanced: string | null; leverage: string | null };
   providerName: string | null;
   isMock: boolean;
-  providerSource: "explicit" | "automatic_fallback" | null;
+  providerSource: ProviderSource | null;
   selectedSlateId: string | null;
+  /** Milestone 19: best-effort refresh of the Big Money Research
+   * Adjustment Layer (external_projections/) against whatever baseline
+   * exists for this date, run right after Ownership. Not a tracked
+   * pipeline step -- a CSV-imported/provider baseline is optional, so
+   * "no baseline yet" is a normal, non-failing state (see
+   * scripts/run_projection_adjustment.py's "no_baseline"/"no_research"
+   * statuses), not a run failure. */
+  externalProjectionStatus: "ready" | "no_baseline" | "no_research" | "not_attempted" | "error";
+  externalProjectionRecordCount: number | null;
 }
 
 export interface ExposureChange {
