@@ -1,5 +1,6 @@
 import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
+import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { buildPitcherRows } from "@/lib/normalize";
@@ -19,12 +20,10 @@ export default async function TopPitchersPage(props: PageProps<"/dashboard/pitch
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-text">Top Pitchers</h1>
-      {pitcherSnapshot && (
-        <p className="mb-4 text-xs text-text-faint">
-          {rows.length} probable starters, from {date}&apos;s pitcher snapshot.
-        </p>
-      )}
+      <PageHeader
+        title="Top Pitchers"
+        description={pitcherSnapshot ? `${rows.length} probable starters, from ${date}'s pitcher snapshot.` : undefined}
+      />
       {pitcherSnapshot ? (
         <PlayerTable rows={rows} variant="pitcher" initialSortKey="projection" highlightId={highlightId} />
       ) : (

@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { qualityReportToRows, ratioHealth, type CompletenessRow, type HealthColor } from "@/lib/health";
 import { loadLatestBatterSnapshot, loadLatestDkMatchReport, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
@@ -52,14 +53,18 @@ export default function ModelHealthPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-text">Model Health</h1>
-      <p className="mb-5 text-xs text-text-faint">
-        {date ? `Completeness for slate ${date}, read directly from the Research Quality Report already computed by the Python pipeline.` : "No slate loaded yet."}
-      </p>
+      <PageHeader
+        title="Model Health"
+        description={
+          date
+            ? `Completeness for slate ${date}, read directly from the Research Quality Report already computed by the Python pipeline.`
+            : "No slate loaded yet."
+        }
+      />
 
       {date && (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          <div className="rounded-lg border border-border bg-bg-panel">
+          <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel shadow-[var(--shadow-card)]">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-faint">
               Pitchers ({pitcherTotal})
             </div>
@@ -70,7 +75,7 @@ export default function ModelHealthPage() {
             )}
           </div>
 
-          <div className="rounded-lg border border-border bg-bg-panel">
+          <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel shadow-[var(--shadow-card)]">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-faint">
               Hitters ({hitterTotal})
             </div>
@@ -81,7 +86,7 @@ export default function ModelHealthPage() {
             )}
           </div>
 
-          <div className="rounded-lg border border-border bg-bg-panel">
+          <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel shadow-[var(--shadow-card)]">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-faint">
               Other Coverage
             </div>
@@ -104,7 +109,7 @@ export default function ModelHealthPage() {
             />
           </div>
 
-          <div className="rounded-lg border border-border bg-bg-panel">
+          <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel shadow-[var(--shadow-card)]">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-faint">
               Not Yet Built
             </div>

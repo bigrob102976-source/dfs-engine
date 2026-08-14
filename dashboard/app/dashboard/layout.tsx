@@ -1,5 +1,6 @@
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { Sidebar } from "@/components/Sidebar";
+import { TopNavigation } from "@/components/TopNavigation";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import {
   latestKnownSlateDate,
@@ -37,17 +38,13 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
     searchIndex = buildSearchIndex({ pitcherRows, hitterRows, lineupSet, pitcherEvaluation });
   }
 
+  const slateLabel = searchDate && searchDate !== today ? `Today · ${today} (search: ${searchDate})` : `Today · ${today}`;
+
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden bg-bg">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border bg-bg-panel px-4 py-2.5">
-          <div className="text-xs text-text-faint">
-            Today: <span className="text-text-muted">{today}</span>
-            {searchDate && searchDate !== today && <span className="ml-2 text-text-faint">(search index: {searchDate})</span>}
-          </div>
-          <GlobalSearch index={searchIndex} />
-        </header>
+        <TopNavigation slateLabel={slateLabel} search={<GlobalSearch index={searchIndex} />} />
         <main className="min-w-0 flex-1 overflow-y-auto p-5">{children}</main>
       </div>
     </div>

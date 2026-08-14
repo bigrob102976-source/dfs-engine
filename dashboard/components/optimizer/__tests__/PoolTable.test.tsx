@@ -205,7 +205,7 @@ describe("PoolTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schwarber" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Projection Comparison")).toBeInTheDocument();
-    expect(screen.getByText("positive recent hard-hit trend")).toBeInTheDocument();
+    expect(screen.getByText(/positive recent hard-hit trend/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

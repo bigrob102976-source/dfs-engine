@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { SearchInput } from "@/components/ui/SearchInput";
 import { filterSearchIndex, type SearchIndexEntry } from "@/lib/search";
 
 function Flag({ on, label }: { on: boolean; label: string }) {
@@ -19,8 +20,8 @@ export function GlobalSearch({ index }: { index: SearchIndexEntry[] }) {
   const results = useMemo(() => filterSearchIndex(index, query).slice(0, 20), [index, query]);
 
   return (
-    <div className="relative w-80">
-      <input
+    <div className="relative w-72">
+      <SearchInput
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -29,10 +30,11 @@ export function GlobalSearch({ index }: { index: SearchIndexEntry[] }) {
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder="Search any player..."
-        className="w-full rounded border border-border bg-bg-panel-raised px-3 py-1.5 text-sm text-text outline-none placeholder:text-text-faint focus:border-accent"
+        aria-label="Search any player"
+        className="w-full"
       />
       {open && query.trim() && (
-        <div className="absolute z-20 mt-1 max-h-96 w-full overflow-y-auto rounded border border-border bg-bg-panel shadow-xl">
+        <div className="absolute z-50 mt-1 max-h-96 w-full overflow-y-auto rounded-[var(--radius-control)] border border-border bg-bg-panel shadow-[var(--shadow-popover)]">
           {results.length === 0 ? (
             <div className="p-3 text-xs text-text-faint">No players match &quot;{query}&quot;.</div>
           ) : (

@@ -1,4 +1,6 @@
 import { SimpleBarChart } from "@/components/SimpleBarChart";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/Header";
 import { buildHistorySeries } from "@/lib/history";
 
 export const dynamic = "force-dynamic";
@@ -8,15 +10,10 @@ export default function HistoryPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-text">History</h1>
-      <p className="mb-4 text-xs text-text-faint">
-        {series.length > 0 ? `${series.length} slate(s) with saved artifacts.` : "No artifacts found yet."}
-      </p>
+      <PageHeader title="History" description={series.length > 0 ? `${series.length} slate(s) with saved artifacts.` : undefined} />
 
       {series.length === 0 ? (
-        <div className="rounded border border-border bg-bg-panel p-6 text-sm text-text-faint">
-          Nothing to chart yet -- build a research package for at least one slate first.
-        </div>
+        <EmptyState icon="📉" title="Nothing to chart yet" description="Build a research package for at least one slate first." />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <SimpleBarChart title="Pitcher MAE by Slate" points={series.map((p) => ({ label: p.date, value: p.pitcherMae }))} />
@@ -43,7 +40,7 @@ export default function HistoryPage() {
         </div>
       )}
 
-      <div className="mt-4 rounded-lg border border-border bg-bg-panel p-4 text-xs text-text-faint">
+      <div className="mt-4 rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 text-xs text-text-faint shadow-[var(--shadow-card)]">
         <span className="font-semibold text-text-muted">Optimizer Runtime:</span> not tracked yet -- no lineup-set
         artifact currently records solve duration. Would require adding a timing field to
         optimizer/persistence.py&apos;s saved document rather than being invented here.

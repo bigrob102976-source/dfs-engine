@@ -1,4 +1,5 @@
 import { MissingDataState } from "@/components/MissingDataState";
+import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { buildHitterRows } from "@/lib/normalize";
@@ -20,10 +21,10 @@ export default function StacksPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-text">Stacks</h1>
-      <p className="mb-4 text-xs text-text-faint">
-        Existing per-team data summarized -- no simulation. Team Popularity requires an ownership snapshot to be loaded.
-      </p>
+      <PageHeader
+        title="Stacks"
+        description="Existing per-team data summarized -- no simulation. Team Popularity requires an ownership snapshot to be loaded."
+      />
 
       {!batterSnapshot ? (
         <MissingDataState
@@ -35,7 +36,7 @@ export default function StacksPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {stacks.map((s) => (
-            <div key={s.team} className="rounded-lg border border-border bg-bg-panel p-4">
+            <div key={s.team} className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold text-text">{s.team}</span>
                 <span className="text-[11px] text-text-faint">{s.confirmedHitterCount} confirmed hitters</span>

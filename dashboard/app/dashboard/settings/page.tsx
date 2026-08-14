@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 
@@ -22,8 +23,8 @@ export default async function SettingsPage() {
   if ("error" in status) {
     return (
       <div>
-        <h1 className="mb-4 text-lg font-semibold text-text">Settings</h1>
-        <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{status.error}</div>
+        <PageHeader title="Settings" />
+        <div className="rounded-[var(--radius-control)] border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{status.error}</div>
       </div>
     );
   }
@@ -35,10 +36,12 @@ export default async function SettingsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-text">Settings</h1>
-      <p className="mb-4 text-xs text-text-faint">Provider configuration is read from server-side environment variables only -- nothing here can set or reveal a credential.</p>
+      <PageHeader
+        title="Settings"
+        description="Provider configuration is read from server-side environment variables only -- nothing here can set or reveal a credential."
+      />
 
-      <div className="rounded-lg border border-border bg-bg-panel p-4">
+      <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">External Projections</h2>
 
         <div className="rounded border border-border-subtle bg-bg-panel-raised p-4">

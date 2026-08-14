@@ -1,20 +1,96 @@
 @import "tailwindcss";
 
+/* ============================================================
+   BIG MONEY DFS design system (Milestone DS1)
+
+   Dark is the unconditional default (spec: "Dark Mode (Default)").
+   ThemeProvider (components/theme/ThemeProvider.tsx) resolves the
+   user's dark/light/system preference to a concrete "dark" | "light"
+   value and stamps it as `data-theme` on <html> -- this stylesheet
+   never reads prefers-color-scheme directly, since "system" is only
+   one of three explicit choices here, not the implicit default.
+
+   Every existing dashboard component already renders with Tailwind
+   utility classes sourced from these tokens (bg-bg-panel, text-muted,
+   border-border, text-accent, bg-green/20, etc.) -- retheming the
+   whole app is almost entirely a matter of changing VALUES here, not
+   rewriting component markup. New semantic tokens (gold, ai/purple,
+   shadow, radius) extend the existing set without renaming anything
+   already in use.
+   ============================================================ */
+
 :root {
-  --bg: #0a0a0c;
-  --bg-panel: #131316;
-  --bg-panel-raised: #1a1a1f;
-  --border: #26262c;
-  --border-subtle: #1c1c21;
-  --text: #e4e4e7;
-  --text-muted: #8b8b96;
-  --text-faint: #5c5c66;
-  --accent: #4f8cff;
-  --accent-dim: #2c4a80;
-  --green: #34c77b;
-  --yellow: #e0b73f;
-  --red: #e0554f;
+  /* Surfaces */
+  --bg: #09090b;
+  --bg-panel: #111217; /* Card */
+  --bg-panel-raised: #181a20; /* Secondary card */
+  --border: #2b313c;
+  --border-subtle: #1c2028;
+
+  /* Text */
+  --text: #f8fafc;
+  --text-muted: #9ca3af;
+  --text-faint: #6b7280;
+
+  /* Brand gold -- logo / brand / premium highlights / badges ONLY */
+  --gold: #d4a72c;
+  --gold-hover: #f0c75e;
+
+  /* Primary action -- buttons / links / selected nav / focus ONLY */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-dim: #1e3a5f; /* selected-nav / subtle active background */
+
+  /* Status */
+  --green: #22c55e; /* success / positive */
+  --yellow: #f59e0b; /* warning / neutral */
+  --red: #ef4444; /* danger / negative */
+
+  /* AI accent -- AI insights ONLY */
+  --purple: #8b5cf6;
+
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* Elevation -- soft shadows instead of harsh borders for raised surfaces */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -8px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 4px 6px rgba(0, 0, 0, 0.3), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+
+  /* Radius */
+  --radius-card: 16px;
+  --radius-control: 8px;
+
+  /* Motion -- subtle only */
+  --duration-fast: 150ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-panel: #ffffff;
+  --bg-panel-raised: #f1f5f9;
+  --border: #e5e7eb;
+  --border-subtle: #eef1f5;
+
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-faint: #94a3b8;
+
+  --gold: #b8901f;
+  --gold-hover: #d4a72c;
+
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-dim: #dbeafe;
+
+  --green: #16a34a;
+  --yellow: #d97706;
+  --red: #dc2626;
+
+  --purple: #7c3aed;
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px -8px rgba(15, 23, 42, 0.12);
+  --shadow-popover: 0 4px 6px rgba(15, 23, 42, 0.06), 0 16px 32px -8px rgba(15, 23, 42, 0.16);
 }
 
 @theme inline {
@@ -26,12 +102,19 @@
   --color-text: var(--text);
   --color-text-muted: var(--text-muted);
   --color-text-faint: var(--text-faint);
+  --color-gold: var(--gold);
+  --color-gold-hover: var(--gold-hover);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-dim: var(--accent-dim);
   --color-green: var(--green);
   --color-yellow: var(--yellow);
   --color-red: var(--red);
+  --color-purple: var(--purple);
   --font-mono: var(--mono);
+  --font-sans: var(--sans);
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
 }
 
 * {
@@ -43,13 +126,23 @@ body {
   height: 100%;
 }
 
+html {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--sans);
   font-size: 13px;
   line-height: 1.4;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 table {
@@ -83,4 +176,43 @@ td {
 
 a {
   color: inherit;
+}
+
+/* Subtle-only motion (spec: hover/fade/slide, 150ms, nothing excessive) --
+   used by Drawer/Modal and anything else that needs an entrance. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Visible focus states everywhere (accessibility) -- primary blue ring,
+   never suppressed. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { PrimaryButton } from "@/components/ui/Button";
 import type { PipelineStepId, RunState, StepStatus } from "@/lib/orchestrator/types";
 
 const POLL_INTERVAL_MS = 1500;
@@ -118,7 +119,7 @@ export function MissingDataState({
 
   if (isActive) {
     return (
-      <div className="rounded border border-border bg-bg-panel p-6 text-sm">
+      <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-6 text-sm shadow-[var(--shadow-card)]">
         <div className="mb-3 font-medium text-text">Generating...</div>
         <div className="flex flex-col gap-2">
           {relevantSteps.map((step) => {
@@ -142,37 +143,30 @@ export function MissingDataState({
 
   if (run?.status === "failed") {
     return (
-      <div className="rounded border border-red bg-bg-panel p-6 text-sm">
+      <div className="rounded-[var(--radius-card)] border border-red bg-bg-panel p-6 text-sm shadow-[var(--shadow-card)]">
         <div className="mb-1 font-medium text-text">{title}</div>
         <p className="mb-3 text-text-faint">{description}</p>
-        <div className="mb-3 rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
+        <div className="mb-3 rounded-[var(--radius-control)] border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
           {relevantSteps.find((s) => s.status === "failed")?.message ?? run.error ?? "The last attempt failed."}
         </div>
-        <button
-          type="button"
-          onClick={handleClick}
-          disabled={starting}
-          className="rounded border border-accent bg-accent-dim px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <PrimaryButton onClick={handleClick} disabled={starting} className="uppercase tracking-wide">
           Try Again
-        </button>
+        </PrimaryButton>
       </div>
     );
   }
 
   return (
-    <div className="rounded border border-border bg-bg-panel p-6 text-center text-sm">
+    <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-bg-panel p-8 text-center text-sm shadow-[var(--shadow-card)]">
+      <div className="mb-2 text-2xl" aria-hidden="true">
+        📊
+      </div>
       <div className="mb-1 font-medium text-text">{title}</div>
       <p className="mb-4 text-text-faint">{description}</p>
       {error && <p className="mb-3 text-xs text-red">{error}</p>}
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={starting}
-        className="rounded border border-accent bg-accent-dim px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <PrimaryButton onClick={handleClick} disabled={starting} className="uppercase tracking-wide">
         {starting ? "Starting..." : primaryActionLabel}
-      </button>
+      </PrimaryButton>
     </div>
   );
 }

@@ -127,7 +127,7 @@ export function PoolTable({
         <span className="text-[11px] text-text-faint">{sorted.length} players</span>
       </div>
 
-      <div className="max-h-[560px] overflow-auto rounded border border-border">
+      <div className="max-h-[560px] overflow-auto rounded-[var(--radius-control)] border border-border">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-bg-panel-raised">
             <tr>
@@ -135,12 +135,16 @@ export function PoolTable({
                 <th
                   key={col.key}
                   onClick={col.sortKey ? () => handleSort(col.sortKey!) : undefined}
-                  className={`border-b border-border px-2 py-1.5 text-[11px] uppercase tracking-wide text-text-faint ${
+                  className={`border-b border-border p-0 text-[11px] uppercase tracking-wide text-text-faint ${
                     col.align === "right" ? "text-right" : "text-left"
                   } ${col.sortKey ? "cursor-pointer select-none hover:text-text-muted" : ""}`}
                 >
-                  {col.label}
-                  {col.sortKey === sortKey ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  {/* Resizable column header (CSS `resize`, no library): drag
+                      the bottom-right handle to widen/narrow a column. */}
+                  <div className="min-w-[3rem] resize-x overflow-hidden whitespace-nowrap px-2 py-1.5">
+                    {col.label}
+                    {col.sortKey === sortKey ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </div>
                 </th>
               ))}
             </tr>

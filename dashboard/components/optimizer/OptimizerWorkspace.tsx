@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { MissingDataState } from "@/components/MissingDataState";
+import { PrimaryButton } from "@/components/ui/Button";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
 import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
@@ -316,7 +317,7 @@ export function OptimizerWorkspace() {
   return (
     <div className="flex flex-col gap-4">
       {/* TOP CONTROL BAR */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-panel p-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-border bg-bg-panel p-3 shadow-[var(--shadow-card)]">
         <div className="flex items-center gap-1">
           <span className="rounded bg-accent-dim px-2 py-1 text-xs font-semibold text-text">DraftKings</span>
           <span className="cursor-not-allowed rounded bg-bg-panel-raised px-2 py-1 text-xs text-text-faint" title="FanDuel support is not implemented in this milestone">
@@ -370,19 +371,14 @@ export function OptimizerWorkspace() {
             </select>
           </label>
 
-          <button
-            type="button"
-            onClick={handleBuild}
-            disabled={!pool || building || validationErrors.length > 0}
-            className="rounded border border-accent bg-accent-dim px-4 py-2 text-xs font-semibold uppercase tracking-wide text-text disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <PrimaryButton onClick={handleBuild} disabled={!pool || building || validationErrors.length > 0} className="uppercase tracking-wide">
             {building ? "Solving..." : "Build Lineups"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
 
       {/* Milestone 17: PROJECTION SOURCE SELECTOR */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-panel p-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-border bg-bg-panel p-3 shadow-[var(--shadow-card)]">
         <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Projection Source</span>
         <div className="flex gap-1" role="group" aria-label="Projection Source">
           {(
@@ -428,7 +424,7 @@ export function OptimizerWorkspace() {
       )}
 
       {pool && (
-        <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-bg-panel p-3 text-xs md:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 rounded-[var(--radius-card)] border border-border bg-bg-panel p-3 text-xs shadow-[var(--shadow-card)] md:grid-cols-4 lg:grid-cols-7">
           <StatusStat label="Active Players" value={pool.activePlayers} />
           <StatusStat label="Pitchers" value={pool.pitcherCount} />
           <StatusStat label="Hitters" value={pool.hitterCount} />

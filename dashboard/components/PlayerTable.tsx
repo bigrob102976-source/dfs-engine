@@ -125,9 +125,9 @@ export function PlayerTable({
         </div>
       )}
 
-      <div className="overflow-x-auto rounded border border-border">
+      <div className="max-h-[640px] overflow-auto rounded-[var(--radius-control)] border border-border shadow-[var(--shadow-card)]">
         <table className="text-xs">
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr className="border-b border-border bg-bg-panel-raised">
               <th className="px-2 py-1.5 text-text-faint">#</th>
               {resolvedColumns.map((col) => (
