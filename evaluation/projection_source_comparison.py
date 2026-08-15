@@ -1,15 +1,15 @@
-"""Foundation for comparing multiple projection SOURCES (external
-baseline / Big Money independent / Big Money adjusted) against actual
-results, once a slate has both actual results AND external/adjusted
+"""Pure metric math for comparing multiple projection SOURCES (external
+baseline / Big Money independent / Big Money adjusted / AI Projection)
+against actual results, once a slate has both actual results AND those
 projections recorded for it.
 
-Milestone 17 only builds this interface -- it is not wired into any
-live evaluation script yet, and no actual comparison has been run
-against real postgame data (no slate in this environment yet has both
-external projections and actual results available together). Do not
-backfill it with current-day stats: like evaluation/pitcher_evaluator.py,
-any real use of this module must only ever compare a PREGAME snapshot
-against POSTGAME results collected after that snapshot was taken.
+Wired into a live script by scripts/run_projection_source_comparison.py
+and evaluation/projection_source_loader.py (which reads the real
+snapshots and builds the {player_id: value} maps this module expects).
+This module itself stays IO-free and source-agnostic on purpose. Like
+evaluation/pitcher_evaluator.py, any real use of this module must only
+ever compare a PREGAME snapshot against POSTGAME results collected
+after that snapshot was taken.
 
 Reuses the exact MAE/RMSE/Pearson-correlation math
 evaluation/pitcher_evaluator.py already uses, generalized to accept

@@ -6,6 +6,7 @@ import { CommandCenterHeader } from "@/components/command-center/CommandCenterHe
 import { QuickActionsPanel } from "@/components/command-center/QuickActionsPanel";
 import { SlateKpiGrid } from "@/components/command-center/SlateKpiGrid";
 import { SlateRankingsColumn } from "@/components/command-center/SlateRankingsColumn";
+import { AiProjectionPerformanceCard } from "@/components/AiProjectionPerformanceCard";
 import { ExternalProjectionsStatusCard } from "@/components/ExternalProjectionsStatusCard";
 import { RefreshPanel } from "@/components/RefreshPanel";
 import { SlateReadiness } from "@/components/SlateReadiness";
@@ -38,8 +39,9 @@ import {
 import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
+import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
 import { buildStackSummaries } from "@/lib/stacks";
-import { buildYesterdaySummary } from "@/lib/yesterday";
+import { buildYesterdaySummary, findLatestEvaluatedDate } from "@/lib/yesterday";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +107,8 @@ export default function TodaysSlatePage() {
   if (batterSnapshot && ownership === null) alerts.push("Ownership has not been projected yet for this slate.");
 
   const yesterday = buildYesterdaySummary();
+  const evaluatedDate = findLatestEvaluatedDate();
+  const projectionComparison = evaluatedDate ? loadLatestProjectionSourceComparison(evaluatedDate) : null;
 
   const lastUpdated =
     statuses
@@ -180,7 +184,7 @@ export default function TodaysSlatePage() {
       </div>
 
       <SectionHeader title="Model Health & Pipeline" />
-      <div className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <DataCard title="Model Health" action={<Link href="/dashboard/health" className="text-[11px] text-accent hover:text-accent-hover">Full report →</Link>}>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
@@ -211,6 +215,7 @@ export default function TodaysSlatePage() {
             <p className="text-xs text-text-faint">No evaluated slate yet.</p>
           )}
         </DataCard>
+        <AiProjectionPerformanceCard doc={projectionComparison} />
       </div>
 
       <SlateReadiness readiness={readiness} />

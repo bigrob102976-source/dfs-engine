@@ -1,6 +1,11 @@
 import { MetricCard } from "@/components/ui/Card";
-import { PageHeader } from "@/components/ui/Header";
+import { PageHeader, SectionHeader } from "@/components/ui/Header";
+import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
 import { buildYesterdaySummary } from "@/lib/yesterday";
+
+function fmt(v: number | null, digits = 2): string {
+  return v === null ? "n/a" : v.toFixed(digits);
+}
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +43,7 @@ function MissCard({ title, record }: { title: string; record: Record<string, unk
 
 export default function YesterdayPage() {
   const s = buildYesterdaySummary();
+  const projectionComparison = s.date ? loadLatestProjectionSourceComparison(s.date) : null;
 
   if (!s.date) {
     return (
@@ -70,6 +76,51 @@ export default function YesterdayPage() {
         <MissCard title="Best Leverage Call" record={s.bestLeverageCall} />
         <MissCard title="Worst Chalk Miss" record={s.worstChalkMiss} />
       </div>
+
+      {projectionComparison && projectionComparison.metrics.length > 0 && (
+        <div className="mt-6">
+          <SectionHeader title="Projection Source Performance" />
+          <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
+            <table className="w-full min-w-[560px] text-xs">
+              <thead>
+                <tr className="text-left text-text-faint">
+                  <th className="pb-2 font-medium">Source</th>
+                  <th className="pb-2 text-right font-medium">N</th>
+                  <th className="pb-2 text-right font-medium">MAE</th>
+                  <th className="pb-2 text-right font-medium">RMSE</th>
+                  <th className="pb-2 text-right font-medium">Corr</th>
+                  <th className="pb-2 text-right font-medium">Rank Corr</th>
+                  <th className="pb-2 text-right font-medium">Top 5</th>
+                  <th className="pb-2 text-right font-medium">Top 10</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectionComparison.metrics.map((m) => (
+                  <tr key={m.source} className="border-t border-border-subtle">
+                    <td className={`py-1.5 capitalize ${m.source === "ai" ? "font-semibold text-purple" : "text-text"}`}>{m.source}</td>
+                    <td className="py-1.5 text-right text-text-muted">{m.n}</td>
+                    <td className={`py-1.5 text-right font-semibold ${m.source === "ai" ? "text-purple" : "text-text"}`}>{fmt(m.mae)}</td>
+                    <td className="py-1.5 text-right text-text-muted">{fmt(m.rmse)}</td>
+                    <td className="py-1.5 text-right text-text-muted">{fmt(m.correlation, 3)}</td>
+                    <td className="py-1.5 text-right text-text-muted">{fmt(m.rank_correlation, 3)}</td>
+                    <td className="py-1.5 text-right text-text-muted">{m.top5_hit_rate !== null ? `${Math.round(m.top5_hit_rate * 100)}%` : "n/a"}</td>
+                    <td className="py-1.5 text-right text-text-muted">{m.top10_hit_rate !== null ? `${Math.round(m.top10_hit_rate * 100)}%` : "n/a"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {projectionComparison.ai_vs_independent_mae_improvement_percent !== null && (
+            <p className="mt-2 text-xs text-text-faint">
+              AI vs Independent MAE improvement:{" "}
+              <span className={`font-semibold ${projectionComparison.ai_vs_independent_mae_improvement_percent >= 0 ? "text-green" : "text-red"}`}>
+                {projectionComparison.ai_vs_independent_mae_improvement_percent >= 0 ? "+" : ""}
+                {projectionComparison.ai_vs_independent_mae_improvement_percent.toFixed(1)}%
+              </span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

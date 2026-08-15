@@ -121,6 +121,26 @@ function seedAiProjectionSnapshot() {
   });
 }
 
+function seedProjectionSourceComparison() {
+  writeJson(`evaluations/${DATE}/pitcher_evaluation_20260814T180000.json`, {
+    slate_date: DATE, model_version: "0.6.0", generated_at: `${DATE}T18:00:00Z`, snapshot_path: null,
+    pitcher_count_predicted: 1,
+    slate_metrics: { pitchers_evaluated: 1, mae: 7.54, rmse: 9.1, projection_correlation: 0.4, overall_score_correlation: 0.3 },
+    top5_hit_rate: 0.6, top10_hit_rate: 0.6, best_calls: [], worst_calls: [],
+    biggest_positive_surprises: [], biggest_busts: [], tag_performance: [], records: [],
+  });
+  writeJson(`evaluations/${DATE}/projection_source_comparison_20260814T190000.json`, {
+    slate_date: DATE, generated_at: `${DATE}T19:00:00+00:00`, actual_result_count: 1,
+    sources_present: ["independent", "external", "ai"],
+    metrics: [
+      { source: "independent", n: 1, mae: 7.54, rmse: 9.1, correlation: 0.4, rank_correlation: 0.42, top5_hit_rate: 0.6, top10_hit_rate: 0.6 },
+      { source: "external", n: 1, mae: 7.01, rmse: 8.8, correlation: 0.45, rank_correlation: 0.44, top5_hit_rate: 0.6, top10_hit_rate: 0.7 },
+      { source: "ai", n: 1, mae: 6.82, rmse: 8.5, correlation: 0.47, rank_correlation: 0.46, top5_hit_rate: 0.8, top10_hit_rate: 0.7 },
+    ],
+    ai_vs_independent_mae_improvement_percent: 9.5,
+  });
+}
+
 describe("TodaysSlatePage (AI Slate Command Center)", () => {
   it("shows a clean empty-data state with no raw script path leaking, when nothing exists yet", async () => {
     const TodaysSlatePage = (await import("../page")).default;
@@ -190,5 +210,30 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
     expect(screen.getByText("Top AI Players")).toBeInTheDocument();
     expect(screen.getByText("Top AI Pitchers")).toBeInTheDocument();
     expect(screen.getByText("Top AI Stacks")).toBeInTheDocument();
+  });
+
+  it("renders the AI Projection Performance card from a real projection_source_comparison snapshot", async () => {
+    seedProjectionSourceComparison();
+
+    const TodaysSlatePage = (await import("../page")).default;
+    const jsx = await TodaysSlatePage();
+    render(jsx);
+
+    expect(screen.getByText("AI Projection Performance")).toBeInTheDocument();
+    const headline = screen.getByText("Overall MAE").parentElement!;
+    expect(headline.textContent).toContain("6.82");
+    expect(screen.getByText("+9.5%")).toBeInTheDocument();
+  });
+
+  it("shows a not-generated message for AI Projection Performance when nothing has been evaluated", async () => {
+    const TodaysSlatePage = (await import("../page")).default;
+    const jsx = await TodaysSlatePage();
+    render(jsx);
+
+    // "Recent Accuracy" shares the exact same empty-state phrasing, so
+    // this text is intentionally duplicated on the page -- assert
+    // presence, not uniqueness.
+    expect(screen.getByText("AI Projection Performance")).toBeInTheDocument();
+    expect(screen.getAllByText("No evaluated slate yet.").length).toBeGreaterThanOrEqual(1);
   });
 });
