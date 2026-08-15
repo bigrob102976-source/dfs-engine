@@ -1,19 +1,37 @@
 import Link from "next/link";
 
+import { AiSlateSummaryCard } from "@/components/command-center/AiSlateSummaryCard";
+import { BottomInsights } from "@/components/command-center/BottomInsights";
+import { CommandCenterHeader } from "@/components/command-center/CommandCenterHeader";
+import { QuickActionsPanel } from "@/components/command-center/QuickActionsPanel";
+import { SlateKpiGrid } from "@/components/command-center/SlateKpiGrid";
+import { SlateRankingsColumn } from "@/components/command-center/SlateRankingsColumn";
 import { ExternalProjectionsStatusCard } from "@/components/ExternalProjectionsStatusCard";
 import { RefreshPanel } from "@/components/RefreshPanel";
 import { SlateReadiness } from "@/components/SlateReadiness";
 import { StatusCard } from "@/components/StatusCard";
-import { DataCard, MetricCard } from "@/components/ui/Card";
-import { PageHeader, SectionHeader } from "@/components/ui/Header";
+import { DataCard } from "@/components/ui/Card";
+import { SectionHeader } from "@/components/ui/Header";
+import {
+  buildGameRankings,
+  buildLineMovementFeed,
+  buildSlateAiSummary,
+  buildSlateKpis,
+  buildUpcomingLockTimes,
+} from "@/lib/commandCenter";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
-import { loadLatestBatterSnapshot, loadLatestDkMatchReport, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
+import {
+  loadLatestBatterSnapshot,
+  loadLatestDkMatchReport,
+  loadLatestOwnershipSnapshot,
+  loadLatestPitcherSnapshot,
+  loadLatestProviderSlate,
+} from "@/lib/loaders";
 import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { buildStackSummaries } from "@/lib/stacks";
-import { buildVegasSummaryStats } from "@/lib/vegasIntelligence";
 import { buildYesterdaySummary } from "@/lib/yesterday";
 
 export const dynamic = "force-dynamic";
@@ -22,43 +40,14 @@ function fmt(v: number | null, digits = 1): string {
   return v === null ? "--" : v.toFixed(digits);
 }
 
-function StatusTile({ label, ready }: { label: string; ready: boolean }) {
-  return (
-    <MetricCard
-      label={label}
-      value={ready ? "READY" : "MISSING"}
-      tone={ready ? "positive" : "negative"}
-    />
-  );
-}
-
-function RankedList({ rows, unit = "" }: { rows: Array<{ id: string; name: string; team: string; projection: number | null }>; unit?: string }) {
-  if (rows.length === 0) return <p className="text-xs text-text-faint">No data yet.</p>;
-  return (
-    <ul className="flex flex-col gap-1.5">
-      {rows.map((r, i) => (
-        <li key={r.id} className="flex items-center justify-between gap-2 text-xs">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="w-4 shrink-0 text-text-faint">{i + 1}</span>
-            <span className="truncate text-text">{r.name}</span>
-            <span className="shrink-0 text-text-faint">{r.team}</span>
-          </span>
-          <span className="shrink-0 font-semibold text-text">
-            {fmt(r.projection)}
-            {unit}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Today's Slate is always the current America/Chicago date -- never the
- * newest artifact folder found on disk (that's what /dashboard/history
- * and /dashboard/yesterday are for). Three-row layout: top-line
- * status/counts, then research highlights, then health/accuracy/pipeline
- * -- every number here is read directly from already-computed artifacts,
- * nothing is recalculated on this page. */
+/** AI Slate Command Center (redesign of /dashboard). Combines existing
+ * pages/data -- Game Environment (Vegas/Weather/Bullpen/Park), Pitcher
+ * /Batter Agent, Ownership, Stacks -- into one flagship view. Every
+ * number traces to an already-built snapshot (see
+ * lib/commandCenter.ts); nothing here recomputes a projection, score,
+ * or ownership value, and the existing operational widgets (RefreshPanel,
+ * SlateReadiness, Artifact Detail, External Projections status) remain
+ * on this same page, unchanged, further down. */
 export default function TodaysSlatePage() {
   const date = getTodayChicagoDate();
   const summary = buildSlateSummary(date);
@@ -69,16 +58,25 @@ export default function TodaysSlatePage() {
   const batterSnapshot = loadLatestBatterSnapshot(date).data;
   const ownership = loadLatestOwnershipSnapshot(date).data;
   const environmentReport = loadLatestEnvironmentReport(date);
-  const vegasStats = environmentReport && environmentReport.games.length > 0 ? buildVegasSummaryStats(environmentReport) : null;
   const matchReport = loadLatestDkMatchReport(date).data;
+  const providerSlate = loadLatestProviderSlate(date).data;
 
   const pitcherRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null);
   const hitterRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
-  const topPitchers = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 5);
-  const topHitters = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 5);
-  const topStacks = buildStackSummaries(hitterRows, ownership?.team_popularity ?? {})
-    .sort((a, b) => (b.teamPopularityScore ?? b.averageProjection ?? 0) - (a.teamPopularityScore ?? a.averageProjection ?? 0))
-    .slice(0, 3);
+  const stacks = buildStackSummaries(hitterRows, ownership?.team_popularity ?? {});
+
+  const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
+  const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
+  const highestLeverage10 = [...pitcherRows, ...hitterRows]
+    .filter((r) => r.leverage !== null)
+    .sort((a, b) => (b.leverage ?? 0) - (a.leverage ?? 0))
+    .slice(0, 10);
+
+  const kpis = buildSlateKpis({ report: environmentReport, ownership, pitcherRows, stacks });
+  const rankings = buildGameRankings(environmentReport, ownership);
+  const aiSummaryBullets = buildSlateAiSummary({ report: environmentReport, ownership, pitcherRows, hitterRows, stacks });
+  const movement = buildLineMovementFeed(environmentReport);
+  const lockTimes = buildUpcomingLockTimes(environmentReport);
 
   const playerCount = (pitcherSnapshot?.pitcher_count ?? 0) + (batterSnapshot?.hitter_count ?? 0);
   const salaryCoverage = typeof matchReport?.salary_coverage_percent === "number" ? (matchReport.salary_coverage_percent as number) : null;
@@ -89,79 +87,74 @@ export default function TodaysSlatePage() {
 
   const yesterday = buildYesterdaySummary();
 
+  const lastUpdated =
+    statuses
+      .map((s) => s.generatedAtUtc)
+      .filter((v): v is string => Boolean(v))
+      .sort()
+      .reverse()[0] ?? (typeof providerSlate?.generated_at_utc === "string" ? (providerSlate.generated_at_utc as string) : null);
+
   return (
     <div>
-      <PageHeader title="Today's Slate" description={`America/Chicago · ${date}`} />
+      <CommandCenterHeader
+        date={date}
+        gameCount={environmentReport?.games.length ?? 0}
+        providerName={typeof providerSlate?.provider_name === "string" ? (providerSlate.provider_name as string) : null}
+        isMock={Boolean(providerSlate?.is_mock)}
+        selectedSlateId={typeof providerSlate?.selected_slate_id === "string" ? (providerSlate.selected_slate_id as string) : null}
+        lastUpdated={lastUpdated}
+      />
 
-      {/* TOP ROW -- slate, games, players, research/ownership/optimizer status */}
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <MetricCard label="Today's Slate" value={summary.gamesOnDkSlate ?? "--"} trend={<span className="text-[11px] text-text-faint">DK games</span>} />
-        <MetricCard label="Games" value={summary.gamesOnResearch} />
-        <MetricCard label="Players" value={playerCount} />
-        <StatusTile label="Research" ready={readiness.research} />
-        <StatusTile label="Ownership" ready={readiness.ownership} />
-        <StatusTile label="Optimizer" ready={readiness.optimizer} />
+      {alerts.length > 0 && (
+        <div className="mb-5 rounded-[var(--radius-control)] border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">
+          {alerts.map((a, i) => (
+            <div key={i}>⚠ {a}</div>
+          ))}
+        </div>
+      )}
+
+      {/* TOP KPI CARDS */}
+      <div className="mb-6">
+        <SlateKpiGrid kpis={kpis} />
       </div>
 
+      {/* CENTER LAYOUT -- AI Slate Summary / Slate Rankings / Quick Actions */}
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr_280px]">
+        <div className="min-w-0">
+          <AiSlateSummaryCard bullets={aiSummaryBullets} />
+        </div>
+        <div className="min-w-0">
+          <SlateRankingsColumn
+            rankings={rankings}
+            pitcherRecords={pitcherSnapshot?.pitchers ?? []}
+            hitterRows={hitterRows}
+            pitcherRows={pitcherRows}
+            analysis={environmentReport?.vegas_slate_analysis ?? null}
+          />
+        </div>
+        <div className="min-w-0">
+          <QuickActionsPanel />
+        </div>
+      </div>
+
+      {/* BOTTOM SECTION */}
+      <BottomInsights
+        topHitters={topHitters10}
+        topPitchers={topPitchers10}
+        topStacks={stacks.slice(0, 10)}
+        highestLeverage={highestLeverage10}
+        risers={movement.risers}
+        fallers={movement.fallers}
+        movementFeed={movement.feed}
+        lockTimes={lockTimes}
+      />
+
+      {/* Pipeline operations -- unchanged, existing widgets */}
+      <SectionHeader title="Pipeline Operations" />
       <div className="mb-6">
         <RefreshPanel />
       </div>
 
-      {/* SECOND ROW -- research highlights */}
-      <SectionHeader title="Slate Highlights" />
-      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-        <DataCard title="Top Pitchers" action={<Link href="/dashboard/pitchers" className="text-[11px] text-accent hover:text-accent-hover">View all →</Link>}>
-          <RankedList rows={topPitchers} />
-        </DataCard>
-        <DataCard title="Top Hitters" action={<Link href="/dashboard/hitters" className="text-[11px] text-accent hover:text-accent-hover">View all →</Link>}>
-          <RankedList rows={topHitters} />
-        </DataCard>
-        <DataCard title="Top Stacks" action={<Link href="/dashboard/stacks" className="text-[11px] text-accent hover:text-accent-hover">View all →</Link>}>
-          {topStacks.length === 0 ? (
-            <p className="text-xs text-text-faint">No data yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-1.5">
-              {topStacks.map((s) => (
-                <li key={s.team} className="flex items-center justify-between text-xs">
-                  <span className="text-text">{s.team}</span>
-                  <span className="font-semibold text-text">{fmt(s.teamPopularityScore)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </DataCard>
-        <DataCard title="Alerts">
-          {alerts.length === 0 ? (
-            <p className="text-xs text-green">No alerts -- slate looks clean.</p>
-          ) : (
-            <ul className="flex flex-col gap-1.5 text-xs text-yellow">
-              {alerts.map((a, i) => (
-                <li key={i}>⚠ {a}</li>
-              ))}
-            </ul>
-          )}
-        </DataCard>
-        <DataCard title="Weather" action={<Link href="/dashboard/weather" className="text-[11px] text-accent hover:text-accent-hover">View →</Link>}>
-          <p className="text-xs text-text-faint">Not yet available as a dedicated view.</p>
-        </DataCard>
-        <DataCard title="Vegas" action={<Link href="/dashboard/vegas" className="text-[11px] text-accent hover:text-accent-hover">View →</Link>}>
-          {vegasStats && vegasStats.highestTotal.value !== null ? (
-            <div className="text-xs">
-              <div className="text-text-faint">Highest Total</div>
-              <div className="text-lg font-semibold text-text">{vegasStats.highestTotal.value.toFixed(1)}</div>
-              {vegasStats.highestTotal.game && (
-                <div className="text-text-faint">
-                  {vegasStats.highestTotal.game.away_team} @ {vegasStats.highestTotal.game.home_team}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-text-faint">No Vegas data yet -- generate today&apos;s Game Environment report.</p>
-          )}
-        </DataCard>
-      </div>
-
-      {/* BOTTOM ROW -- model health, recent accuracy, pipeline status */}
       <SectionHeader title="Model Health & Pipeline" />
       <div className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <DataCard title="Model Health" action={<Link href="/dashboard/health" className="text-[11px] text-accent hover:text-accent-hover">Full report →</Link>}>

@@ -49,6 +49,15 @@ export function loadLatestDkMatchReport(date: string): Loaded<Record<string, unk
   return loadLatest<Record<string, unknown>>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_match_report_");
 }
 
+/** The most recent scripts/fetch_dfs_slate.py output for `date` -- the
+ * DFS salary provider's own status/name/mock-flag/selected-slate record.
+ * Read-only, same immutable-snapshot convention as every other loader
+ * here; the dashboard never re-derives this, it only displays what the
+ * pipeline already wrote (see runner.ts's dfsSalaries step). */
+export function loadLatestProviderSlate(date: string): Loaded<Record<string, unknown>> {
+  return loadLatest<Record<string, unknown>>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "provider_slate_");
+}
+
 export function loadLatestLineupSet(date: string): Loaded<LineupSet> {
   return loadLatest<LineupSet>(artifactPath(ARTIFACT_DIRS.lineups, date), "dk_lineups_");
 }

@@ -187,10 +187,7 @@ export function RefreshPanel() {
   return (
     <div className="mb-6 flex flex-col gap-4 rounded-lg border border-border bg-bg-panel p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-text">Today&apos;s Slate</h1>
-          {run && <p className="text-xs text-text-faint">Slate date: {run.slateDate}</p>}
-        </div>
+        {run ? <p className="text-xs text-text-faint">Slate date: {run.slateDate}</p> : <span />}
         <button
           type="button"
           onClick={handleRefresh}
