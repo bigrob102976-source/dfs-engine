@@ -44,6 +44,22 @@ const POOL_RESULT = {
       confidence: 80,
       lineupStatus: "active",
       matchStatus: "matched",
+      externalProjection: null,
+      adjustedProjection: null,
+      adjustmentDelta: null,
+      adjustmentPercent: null,
+      adjustmentReasons: [],
+      aiProjection: null,
+      aiCeiling: null,
+      aiFloor: null,
+      aiDelta: null,
+      aiConfidence: null,
+      aiRisk: null,
+      aiGrade: null,
+      aiValueScore: null,
+      aiSignals: [],
+      aiReasons: [],
+      aiSummary: null,
     },
     {
       dkPlayerId: "d2",
@@ -65,6 +81,22 @@ const POOL_RESULT = {
       confidence: 90,
       lineupStatus: "active",
       matchStatus: "matched",
+      externalProjection: null,
+      adjustedProjection: null,
+      adjustmentDelta: null,
+      adjustmentPercent: null,
+      adjustmentReasons: [],
+      aiProjection: null,
+      aiCeiling: null,
+      aiFloor: null,
+      aiDelta: null,
+      aiConfidence: null,
+      aiRisk: null,
+      aiGrade: null,
+      aiValueScore: null,
+      aiSignals: [],
+      aiReasons: [],
+      aiSummary: null,
     },
   ],
   activePlayers: 2,
@@ -369,6 +401,63 @@ describe("OptimizerWorkspace", () => {
       expect(screen.queryByRole("columnheader", { name: "Ext" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByLabelText("Show comparison columns"));
       expect(screen.getByRole("columnheader", { name: "Ext" })).toBeInTheDocument();
+    });
+  });
+
+  describe("Milestone 20: AI Projection selector", () => {
+    const POOL_WITH_AI = {
+      ...POOL_RESULT,
+      hasAiProjections: true,
+      players: [
+        { ...POOL_RESULT.players[0], aiProjection: 11.2, aiDelta: 1.2, aiConfidence: 88, aiGrade: "A" },
+        { ...POOL_RESULT.players[1], aiProjection: 19.5, aiDelta: -0.5, aiConfidence: 75, aiGrade: "B+" },
+      ],
+    };
+
+    it("AI Projection is disabled and shows a not-generated message when the pool has no AI data", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "AI Projection" })).toBeDisabled();
+      expect(screen.getByText(/AI Projection not generated yet/)).toBeInTheDocument();
+    });
+
+    it("enables AI Projection when the pool has AI data, and selecting it is reflected in the build request", async () => {
+      const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "AI Projection" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "AI Projection" }));
+      expect(screen.getByRole("button", { name: "AI Projection" })).toHaveAttribute("aria-pressed", "true");
+
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).toBe("ai");
+      });
+    });
+
+    it("falls back to Big Money Independent if the selected slate has no AI data", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByRole("button", { name: "AI Projection" }));
+      expect(screen.getByRole("button", { name: "AI Projection" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Big Money Independent" })).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("the player table always shows AI Proj/AI Δ/AI Conf/AI Grade columns", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("columnheader", { name: "AI Proj" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "AI Conf" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "AI Grade" })).toBeInTheDocument();
     });
   });
 });

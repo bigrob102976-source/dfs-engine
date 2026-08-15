@@ -4,6 +4,8 @@
 // choices -- never provider credentials or anything server-secret (see
 // dfs/providers/config.py -- API keys never leave the server process).
 
+import type { ProjectionSource } from "./types";
+
 const STORAGE_KEY = "mlb-dfs-optimizer-workspace-v1";
 
 export interface PersistedWorkspaceState {
@@ -20,7 +22,7 @@ export interface PersistedWorkspaceState {
   objective: "projection" | "ceiling" | "balanced" | "leverage";
   // Milestone 17. Optional so state persisted before this milestone still
   // loads cleanly -- callers must default both when absent.
-  projectionSource?: "independent" | "external" | "adjusted";
+  projectionSource?: ProjectionSource;
   showProjectionComparison?: boolean;
 }
 

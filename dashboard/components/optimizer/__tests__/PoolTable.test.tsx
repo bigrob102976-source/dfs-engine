@@ -30,6 +30,17 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     adjustmentDelta: null,
     adjustmentPercent: null,
     adjustmentReasons: [],
+    aiProjection: null,
+    aiCeiling: null,
+    aiFloor: null,
+    aiDelta: null,
+    aiConfidence: null,
+    aiRisk: null,
+    aiGrade: null,
+    aiValueScore: null,
+    aiSignals: [],
+    aiReasons: [],
+    aiSummary: null,
     ...overrides,
   };
 }
@@ -98,7 +109,11 @@ describe("PoolTable", () => {
 
   it("clicking a sortable header toggles direction", () => {
     renderTable();
-    const header = screen.getByRole("columnheader", { name: /Proj/ });
+    // Anchored regex: Milestone 20 added an "AI Proj" column, which the
+    // old unanchored /Proj/ would also match (and "Proj" defaults to
+    // showing a sort-direction arrow, e.g. "Proj ↓", so an exact string
+    // match won't work either).
+    const header = screen.getByRole("columnheader", { name: /^Proj/ });
     fireEvent.click(header); // ascending
     let rows = screen.getAllByRole("row").slice(1);
     expect(rows[0].textContent).toContain("Bravo Hitter"); // lowest projection (5) first
@@ -214,5 +229,61 @@ describe("PoolTable", () => {
     renderTable();
     fireEvent.click(screen.getByRole("button", { name: "Bravo Hitter" }));
     expect(screen.getByText("No external projection data available for this player.")).toBeInTheDocument();
+  });
+
+  // Milestone 20: AI Projection Engine columns + Player Detail section.
+  it("always shows AI Proj/AI Δ/AI Conf/AI Grade columns and renders each player's AI values", () => {
+    const aiPlayers = [
+      player({
+        dkPlayerId: "d1", name: "Judge", projection: 12, aiProjection: 14.02, aiDelta: 2.02, aiConfidence: 81.2, aiGrade: "A+",
+      }),
+    ];
+    render(
+      <PoolTable players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+    );
+    expect(screen.getByRole("columnheader", { name: "AI Proj" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "AI Conf" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "AI Grade" })).toBeInTheDocument();
+    const row = screen.getByText("Judge").closest("tr")!;
+    expect(row.textContent).toContain("14.0");
+    expect(row.textContent).toContain("+2.02");
+    expect(row.textContent).toContain("81");
+    expect(row.textContent).toContain("A+");
+  });
+
+  it("AI columns render '--' for a player with no AI Projection yet", () => {
+    renderTable();
+    const row = screen.getByText("Bravo Hitter").closest("tr")!;
+    // Salary/Value/Own% etc. also render "--" for missing data, so this
+    // just confirms the new columns don't throw or render a stray "null".
+    expect(row.textContent).not.toContain("null");
+    expect(row.textContent).not.toContain("undefined");
+  });
+
+  it("clicking a player with AI data opens the AI Projection Engine section with signal breakdown and reasons", () => {
+    const aiPlayers = [
+      player({
+        dkPlayerId: "d1", name: "Judge", team: "NYY", projection: 12, aiProjection: 14.02, aiCeiling: 23.37, aiFloor: 7.01,
+        aiDelta: 2.02, aiConfidence: 81.2, aiRisk: 35, aiGrade: "A+", aiValueScore: 2.42,
+        aiSignals: [{ category: "weather", label: "Weather", raw_delta: 0.45, weight: 1, delta: 0.45, reason: "Wind Out 14 MPH" }],
+        aiReasons: ["Weather +0.45: Wind Out 14 MPH"],
+        aiSummary: "Judge projects to 14.0 AI points (confidence 81, risk 35) with positive Weather signals.",
+      }),
+    ];
+    render(
+      <PoolTable players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Judge" }));
+    expect(screen.getByText("AI Projection Engine")).toBeInTheDocument();
+    expect(screen.getByText("Signal Breakdown")).toBeInTheDocument();
+    expect(screen.getByText(/Wind Out 14 MPH/)).toBeInTheDocument();
+    expect(screen.getByText(/projects to 14.0 AI points/)).toBeInTheDocument();
+  });
+
+  it("the AI Projection Engine section shows a not-generated message for a player without AI data", () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: "Bravo Hitter" }));
+    expect(screen.getByText(/No AI Projection generated yet/)).toBeInTheDocument();
   });
 });

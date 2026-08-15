@@ -6,8 +6,8 @@ import { GameCenterDrawer } from "./GameCenterDrawer";
 import { SlateRankingCard } from "./SlateRankingCard";
 import { SectionHeader } from "@/components/ui/Header";
 import type { VegasSlateAnalysis } from "@/lib/gameEnvironment";
-import type { GameRanking } from "@/lib/commandCenter";
-import type { PitcherRecord, PlayerRow } from "@/lib/types";
+import type { AiRankedPlayer, GameRanking } from "@/lib/commandCenter";
+import type { PitcherRecord } from "@/lib/types";
 
 /** CENTER COLUMN client shell: owns which game's Game Center is open.
  * `rankings` is pre-sorted (highest combined score first) by
@@ -21,8 +21,8 @@ export function SlateRankingsColumn({
 }: {
   rankings: GameRanking[];
   pitcherRecords: PitcherRecord[];
-  hitterRows: PlayerRow[];
-  pitcherRows: PlayerRow[];
+  hitterRows: AiRankedPlayer[];
+  pitcherRows: AiRankedPlayer[];
   analysis: VegasSlateAnalysis | null;
 }) {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);

@@ -4,6 +4,7 @@
 // pipeline; this one drives on-demand, user-configured lineup builds
 // against a player pool the user is actively browsing/locking/excluding.
 
+import type { AiSignalContribution } from "../aiProjections";
 import type { ProviderSource, SlateOption } from "../orchestrator/types";
 import type { Lineup } from "../types";
 
@@ -55,9 +56,24 @@ export interface PoolPlayerRow {
   adjustmentDelta: number | null;
   adjustmentPercent: number | null;
   adjustmentReasons: string[];
+
+  // Milestone 20: AI Projection Engine -- joined in from the latest
+  // ai_projection_*.json snapshot by mlbPlayerId. `projection` above is
+  // still ALWAYS the independent value; see lib/aiProjections.ts.
+  aiProjection: number | null;
+  aiCeiling: number | null;
+  aiFloor: number | null;
+  aiDelta: number | null; // aiProjection - projection (independent)
+  aiConfidence: number | null;
+  aiRisk: number | null;
+  aiGrade: string | null;
+  aiValueScore: number | null;
+  aiSignals: AiSignalContribution[];
+  aiReasons: string[];
+  aiSummary: string | null;
 }
 
-export type ProjectionSource = "independent" | "external" | "adjusted";
+export type ProjectionSource = "independent" | "external" | "adjusted" | "ai";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -79,6 +95,7 @@ export interface OptimizerPoolResult {
   salaryCap: number;
   hasOwnership: boolean;
   hasExternalProjections: boolean;
+  hasAiProjections: boolean;
 }
 
 export interface OptimizerBuildRequest {

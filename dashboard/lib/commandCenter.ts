@@ -1,6 +1,7 @@
+import type { AiPlayerProjection } from "./aiProjections";
 import type { GameEnvironmentReport, SlateEnvironmentReport } from "./gameEnvironment";
 import { weatherRiskValue } from "./environmentSortFilter";
-import type { StackSummary } from "./stacks";
+import { buildStackSummaries, type StackSummary } from "./stacks";
 import type { OwnershipSnapshot, TeamPopularity } from "./types";
 import type { PlayerRow } from "./types";
 import { deriveVegasBadges, vegasScore, type VegasBadge } from "./vegasIntelligence";
@@ -347,4 +348,100 @@ export function buildUpcomingLockTimes(report: SlateEnvironmentReport | null): L
     .filter((g): g is GameEnvironmentReport & { game_datetime_utc: string } => Boolean(g.game_datetime_utc))
     .map((g) => ({ game: g, gameDatetimeUtc: g.game_datetime_utc }))
     .sort((a, b) => new Date(a.gameDatetimeUtc).getTime() - new Date(b.gameDatetimeUtc).getTime());
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 20: AI Projection Engine -- Command Center / Game Center
+// rankings. Every field here is joined straight from the immutable
+// ai_projection_*.json snapshot (projection_engine/scoring.py's output,
+// see lib/aiProjections.ts) onto the SAME PlayerRow data already loaded
+// for the rest of the page; nothing here recomputes a signal or a
+// projection.
+// ---------------------------------------------------------------------------
+
+export interface AiRankedPlayer extends PlayerRow {
+  aiProjection: number | null;
+  aiDelta: number | null; // total_adjustment: aiProjection - independent projection
+  aiConfidence: number | null;
+  aiRisk: number | null;
+  aiGrade: string | null;
+}
+
+/** Joins the AI Projection Engine's per-player output onto already
+ * -loaded PlayerRows by id (the mlb player_id both sides key on). A
+ * player with no AI Projection snapshot entry yet simply carries null
+ * AI fields -- never a fabricated value. */
+export function joinAiProjections(rows: PlayerRow[], aiByPlayerId: Map<string, AiPlayerProjection>): AiRankedPlayer[] {
+  return rows.map((r) => {
+    const ai = aiByPlayerId.get(r.id);
+    return {
+      ...r,
+      aiProjection: ai?.ai_projection ?? null,
+      aiDelta: ai?.total_adjustment ?? null,
+      aiConfidence: ai?.ai_confidence ?? null,
+      aiRisk: ai?.ai_risk ?? null,
+      aiGrade: ai?.ai_grade ?? null,
+    };
+  });
+}
+
+function aiValueScore(row: AiRankedPlayer): number | null {
+  if (row.aiProjection === null || row.salary === null || row.salary <= 0) return null;
+  return Math.round((row.aiProjection / row.salary) * 1000 * 100) / 100;
+}
+
+export interface AiValuedPlayer extends AiRankedPlayer {
+  aiValue: number | null;
+}
+
+/** Top N players by AI Projection per $1,000 salary -- same "value"
+ * convention as this module's own rankPlayersByValue, applied to the AI
+ * tier instead of the independent one. */
+export function topAiValues(rows: AiRankedPlayer[], limit = 10): AiValuedPlayer[] {
+  return rows
+    .map((r) => ({ ...r, aiValue: aiValueScore(r) }))
+    .filter((r): r is AiValuedPlayer => r.aiValue !== null)
+    .sort((a, b) => (b.aiValue ?? 0) - (a.aiValue ?? 0))
+    .slice(0, limit);
+}
+
+/** Players the AI Projection Engine moved UP the most from their
+ * independent baseline. */
+export function largestAiUpgrades(rows: AiRankedPlayer[], limit = 10): AiRankedPlayer[] {
+  return rows
+    .filter((r) => r.aiDelta !== null && r.aiDelta > 0)
+    .sort((a, b) => (b.aiDelta ?? 0) - (a.aiDelta ?? 0))
+    .slice(0, limit);
+}
+
+/** Players the AI Projection Engine moved DOWN the most from their
+ * independent baseline. */
+export function largestAiDowngrades(rows: AiRankedPlayer[], limit = 10): AiRankedPlayer[] {
+  return rows
+    .filter((r) => r.aiDelta !== null && r.aiDelta < 0)
+    .sort((a, b) => (a.aiDelta ?? 0) - (b.aiDelta ?? 0))
+    .slice(0, limit);
+}
+
+export function highestAiConfidence(rows: AiRankedPlayer[], limit = 10): AiRankedPlayer[] {
+  return rows
+    .filter((r) => r.aiConfidence !== null)
+    .sort((a, b) => (b.aiConfidence ?? 0) - (a.aiConfidence ?? 0))
+    .slice(0, limit);
+}
+
+export function lowestAiConfidence(rows: AiRankedPlayer[], limit = 10): AiRankedPlayer[] {
+  return rows
+    .filter((r) => r.aiConfidence !== null)
+    .sort((a, b) => (a.aiConfidence ?? 0) - (b.aiConfidence ?? 0))
+    .slice(0, limit);
+}
+
+/** Team stack summaries built from AI Projections instead of independent
+ * ones -- reuses lib/stacks.ts::buildStackSummaries UNCHANGED by simply
+ * substituting `projection` with `aiProjection` before calling it, so
+ * the team-averaging/top5 logic is never duplicated. */
+export function buildAiStackSummaries(hitterRows: AiRankedPlayer[], teamPopularity: Record<string, TeamPopularity>): StackSummary[] {
+  const asIndependentShaped: PlayerRow[] = hitterRows.map((r) => ({ ...r, projection: r.aiProjection }));
+  return buildStackSummaries(asIndependentShaped, teamPopularity);
 }

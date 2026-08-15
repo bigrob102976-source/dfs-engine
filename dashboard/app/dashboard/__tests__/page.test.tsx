@@ -101,6 +101,26 @@ function seedPitcherSnapshot() {
   });
 }
 
+function seedAiProjectionSnapshot() {
+  writeJson(`ai_projection_snapshots/${DATE}/ai_projection_20260814T190000.json`, {
+    slate_date: DATE, generated_at: `${DATE}T19:00:00Z`, model_version: "0.1.0",
+    pitcher_snapshot_path: null, batter_snapshot_path: null, player_count: 1, warnings: [],
+    players: [
+      {
+        player_id: "p1", name: "Tarik Skubal", team: "DET", player_type: "pitcher", opponent: "CLE", game_id: "g1",
+        salary: 10500, independent_projection: 24.5, independent_ceiling: 34, independent_floor: 18,
+        external_projection: null, adjusted_projection: null,
+        ai_projection: 26.1, ai_ceiling: 36.2, ai_floor: 19.1, ai_confidence: 88, ai_risk: 22, ai_grade: "A+", ai_value_score: 2.49,
+        total_adjustment: 1.6, total_adjustment_percent: 6.53, adjustment_capped: false,
+        signals: [{ category: "vegas", label: "Vegas", raw_delta: 0.35, weight: 1, delta: 0.35, reason: "Own team implied 3.2 runs in a low-total game" }],
+        reasons: ["Vegas +0.35: Own team implied 3.2 runs in a low-total game"],
+        ai_summary: "Tarik Skubal projects to 26.1 AI points (confidence 88, risk 22) with positive Vegas signals.",
+        model_version: "0.1.0",
+      },
+    ],
+  });
+}
+
 describe("TodaysSlatePage (AI Slate Command Center)", () => {
   it("shows a clean empty-data state with no raw script path leaking, when nothing exists yet", async () => {
     const TodaysSlatePage = (await import("../page")).default;
@@ -147,5 +167,28 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
 
     // Quick Actions
     expect(screen.getByRole("link", { name: "Build Lineups" })).toHaveAttribute("href", "/dashboard/optimizer");
+  });
+
+  it("Milestone 20: renders the AI Projection Engine section and Game Center AI data from a real ai_projection snapshot", async () => {
+    seedEnvironmentReport();
+    seedPitcherSnapshot();
+    seedAiProjectionSnapshot();
+
+    const TodaysSlatePage = (await import("../page")).default;
+    const jsx = await TodaysSlatePage();
+    render(jsx);
+
+    // Bottom "AI Projection Engine" section -- Tarik Skubal is the only
+    // scored player, so he appears in every non-empty AI list (Top AI
+    // Values, Largest AI Upgrades, Highest Confidence).
+    expect(screen.getByText("AI Projection Engine")).toBeInTheDocument();
+    expect(screen.getAllByText("Tarik Skubal").length).toBeGreaterThan(0);
+    expect(screen.getByText("Largest AI Downgrades")).toBeInTheDocument(); // header present even though empty
+
+    // Game Center: opening the slide-over shows Top AI Players/Pitchers/Stacks.
+    fireEvent.click(screen.getByRole("button", { name: /CLE @ DET/ }));
+    expect(screen.getByText("Top AI Players")).toBeInTheDocument();
+    expect(screen.getByText("Top AI Pitchers")).toBeInTheDocument();
+    expect(screen.getByText("Top AI Stacks")).toBeInTheDocument();
   });
 });

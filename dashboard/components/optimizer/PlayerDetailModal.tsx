@@ -2,10 +2,35 @@
 
 import { AIInsightBadge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import type { AiSignalContribution } from "@/lib/aiProjections";
 import type { PoolPlayerRow } from "@/lib/optimizerWorkspace/types";
 
 function fmt(v: number | null, digits = 1): string {
   return v === null ? "--" : v.toFixed(digits);
+}
+
+/** Milestone 20's Signal Breakdown visualization: a horizontal bar per
+ * signal, width scaled to |delta| relative to the player's largest
+ * signal, colored by direction -- the dashboard rendering of the
+ * milestone's own "Weather ██████ / Vegas ████" worked example. */
+function SignalBreakdownBar({ signal, maxAbsDelta }: { signal: AiSignalContribution; maxAbsDelta: number }) {
+  const widthPercent = maxAbsDelta > 0 ? Math.max(4, (Math.abs(signal.delta) / maxAbsDelta) * 100) : 0;
+  const positive = signal.delta >= 0;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <div className="w-24 shrink-0 text-text-faint">{signal.label}</div>
+      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-bg-panel-raised">
+        <div
+          className={`h-full rounded-full ${positive ? "bg-green" : "bg-red"}`}
+          style={{ width: `${widthPercent}%` }}
+        />
+      </div>
+      <div className={`w-14 shrink-0 text-right font-semibold ${positive ? "text-green" : "text-red"}`}>
+        {positive ? "+" : ""}
+        {signal.delta.toFixed(2)}
+      </div>
+    </div>
+  );
 }
 
 /** PROJECTION COMPARISON detail (Milestone 17): clearly distinguishes
@@ -15,6 +40,8 @@ function fmt(v: number | null, digits = 1): string {
  * snapshot covers this player yet. */
 export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; onClose: () => void }) {
   const hasComparison = player.externalProjection !== null || player.adjustedProjection !== null;
+  const hasAi = player.aiProjection !== null;
+  const maxAbsSignalDelta = hasAi ? Math.max(0, ...player.aiSignals.map((s) => Math.abs(s.delta))) : 0;
 
   return (
     <Modal onClose={onClose} ariaLabel={`${player.name} projection comparison`}>
@@ -61,6 +88,92 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Milestone 20: AI Projection Engine -- combines every research
+          signal already computed elsewhere (weather/Vegas/bullpen/park/
+          ownership/matchup/recent form/external gap) into one number,
+          with every signal contribution and reason shown here. */}
+      {hasAi && (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">AI Projection Engine</h3>
+
+          <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+            <dt className="text-text-faint">Independent Projection</dt>
+            <dd className="text-right text-text">{fmt(player.projection)}</dd>
+            <dt className="text-text-faint">External Projection</dt>
+            <dd className="text-right text-text">{fmt(player.externalProjection)}</dd>
+            <dt className="text-text-faint">Adjusted Projection</dt>
+            <dd className="text-right text-text">{fmt(player.adjustedProjection)}</dd>
+            <dt className="font-semibold text-purple">AI Projection</dt>
+            <dd className="text-right font-semibold text-purple">{fmt(player.aiProjection)}</dd>
+          </dl>
+
+          <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Ceiling</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.aiCeiling)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Floor</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.aiFloor)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Confidence</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.aiConfidence, 0)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Risk</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.aiRisk, 0)}</div>
+            </div>
+          </div>
+
+          <div className="mt-2 flex items-center justify-between text-xs">
+            <span className="text-text-faint">
+              Grade <span className="font-semibold text-purple">{player.aiGrade ?? "--"}</span>
+            </span>
+            <span className="text-text-faint">
+              Value <span className="font-semibold text-text">{fmt(player.aiValueScore, 2)}</span> pts/$1k
+            </span>
+            <span className="text-text-faint">
+              Total Adj{" "}
+              <span className={`font-semibold ${(player.aiDelta ?? 0) >= 0 ? "text-green" : "text-red"}`}>
+                {(player.aiDelta ?? 0) >= 0 ? "+" : ""}
+                {fmt(player.aiDelta, 2)}
+              </span>
+            </span>
+          </div>
+
+          {player.aiSignals.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1.5 text-[11px] uppercase tracking-wide text-text-faint">Signal Breakdown</div>
+              <div className="flex flex-col gap-1.5">
+                {player.aiSignals.map((s, i) => (
+                  <SignalBreakdownBar key={`${s.category}-${i}`} signal={s} maxAbsDelta={maxAbsSignalDelta} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {player.aiReasons.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] uppercase tracking-wide text-text-faint">AI Reasons</div>
+              <div className="flex flex-wrap gap-1.5">
+                {player.aiReasons.map((r, i) => (
+                  <AIInsightBadge key={i}>{r}</AIInsightBadge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {player.aiSummary && <p className="mt-3 text-xs italic text-text-muted">{player.aiSummary}</p>}
+        </div>
+      )}
+      {!hasAi && (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">AI Projection Engine</h3>
+          <p className="text-xs text-text-faint">No AI Projection generated yet for this player -- run scripts/run_ai_projection_engine.py.</p>
         </div>
       )}
     </Modal>

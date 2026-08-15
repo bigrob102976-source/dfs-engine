@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
 import type { GameEnvironmentReport } from "@/lib/gameEnvironment";
-import type { LineMovementEntry, LockTimeEntry } from "@/lib/commandCenter";
+import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry } from "@/lib/commandCenter";
 import type { PlayerRow } from "@/lib/types";
 import type { StackSummary } from "@/lib/stacks";
 
@@ -39,6 +39,37 @@ function PlayerList({ rows, unit = "" }: { rows: PlayerRow[]; unit?: string }) {
   );
 }
 
+/** Milestone 20: compact AI-ranked player lists (Top AI Values, Largest
+ * AI Upgrades/Downgrades, Highest/Lowest AI Confidence). `metric` picks
+ * which AI field is shown on the right -- every value here is joined
+ * straight from the AI Projection Engine's snapshot, never recomputed. */
+function AiPlayerList({ rows, metric }: { rows: AiRankedPlayer[]; metric: "value" | "delta" | "confidence" }) {
+  if (rows.length === 0) return <p className="text-xs text-text-faint">No AI Projections yet.</p>;
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {rows.map((r, i) => {
+        const value =
+          metric === "value" ? (r as AiValuedPlayer).aiValue : metric === "delta" ? r.aiDelta : r.aiConfidence;
+        const digits = metric === "value" ? 2 : metric === "confidence" ? 0 : 2;
+        const signed = metric === "delta" && value !== null && value >= 0;
+        return (
+          <li key={r.id} className="flex items-center justify-between gap-2 text-xs">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="w-4 shrink-0 text-text-faint">{i + 1}</span>
+              <span className="truncate text-text">{r.name}</span>
+              <span className="shrink-0 text-text-faint">{r.team}</span>
+            </span>
+            <span className={`shrink-0 font-semibold ${metric === "delta" ? (signed ? "text-green" : "text-red") : "text-purple"}`}>
+              {signed ? "+" : ""}
+              {fmt(value, digits)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function MovementList({ entries, tone }: { entries: LineMovementEntry[]; tone: "positive" | "negative" }) {
   if (entries.length === 0) return <p className="text-xs text-text-faint">No movement yet.</p>;
   return (
@@ -70,6 +101,11 @@ export function BottomInsights({
   fallers,
   movementFeed,
   lockTimes,
+  topAiValues,
+  largestAiUpgrades,
+  largestAiDowngrades,
+  highestAiConfidence,
+  lowestAiConfidence,
 }: {
   topHitters: PlayerRow[];
   topPitchers: PlayerRow[];
@@ -79,6 +115,11 @@ export function BottomInsights({
   fallers: LineMovementEntry[];
   movementFeed: LineMovementEntry[];
   lockTimes: LockTimeEntry[];
+  topAiValues: AiValuedPlayer[];
+  largestAiUpgrades: AiRankedPlayer[];
+  largestAiDowngrades: AiRankedPlayer[];
+  highestAiConfidence: AiRankedPlayer[];
+  lowestAiConfidence: AiRankedPlayer[];
 }) {
   return (
     <div>
@@ -136,6 +177,25 @@ export function BottomInsights({
               ))}
             </ul>
           )}
+        </DataCard>
+      </div>
+
+      <SectionHeader title="AI Projection Engine" />
+      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+        <DataCard title="Top AI Values">
+          <AiPlayerList rows={topAiValues} metric="value" />
+        </DataCard>
+        <DataCard title="Largest AI Upgrades">
+          <AiPlayerList rows={largestAiUpgrades} metric="delta" />
+        </DataCard>
+        <DataCard title="Largest AI Downgrades">
+          <AiPlayerList rows={largestAiDowngrades} metric="delta" />
+        </DataCard>
+        <DataCard title="Highest Confidence">
+          <AiPlayerList rows={highestAiConfidence} metric="confidence" />
+        </DataCard>
+        <DataCard title="Lowest Confidence">
+          <AiPlayerList rows={lowestAiConfidence} metric="confidence" />
         </DataCard>
       </div>
 

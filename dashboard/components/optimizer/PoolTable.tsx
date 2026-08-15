@@ -27,6 +27,10 @@ const COLUMNS: Column[] = [
   { key: "projection", label: "Proj", sortKey: "projection", align: "right" },
   { key: "ceiling", label: "Ceil", sortKey: "ceiling", align: "right" },
   { key: "value", label: "Value", sortKey: "value", align: "right" },
+  { key: "aiProjection", label: "AI Proj", sortKey: "aiProjection", align: "right" },
+  { key: "aiDelta", label: "AI Δ", sortKey: "aiDelta", align: "right" },
+  { key: "aiConfidence", label: "AI Conf", sortKey: "aiConfidence", align: "right" },
+  { key: "aiGrade", label: "AI Grade", sortKey: "aiGrade", align: "right" },
   { key: "ownership", label: "Own%", sortKey: "ownership", align: "right" },
   { key: "leverage", label: "Lev", sortKey: "leverage", align: "right" },
   { key: "risk", label: "Risk", sortKey: "risk", align: "right" },
@@ -209,6 +213,12 @@ export function PoolTable({
                   )}
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.ceiling)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.value, 2)}</td>
+                  <td className="px-2 py-1 text-right text-purple">{fmt(p.aiProjection)}</td>
+                  <td className={`px-2 py-1 text-right ${p.aiDelta !== null && p.aiDelta >= 0 ? "text-green" : p.aiDelta !== null ? "text-red" : "text-text-muted"}`}>
+                    {p.aiDelta !== null ? `${p.aiDelta >= 0 ? "+" : ""}${fmt(p.aiDelta, 2)}` : "--"}
+                  </td>
+                  <td className="px-2 py-1 text-right text-text-muted">{fmt(p.aiConfidence, 0)}</td>
+                  <td className="px-2 py-1 text-right text-purple">{p.aiGrade ?? "--"}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{p.ownership !== null ? `${fmt(p.ownership)}%` : "--"}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.leverage)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.risk)}</td>

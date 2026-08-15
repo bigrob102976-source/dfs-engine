@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { getAiProjectionByPlayerId } from "../aiProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
@@ -98,10 +99,12 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   }
 
   const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
+  const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
     const own = ownershipByDkId.get(p.dk_player_id) ?? (p.mlb_player_id ? ownershipByMlbId.get(p.mlb_player_id) : undefined);
     const comparison = p.mlb_player_id ? comparisonByPlayerId.get(p.mlb_player_id) : undefined;
+    const ai = p.mlb_player_id ? aiByPlayerId.get(p.mlb_player_id) : undefined;
     return {
       dkPlayerId: p.dk_player_id,
       mlbPlayerId: p.mlb_player_id,
@@ -127,6 +130,17 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       adjustmentDelta: comparison?.adjustmentDelta ?? null,
       adjustmentPercent: comparison?.adjustmentPercent ?? null,
       adjustmentReasons: comparison?.adjustmentReasons ?? [],
+      aiProjection: ai?.ai_projection ?? null,
+      aiCeiling: ai?.ai_ceiling ?? null,
+      aiFloor: ai?.ai_floor ?? null,
+      aiDelta: ai?.total_adjustment ?? null,
+      aiConfidence: ai?.ai_confidence ?? null,
+      aiRisk: ai?.ai_risk ?? null,
+      aiGrade: ai?.ai_grade ?? null,
+      aiValueScore: ai?.ai_value_score ?? null,
+      aiSignals: ai?.signals ?? [],
+      aiReasons: ai?.reasons ?? [],
+      aiSummary: ai?.ai_summary ?? null,
     };
   });
 
@@ -154,6 +168,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     slateGames: typeof matchReport?.dk_games_total === "number" ? (matchReport.dk_games_total as number) : 0,
     rosterFeasibilityPass: pool?.roster_feasibility_pass ?? false,
     hasExternalProjections: comparisonByPlayerId.size > 0,
+    hasAiProjections: aiByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
   };

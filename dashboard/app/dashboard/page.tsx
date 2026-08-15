@@ -18,7 +18,14 @@ import {
   buildSlateAiSummary,
   buildSlateKpis,
   buildUpcomingLockTimes,
+  highestAiConfidence,
+  joinAiProjections,
+  largestAiDowngrades,
+  largestAiUpgrades,
+  lowestAiConfidence,
+  topAiValues,
 } from "@/lib/commandCenter";
+import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
@@ -64,6 +71,18 @@ export default function TodaysSlatePage() {
   const pitcherRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null);
   const hitterRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
   const stacks = buildStackSummaries(hitterRows, ownership?.team_popularity ?? {});
+
+  // Milestone 20: AI Projection Engine -- joined onto the same rows
+  // above, additive only (nothing above this line changes behavior).
+  const aiByPlayerId = getAiProjectionByPlayerId(date);
+  const aiHitterRows = joinAiProjections(hitterRows, aiByPlayerId);
+  const aiPitcherRows = joinAiProjections(pitcherRows, aiByPlayerId);
+  const aiAllRows = [...aiPitcherRows, ...aiHitterRows];
+  const topAiValues10 = topAiValues(aiAllRows, 10);
+  const largestAiUpgrades10 = largestAiUpgrades(aiAllRows, 10);
+  const largestAiDowngrades10 = largestAiDowngrades(aiAllRows, 10);
+  const highestAiConfidence10 = highestAiConfidence(aiAllRows, 10);
+  const lowestAiConfidence10 = lowestAiConfidence(aiAllRows, 10);
 
   const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
@@ -127,8 +146,8 @@ export default function TodaysSlatePage() {
           <SlateRankingsColumn
             rankings={rankings}
             pitcherRecords={pitcherSnapshot?.pitchers ?? []}
-            hitterRows={hitterRows}
-            pitcherRows={pitcherRows}
+            hitterRows={aiHitterRows}
+            pitcherRows={aiPitcherRows}
             analysis={environmentReport?.vegas_slate_analysis ?? null}
           />
         </div>
@@ -147,6 +166,11 @@ export default function TodaysSlatePage() {
         fallers={movement.fallers}
         movementFeed={movement.feed}
         lockTimes={lockTimes}
+        topAiValues={topAiValues10}
+        largestAiUpgrades={largestAiUpgrades10}
+        largestAiDowngrades={largestAiDowngrades10}
+        highestAiConfidence={highestAiConfidence10}
+        lowestAiConfidence={lowestAiConfidence10}
       />
 
       {/* Pipeline operations -- unchanged, existing widgets */}

@@ -7,15 +7,15 @@ import { EnvironmentScoreBadge } from "@/components/ui/Badge";
 import { Drawer } from "@/components/ui/Drawer";
 import { SectionHeader } from "@/components/ui/Header";
 import type { VegasSlateAnalysis } from "@/lib/gameEnvironment";
-import type { GameRanking } from "@/lib/commandCenter";
-import type { PitcherRecord, PlayerRow } from "@/lib/types";
+import { buildAiStackSummaries, type AiRankedPlayer, type GameRanking } from "@/lib/commandCenter";
+import type { PitcherRecord } from "@/lib/types";
 import { buildVegasGameRows } from "@/lib/vegasIntelligence";
 
 function fmt(v: number | null | undefined, digits = 1): string {
   return v === null || v === undefined ? "--" : v.toFixed(digits);
 }
 
-function MiniList({ rows, unit = "" }: { rows: PlayerRow[]; unit?: string }) {
+function MiniList({ rows, unit = "" }: { rows: AiRankedPlayer[]; unit?: string }) {
   if (rows.length === 0) return <p className="text-xs text-text-faint">No players yet.</p>;
   return (
     <ul className="flex flex-col gap-1">
@@ -29,6 +29,28 @@ function MiniList({ rows, unit = "" }: { rows: PlayerRow[]; unit?: string }) {
             {fmt(r.projection)}
             {unit}
           </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Milestone 20's Game Center AI sections: same compact list shape as
+ * MiniList, but ranked and displayed by AI Projection (purple, the
+ * project's established AI-indicator color) plus AI Grade. */
+function AiMiniList({ rows }: { rows: AiRankedPlayer[] }) {
+  const withAi = rows.filter((r) => r.aiProjection !== null).sort((a, b) => (b.aiProjection ?? 0) - (a.aiProjection ?? 0));
+  if (withAi.length === 0) return <p className="text-xs text-text-faint">No AI Projections yet.</p>;
+  return (
+    <ul className="flex flex-col gap-1">
+      {withAi.map((r, i) => (
+        <li key={r.id} className="flex items-center justify-between gap-2 text-xs">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="w-3 shrink-0 text-text-faint">{i + 1}</span>
+            <span className="truncate text-text">{r.name}</span>
+            {r.aiGrade && <span className="shrink-0 text-[10px] font-semibold text-purple">{r.aiGrade}</span>}
+          </span>
+          <span className="shrink-0 font-semibold text-purple">{fmt(r.aiProjection)}</span>
         </li>
       ))}
     </ul>
@@ -52,8 +74,8 @@ export function GameCenterDrawer({
 }: {
   ranking: GameRanking | null;
   pitcherRecords: PitcherRecord[];
-  hitterRows: PlayerRow[];
-  pitcherRows: PlayerRow[];
+  hitterRows: AiRankedPlayer[];
+  pitcherRows: AiRankedPlayer[];
   analysis: VegasSlateAnalysis | null;
   onClose: () => void;
 }) {
@@ -61,9 +83,12 @@ export function GameCenterDrawer({
   const { game } = ranking;
 
   const vegasRow = buildVegasGameRows([game], pitcherRecords)[0];
-  const homeHitters = hitterRows.filter((r) => r.team === game.home_team).slice(0, 5);
-  const awayHitters = hitterRows.filter((r) => r.team === game.away_team).slice(0, 5);
+  const gameHitters = hitterRows.filter((r) => r.team === game.home_team || r.team === game.away_team);
+  const homeHitters = gameHitters.filter((r) => r.team === game.home_team).slice(0, 5);
+  const awayHitters = gameHitters.filter((r) => r.team === game.away_team).slice(0, 5);
   const gamePitchers = pitcherRows.filter((r) => r.team === game.home_team || r.team === game.away_team).slice(0, 2);
+  const topAiPlayers = [...gameHitters, ...gamePitchers].filter((r) => r.aiProjection !== null).sort((a, b) => (b.aiProjection ?? 0) - (a.aiProjection ?? 0)).slice(0, 5);
+  const aiStacks = buildAiStackSummaries(gameHitters, {}).filter((s) => s.team === game.home_team || s.team === game.away_team);
 
   return (
     <Drawer onClose={onClose} ariaLabel={`${game.away_team} at ${game.home_team} game center`} width="w-[640px]">
@@ -102,6 +127,37 @@ export function GameCenterDrawer({
       <SectionHeader title="Top Pitchers" />
       <div className="mb-4">
         <MiniList rows={gamePitchers} />
+      </div>
+
+      {/* Milestone 20: AI Projection Engine sections -- Top AI Players,
+          Top AI Stacks, Top AI Pitchers for this game. */}
+      <SectionHeader title="Top AI Players" />
+      <div className="mb-4">
+        <AiMiniList rows={topAiPlayers} />
+      </div>
+
+      <SectionHeader title="Top AI Pitchers" />
+      <div className="mb-4">
+        <AiMiniList rows={gamePitchers} />
+      </div>
+
+      <SectionHeader title="Top AI Stacks" />
+      <div className="mb-4">
+        {aiStacks.length === 0 ? (
+          <p className="text-xs text-text-faint">No AI Projections yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {aiStacks.map((s, i) => (
+              <li key={s.team} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-text">
+                  <span className="w-3 shrink-0 text-text-faint">{i + 1}</span>
+                  {s.team}
+                </span>
+                <span className="font-semibold text-purple">{fmt(s.averageProjection)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <SectionHeader title="Stacks" />

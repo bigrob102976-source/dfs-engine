@@ -238,11 +238,15 @@ export function OptimizerWorkspace() {
     projectionSource,
   ]);
 
-  // Milestone 17: if the newly-selected slate has no external/adjusted
-  // projection data, fall back to Big Money Independent rather than
-  // silently building against a source that doesn't exist for it.
+  // Milestone 17/20: if the newly-selected slate has no data for the
+  // currently-selected projection source, fall back to Big Money
+  // Independent rather than silently building against a source that
+  // doesn't exist for it.
   useEffect(() => {
-    if (pool && !pool.hasExternalProjections && projectionSource !== "independent") {
+    if (!pool) return;
+    const externalUnavailable = (projectionSource === "external" || projectionSource === "adjusted") && !pool.hasExternalProjections;
+    const aiUnavailable = projectionSource === "ai" && !pool.hasAiProjections;
+    if (externalUnavailable || aiUnavailable) {
       Promise.resolve().then(() => setProjectionSource("independent"));
     }
   }, [pool, projectionSource]);
@@ -386,9 +390,10 @@ export function OptimizerWorkspace() {
               { value: "independent" as ProjectionSource, label: "Big Money Independent" },
               { value: "external" as ProjectionSource, label: "External Baseline" },
               { value: "adjusted" as ProjectionSource, label: "Big Money Adjusted" },
+              { value: "ai" as ProjectionSource, label: "AI Projection" },
             ]
           ).map((opt) => {
-            const disabled = opt.value !== "independent" && !pool?.hasExternalProjections;
+            const disabled = opt.value === "ai" ? !pool?.hasAiProjections : opt.value !== "independent" && !pool?.hasExternalProjections;
             return (
               <button
                 key={opt.value}
@@ -397,7 +402,11 @@ export function OptimizerWorkspace() {
                 disabled={disabled}
                 aria-pressed={projectionSource === opt.value}
                 className={`rounded px-2 py-1 text-xs font-medium ${
-                  projectionSource === opt.value ? "bg-accent-dim text-text" : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
+                  projectionSource === opt.value
+                    ? opt.value === "ai"
+                      ? "bg-purple/20 text-purple"
+                      : "bg-accent-dim text-text"
+                    : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
                 } disabled:cursor-not-allowed disabled:opacity-40`}
               >
                 {opt.label}
@@ -406,6 +415,9 @@ export function OptimizerWorkspace() {
           })}
         </div>
         {!pool?.hasExternalProjections && <span className="text-[11px] text-text-faint">External projection provider not connected.</span>}
+        {!pool?.hasAiProjections && (
+          <span className="text-[11px] text-text-faint">AI Projection not generated yet -- run scripts/run_ai_projection_engine.py.</span>
+        )}
 
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
           <input type="checkbox" checked={showProjectionComparison} onChange={(e) => setShowProjectionComparison(e.target.checked)} />

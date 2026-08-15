@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { getAiProjectionByPlayerId } from "../aiProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
@@ -14,25 +15,35 @@ import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
 /** Milestone 17's Projection Source selector: "independent" (the
  * default -- Big Money's own projections, exactly as before this
  * milestone) never writes anything and passes no extra flag, so that
- * path is byte-identical to pre-M17 behavior. "external"/"adjusted"
+ * path is byte-identical to pre-M17 behavior. "external"/"adjusted"/"ai"
  * write a small, ephemeral {mlb_player_id: {projection, ceiling,
  * floor}} JSON file under the OS temp directory and pass it via
  * --projection-overrides -- the persisted dk_player_pool_<ts>.json
  * (Big Money's independent projections) is NEVER written to. A player
  * missing from the chosen source simply has no override entry, so
  * scripts/optimize_dk_lineups.py falls back to their independent value
- * rather than dropping them. */
+ * rather than dropping them. Milestone 20: "ai" is the only source that
+ * also supplies its own ceiling/floor (projection_engine/scoring.py
+ * computes both) -- external/adjusted still leave those two null, so
+ * the optimizer falls back to the pool's own independent ceiling/floor. */
 function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
   if (request.projectionSource === "independent") return null;
 
-  const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
   const overrides: Record<string, { projection: number | null; ceiling: number | null; floor: number | null }> = {};
-  for (const [mlbPlayerId, row] of comparisonByPlayerId) {
-    const projection = request.projectionSource === "external" ? row.externalProjection : row.adjustedProjection;
-    if (projection === null) continue;
-    // ceiling/floor stay null -- scripts/optimize_dk_lineups.py falls back to
-    // the pool's own (independent) ceiling/floor for those two fields.
-    overrides[mlbPlayerId] = { projection, ceiling: null, floor: null };
+
+  if (request.projectionSource === "ai") {
+    const aiByPlayerId = getAiProjectionByPlayerId(request.date);
+    for (const [mlbPlayerId, player] of aiByPlayerId) {
+      if (player.ai_projection === null) continue;
+      overrides[mlbPlayerId] = { projection: player.ai_projection, ceiling: player.ai_ceiling, floor: player.ai_floor };
+    }
+  } else {
+    const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
+    for (const [mlbPlayerId, row] of comparisonByPlayerId) {
+      const projection = request.projectionSource === "external" ? row.externalProjection : row.adjustedProjection;
+      if (projection === null) continue;
+      overrides[mlbPlayerId] = { projection, ceiling: null, floor: null };
+    }
   }
   if (Object.keys(overrides).length === 0) return null;
 
