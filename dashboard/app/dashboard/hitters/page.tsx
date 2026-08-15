@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function TopHittersPage(props: PageProps<"/dashboard/hitters">) {
   const searchParams = await props.searchParams;
   const highlightId = typeof searchParams.player === "string" ? searchParams.player : undefined;
+  const team = typeof searchParams.team === "string" ? searchParams.team : undefined;
 
   const date = getTodayChicagoDate();
   const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
@@ -25,7 +26,7 @@ export default async function TopHittersPage(props: PageProps<"/dashboard/hitter
         description={batterSnapshot ? `${rows.length} confirmed starting-lineup hitters, from ${date}'s batter snapshot.` : undefined}
       />
       {batterSnapshot ? (
-        <PlayerTable rows={rows} variant="hitter" initialSortKey="projection" highlightId={highlightId} />
+        <PlayerTable rows={rows} variant="hitter" initialSortKey="projection" highlightId={highlightId} initialFilters={team ? { team } : undefined} />
       ) : (
         <MissingDataState
           title="Batter research is not ready for today's slate"

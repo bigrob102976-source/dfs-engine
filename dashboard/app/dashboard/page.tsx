@@ -7,11 +7,13 @@ import { StatusCard } from "@/components/StatusCard";
 import { DataCard, MetricCard } from "@/components/ui/Card";
 import { PageHeader, SectionHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { loadLatestBatterSnapshot, loadLatestDkMatchReport, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { buildStackSummaries } from "@/lib/stacks";
+import { buildVegasSummaryStats } from "@/lib/vegasIntelligence";
 import { buildYesterdaySummary } from "@/lib/yesterday";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +68,8 @@ export default function TodaysSlatePage() {
   const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
   const batterSnapshot = loadLatestBatterSnapshot(date).data;
   const ownership = loadLatestOwnershipSnapshot(date).data;
+  const environmentReport = loadLatestEnvironmentReport(date);
+  const vegasStats = environmentReport && environmentReport.games.length > 0 ? buildVegasSummaryStats(environmentReport) : null;
   const matchReport = loadLatestDkMatchReport(date).data;
 
   const pitcherRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null);
@@ -141,7 +145,19 @@ export default function TodaysSlatePage() {
           <p className="text-xs text-text-faint">Not yet available as a dedicated view.</p>
         </DataCard>
         <DataCard title="Vegas" action={<Link href="/dashboard/vegas" className="text-[11px] text-accent hover:text-accent-hover">View →</Link>}>
-          <p className="text-xs text-text-faint">Not yet available as a dedicated view.</p>
+          {vegasStats && vegasStats.highestTotal.value !== null ? (
+            <div className="text-xs">
+              <div className="text-text-faint">Highest Total</div>
+              <div className="text-lg font-semibold text-text">{vegasStats.highestTotal.value.toFixed(1)}</div>
+              {vegasStats.highestTotal.game && (
+                <div className="text-text-faint">
+                  {vegasStats.highestTotal.game.away_team} @ {vegasStats.highestTotal.game.home_team}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-text-faint">No Vegas data yet -- generate today&apos;s Game Environment report.</p>
+          )}
         </DataCard>
       </div>
 

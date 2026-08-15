@@ -22,6 +22,7 @@ export function PlayerTable({
   initialSortKey,
   highlightId,
   showFilters = true,
+  initialFilters,
 }: {
   rows: PlayerRow[];
   columns?: PlayerColumn[];
@@ -29,11 +30,16 @@ export function PlayerTable({
   initialSortKey: keyof PlayerRow;
   highlightId?: string | null;
   showFilters?: boolean;
+  /** Seeds the filter state on mount -- e.g. a `?team=` query param from
+   * the Vegas Intelligence Board's "Top Hitters"/"Top Pitchers" links.
+   * A plain serializable object, so a Server Component page can pass it
+   * directly (unlike `columns`, which carries render closures). */
+  initialFilters?: PlayerRowFilters;
 }) {
   const resolvedColumns = columns ?? (variant === "pitcher" ? PITCHER_COLUMNS : HITTER_COLUMNS);
   const [sortKey, setSortKey] = useState<keyof PlayerRow>(initialSortKey);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [filters, setFilters] = useState<PlayerRowFilters>({});
+  const [filters, setFilters] = useState<PlayerRowFilters>(() => initialFilters ?? {});
   // Lazy initializer (not an effect): a highlighted player from a search
   // result should open the detail panel on first render only -- each
   // navigation to this route mounts a fresh PlayerTable instance, so
@@ -72,7 +78,7 @@ export function PlayerTable({
           <select
             className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-xs text-text"
             onChange={(e) => setFilters((f) => ({ ...f, team: e.target.value || undefined }))}
-            defaultValue=""
+            defaultValue={filters.team ?? ""}
           >
             <option value="">All teams</option>
             {teams.map((t) => (
