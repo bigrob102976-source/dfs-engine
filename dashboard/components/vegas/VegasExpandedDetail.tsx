@@ -3,8 +3,8 @@ import Link from "next/link";
 import { AIInsightBadge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/Header";
 import { averageBullpenStrength } from "@/lib/environmentSortFilter";
-import { buildVegasAiSummary, openingImpliedRuns, type VegasGameRow } from "@/lib/vegasIntelligence";
-import type { VegasSlateAnalysis } from "@/lib/gameEnvironment";
+import { buildVegasAiSummary, firstObservedImpliedRuns, type VegasGameRow } from "@/lib/vegasIntelligence";
+import type { BookLineSnapshot, VegasSlateAnalysis, VegasSnapshot } from "@/lib/gameEnvironment";
 
 function fmt(value: number | null | undefined, digits = 1): string {
   return value === null || value === undefined ? "--" : value.toFixed(digits);
@@ -13,6 +13,91 @@ function fmt(value: number | null | undefined, digits = 1): string {
 function fmtMl(value: number | null | undefined): string {
   if (value === null || value === undefined) return "--";
   return value > 0 ? `+${value}` : `${value}`;
+}
+
+function fmtPct(value: number | null | undefined): string {
+  return value === null || value === undefined ? "--" : `${(value * 100).toFixed(1)}%`;
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return "--";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "--" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** Per-sportsbook Moneyline/Total/Run Line/Last Updated table -- real
+ * SportsGameOdds provider data only (Milestone 24). Only the books the
+ * API actually returned are shown; nothing is fabricated for a book
+ * that didn't post a line. */
+function BookTable({ books, homeTeam, awayTeam }: { books: BookLineSnapshot[]; homeTeam: string; awayTeam: string }) {
+  if (books.length === 0) {
+    return <p className="mb-4 text-text-faint">No individual sportsbook lines were returned by the provider.</p>;
+  }
+  return (
+    <div className="mb-4 overflow-x-auto rounded border border-border-subtle bg-bg-panel-raised p-2.5 text-xs">
+      <table className="w-full min-w-[420px]">
+        <thead>
+          <tr className="text-text-faint">
+            <th className="pb-1 text-left font-normal">Book</th>
+            <th className="pb-1 text-right font-normal">Moneyline ({awayTeam}/{homeTeam})</th>
+            <th className="pb-1 text-right font-normal">Total</th>
+            <th className="pb-1 text-right font-normal">Run Line ({homeTeam})</th>
+            <th className="pb-1 text-right font-normal">Last Updated</th>
+          </tr>
+        </thead>
+        <tbody className="text-text">
+          {books.map((b) => (
+            <tr key={b.book} className="border-t border-border-subtle/60">
+              <td className="py-1 text-text-muted">{b.book}</td>
+              <td className="py-1 text-right">
+                {fmtMl(b.away_moneyline)} / {fmtMl(b.home_moneyline)}
+              </td>
+              <td className="py-1 text-right">{fmt(b.total)}</td>
+              <td className="py-1 text-right">{b.home_run_line !== null ? fmt(b.home_run_line) : "--"}</td>
+              <td className="py-1 text-right text-text-faint">{fmtTime(b.last_updated)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Market-consensus summary (median total, no-vig win probabilities,
+ * run-line-derived implied runs) -- see research/game_environment/providers/consensus.py
+ * and implied_runs.py for the exact methodology used to compute these. */
+function ConsensusSummary({ vegas, homeTeam, awayTeam }: { vegas: VegasSnapshot; homeTeam: string; awayTeam: string }) {
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-1 rounded border border-border-subtle bg-bg-panel-raised p-2.5 text-text-muted">
+      <span>
+        Consensus Total: <span className="text-text">{fmt(vegas.current_home.total)}</span>
+      </span>
+      <span>
+        Books Used: <span className="text-text">{vegas.books_used.length > 0 ? vegas.books_used.join(", ") : "--"}</span>
+      </span>
+      <span>
+        {homeTeam} Win %: <span className="text-text">{fmtPct(vegas.consensus_home_win_probability)}</span>
+      </span>
+      <span>
+        {awayTeam} Win %: <span className="text-text">{fmtPct(vegas.consensus_away_win_probability)}</span>
+      </span>
+      <span>
+        {homeTeam} Implied Runs: <span className="text-text">{fmt(vegas.home_implied_runs)}</span>
+      </span>
+      <span>
+        {awayTeam} Implied Runs: <span className="text-text">{fmt(vegas.away_implied_runs)}</span>
+      </span>
+      {vegas.implied_runs_calculation_method && (
+        <span className="col-span-2 text-[11px] text-text-faint">Method: {vegas.implied_runs_calculation_method}</span>
+      )}
+      {!vegas.implied_runs_is_valid && (
+        <span className="col-span-2 text-[11px] text-red">Implied runs failed validation -- see warnings below.</span>
+      )}
+      {vegas.validation_warnings.length > 0 && (
+        <span className="col-span-2 text-[11px] text-red">{vegas.validation_warnings.join("; ")}</span>
+      )}
+    </div>
+  );
 }
 
 function OddsColumn({ title, home, away, homeTeam, awayTeam }: {
@@ -67,7 +152,7 @@ export function VegasExpandedDetail({ row, analysis }: { row: VegasGameRow; anal
   const vegas = game.vegas;
   const bullpenStrength = averageBullpenStrength(game);
   const aiSummary = buildVegasAiSummary(game, analysis);
-  const opening = vegas ? openingImpliedRuns(vegas) : { home: null, away: null };
+  const firstObserved = vegas ? firstObservedImpliedRuns(vegas) : { home: null, away: null };
 
   return (
     <div className="grid grid-cols-1 gap-4 p-4 text-xs lg:grid-cols-2">
@@ -83,21 +168,32 @@ export function VegasExpandedDetail({ row, analysis }: { row: VegasGameRow; anal
           <>
             <SectionHeader title="Odds" />
             <div className="mb-4 grid grid-cols-2 gap-2">
-              <OddsColumn title="Opening" home={vegas.opening_home} away={vegas.opening_away} homeTeam={game.home_team} awayTeam={game.away_team} />
+              <OddsColumn title="First Observed" home={vegas.opening_home} away={vegas.opening_away} homeTeam={game.home_team} awayTeam={game.away_team} />
               <OddsColumn title="Current" home={vegas.current_home} away={vegas.current_away} homeTeam={game.home_team} awayTeam={game.away_team} />
             </div>
 
             <SectionHeader title="Betting History" />
             <ol className="mb-4 flex flex-col gap-1 text-text-muted">
               <li>
-                <span className="text-text-faint">Open</span> -- Total {fmt(vegas.opening_home.total)}, {game.home_team} ML {fmtMl(vegas.opening_home.moneyline)}
-                , Implied {fmt(opening.home)} / {fmt(opening.away)}
+                <span className="text-text-faint">First Observed{vegas.is_first_pull_of_day ? " (this pull)" : ""}</span> -- Total{" "}
+                {fmt(vegas.opening_home.total)}, {game.home_team} ML {fmtMl(vegas.opening_home.moneyline)}, Implied {fmt(firstObserved.home)} /{" "}
+                {fmt(firstObserved.away)}
               </li>
               <li>
                 <span className="text-text-faint">Current</span> -- Total {fmt(vegas.current_home.total)}, {game.home_team} ML {fmtMl(vegas.current_home.moneyline)}
                 , Implied {fmt(vegas.home_implied_runs)} / {fmt(vegas.away_implied_runs)}
               </li>
             </ol>
+
+            {!vegas.is_mock && (
+              <>
+                <SectionHeader title="Sportsbook Lines" />
+                <BookTable books={vegas.books} homeTeam={game.home_team} awayTeam={game.away_team} />
+
+                <SectionHeader title="Market Consensus" />
+                <ConsensusSummary vegas={vegas} homeTeam={game.home_team} awayTeam={game.away_team} />
+              </>
+            )}
           </>
         ) : (
           <p className="mb-4 text-text-faint">Vegas lines are unavailable for this game.</p>

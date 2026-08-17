@@ -15,11 +15,19 @@ import { filterVegasRows, searchVegasRows, sortVegasRows, type VegasFilterKey, t
 /** Client-side interactive shell for the Vegas Intelligence Board
  * (Milestone DS3): summary cards, search/filter/sort toolbar, the
  * desktop table / mobile card split, row expansion, and the
- * Show-Opening-Lines/Movement-%/Sparklines/Compact-Mode display
+ * Show-First-Observed-Lines/Movement-%/Sparklines/Compact-Mode display
  * settings. The Server Component page (page.tsx) does the one-time file
  * read (+ pitcher join); everything interactive lives here -- same
  * split as EnvironmentTerminal. */
-export function VegasIntelligenceBoard({ report, rows }: { report: SlateEnvironmentReport; rows: VegasGameRow[] }) {
+export function VegasIntelligenceBoard({
+  report,
+  rows,
+  history,
+}: {
+  report: SlateEnvironmentReport;
+  rows: VegasGameRow[];
+  history: SlateEnvironmentReport[];
+}) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<VegasFilterKey>("all");
   const [sortKey, setSortKey] = useState<VegasSortKey>("gameTime");
@@ -78,6 +86,7 @@ export function VegasIntelligenceBoard({ report, rows }: { report: SlateEnvironm
         onSort={handleSort}
         expandedId={expandedId}
         onToggleExpand={toggleExpand}
+        history={history}
       />
 
       <div className="flex flex-col gap-3 lg:hidden">
@@ -89,6 +98,7 @@ export function VegasIntelligenceBoard({ report, rows }: { report: SlateEnvironm
             settings={settings}
             expanded={expandedId === row.game.game_id}
             onToggleExpand={() => toggleExpand(row.game.game_id)}
+            history={history}
           />
         ))}
         {visible.length === 0 && <p className="py-8 text-center text-xs text-text-faint">No games match the current filters.</p>}

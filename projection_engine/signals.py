@@ -92,8 +92,17 @@ def weather_signal(player_type: str, weather: Optional[dict], weather_analysis: 
 
 def vegas_signal(player_type: str, is_home: bool, vegas: Optional[dict]) -> Optional[RawSignal]:
     """Reuses VegasSnapshot's own home_implied_runs/away_implied_runs/
-    total_movement and vegas.py::total_tier -- never re-derives odds math."""
-    if not vegas:
+    total_movement and vegas.py::total_tier -- never re-derives odds math.
+
+    Milestone 24: mock Vegas data must never influence a production/live
+    AI projection (same provenance rule as native_projections/matchup.py
+    ::environment_adjustment) -- returns None (no signal at all) whenever
+    `vegas["is_mock"]` is true, or whenever provenance is unknown
+    (key absent), treating "unknown" the same as "mock" rather than
+    assuming real. This is an input-quality/provenance fix, not a weight
+    change -- VEGAS_HIGH_TOTAL_POINTS/VEGAS_LOW_TOTAL_POINTS/etc. in
+    config/projection_engine_config.py are untouched."""
+    if not vegas or vegas.get("is_mock", True) is not False:
         return None
 
     implied = vegas.get("home_implied_runs") if is_home else vegas.get("away_implied_runs")

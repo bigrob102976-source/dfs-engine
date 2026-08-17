@@ -4,9 +4,16 @@ import { TeamMark } from "./TeamMark";
 import { VegasBadgeRow } from "./VegasBadgeRow";
 import { VegasExpandedDetail } from "./VegasExpandedDetail";
 import { VegasSparkline } from "./VegasSparkline";
-import type { VegasSlateAnalysis } from "@/lib/gameEnvironment";
+import type { SlateEnvironmentReport, VegasSlateAnalysis } from "@/lib/gameEnvironment";
 import type { VegasDisplaySettings } from "@/lib/vegasDisplaySettings";
-import { buildTotalMovementSeries, deriveVegasBadges, movementTone, vegasScore, type VegasGameRow } from "@/lib/vegasIntelligence";
+import {
+  buildRealTotalMovementSeries,
+  buildTotalMovementSeries,
+  deriveVegasBadges,
+  movementTone,
+  vegasScore,
+  type VegasGameRow,
+} from "@/lib/vegasIntelligence";
 
 function fmt(value: number | null | undefined, digits = 1): string {
   return value === null || value === undefined ? "--" : value.toFixed(digits);
@@ -35,17 +42,19 @@ export function VegasMobileCard({
   settings,
   expanded,
   onToggleExpand,
+  history,
 }: {
   row: VegasGameRow;
   analysis: VegasSlateAnalysis | null;
   settings: VegasDisplaySettings;
   expanded: boolean;
   onToggleExpand: () => void;
+  history: SlateEnvironmentReport[];
 }) {
   const { game } = row;
   const vegas = game.vegas;
   const badges = deriveVegasBadges(game, analysis);
-  const series = buildTotalMovementSeries(vegas);
+  const series = vegas && !vegas.is_mock ? buildRealTotalMovementSeries(history, game.game_id) : buildTotalMovementSeries(vegas);
 
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel shadow-[var(--shadow-card)]">

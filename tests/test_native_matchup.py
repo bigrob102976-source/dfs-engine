@@ -150,11 +150,17 @@ def test_park_factor_above_neutral_helps_hitters_and_hurts_pitchers():
     assert pitcher_result.points < 0
 
 
-def test_mock_vegas_capped_lower_than_real_vegas():
+def test_mock_vegas_contributes_zero_points_never_influences_real_projection():
+    # Milestone 24: mock Vegas data must NEVER influence a real/live
+    # projection -- not merely "capped small" as in the pre-M24 design.
     mock_result = environment_adjustment("hitter", team_implied_runs=5.5, vegas_is_mock=True)
+    assert mock_result.points == 0.0
+    assert "never influences" in mock_result.reasons[0].lower()
+
+
+def test_real_vegas_contributes_nonzero_points():
     real_result = environment_adjustment("hitter", team_implied_runs=5.5, vegas_is_mock=False)
-    assert mock_result.points <= cfg.MOCK_VEGAS_MAX_POINTS + 1e-6
-    assert real_result.points > mock_result.points
+    assert real_result.points != 0.0
 
 
 def test_weather_favoring_hitter_gives_positive_points():

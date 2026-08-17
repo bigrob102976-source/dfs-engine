@@ -252,14 +252,27 @@ def environment_adjustment(
         reasons.append(f"Park factor {park_factor:.0f} (real) -> {park_points:+.3f} points")
 
     if team_implied_runs is not None:
-        runs_range = _PITCHER_RANGES["run_prevention"]["implied_runs"]  # {"low":3.0,"high":5.5,"invert":True} -- shared run-environment scale
-        invert = player_type == "pitcher"
-        favorability = _normalize(team_implied_runs, runs_range["low"], runs_range["high"], invert)
-        cap = cfg.REAL_VEGAS_MAX_POINTS if vegas_is_mock is False else cfg.MOCK_VEGAS_MAX_POINTS
-        vegas_points = _points_from_favorability(favorability, cap)
-        points += vegas_points
-        tag = "real market data" if vegas_is_mock is False else "synthetic mock provider"
-        reasons.append(f"Vegas implied runs {team_implied_runs:.2f} ({tag}) -> {vegas_points:+.3f} points")
+        # Safe-by-default: only an EXPLICIT vegas_is_mock=False (a real
+        # provider actually said so) unlocks real weight. Unknown
+        # provenance (None) is treated the same as mock -- never assume
+        # data is real just because nobody said it was fake.
+        if vegas_is_mock is not False:
+            # Milestone 24: mock Vegas data must NEVER influence a
+            # projection labeled real/live -- it may still be displayed
+            # elsewhere in explicit dev/mock mode, but it contributes
+            # ZERO points here, full stop (not merely "capped small" as
+            # in the pre-M24 design).
+            reasons.append(
+                f"Vegas implied runs {team_implied_runs:.2f} (synthetic mock provider) -> +0.000 points "
+                f"(mock Vegas never influences a real/live projection)"
+            )
+        else:
+            runs_range = _PITCHER_RANGES["run_prevention"]["implied_runs"]  # {"low":3.0,"high":5.5,"invert":True} -- shared run-environment scale
+            invert = player_type == "pitcher"
+            favorability = _normalize(team_implied_runs, runs_range["low"], runs_range["high"], invert)
+            vegas_points = _points_from_favorability(favorability, cfg.REAL_VEGAS_MAX_POINTS)
+            points += vegas_points
+            reasons.append(f"Vegas implied runs {team_implied_runs:.2f} (real market data) -> {vegas_points:+.3f} points")
 
     if weather_favors:
         other_type = "pitcher" if player_type == "hitter" else "hitter"

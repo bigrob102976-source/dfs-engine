@@ -58,7 +58,7 @@ export function VegasHeaderActions({
               isMock ? "bg-yellow/15 text-yellow" : "bg-gold/15 text-gold"
             }`}
           >
-            {providerName}
+            {providerName} / {isMock ? "MOCK DATA" : "LIVE MARKET DATA"}
           </span>
         )}
         <PrimaryButton onClick={handleRefresh} disabled={busy} className="uppercase tracking-wide">

@@ -75,7 +75,7 @@ describe("VegasPage", () => {
     expect(screen.queryByText(/scripts\//)).not.toBeInTheDocument();
   });
 
-  it("shows 'No Vegas Data' when the report has games but none carry Vegas odds", async () => {
+  it("shows 'Vegas Provider / NOT CONNECTED' when the report has games but none carry Vegas odds", async () => {
     process.env.MLB_DFS_ROOT = tmpDir;
     writeSnapshot("2026-08-13", {
       slate_date: "2026-08-13",
@@ -100,7 +100,7 @@ describe("VegasPage", () => {
     const jsx = await VegasPage();
     render(jsx);
 
-    expect(screen.getByText("No Vegas Data")).toBeInTheDocument();
+    expect(screen.getByText("Vegas Provider / NOT CONNECTED")).toBeInTheDocument();
     vi.doUnmock("@/lib/currentDate");
     vi.resetModules();
   });

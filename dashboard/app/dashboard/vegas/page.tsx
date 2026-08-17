@@ -4,7 +4,7 @@ import { GenerateEnvironmentButton } from "@/components/environment/GenerateEnvi
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
-import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
+import { loadEnvironmentReportHistory, loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { buildVegasGameRows } from "@/lib/vegasIntelligence";
@@ -53,8 +53,8 @@ export default async function VegasPage() {
         <PageHeader title="Vegas Intelligence" description="Track line movement, implied totals, betting trends, and AI market analysis." />
         <EmptyState
           icon="💰"
-          title="No Vegas Data"
-          description="Today's Game Environment report has games, but none have Vegas odds yet. Regenerate the report to try again."
+          title="Vegas Provider / NOT CONNECTED"
+          description="No SPORTSGAMEODDS_API_KEY is configured and mock mode was not explicitly requested, so no Vegas data was collected. Native Projection Vegas Adjustment: DISABLED. Set SPORTSGAMEODDS_API_KEY (server-side only) and regenerate the report to connect a real provider."
           action={<GenerateEnvironmentButton />}
         />
       </div>
@@ -64,6 +64,7 @@ export default async function VegasPage() {
   const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
   const rows = buildVegasGameRows(report.games, pitcherSnapshot?.pitchers ?? []);
   const sampleVegas = gamesWithVegas[0]?.vegas ?? null;
+  const history = loadEnvironmentReportHistory(date);
 
   return (
     <div>
@@ -72,7 +73,7 @@ export default async function VegasPage() {
         description="Track line movement, implied totals, betting trends, and AI market analysis."
         actions={<VegasHeaderActions generatedAt={report.generated_at} providerName={sampleVegas?.provider_name ?? null} isMock={sampleVegas?.is_mock ?? false} />}
       />
-      <VegasIntelligenceBoard report={report} rows={rows} />
+      <VegasIntelligenceBoard report={report} rows={rows} history={history} />
     </div>
   );
 }

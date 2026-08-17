@@ -107,12 +107,64 @@ class VegasSnapshot:
     current_away: VegasLine
     home_implied_runs: Optional[float]
     away_implied_runs: Optional[float]
-    total_movement: Optional[float]  # current_total - opening_total
+    total_movement: Optional[float]  # current_total - opening_total ("opening" = FIRST OBSERVED by this project, see is_first_pull_of_day
     moneyline_movement_home: Optional[int]  # current - opening, home side
+
+    # --- Milestone 24: real-provider provenance, per-book detail, and ---
+    # --- explainable consensus/implied-runs methodology ----------------
+    # Every field below is None for MockVegasProvider (mock never reports
+    # a real event id, a real book list, or a real calculation method).
+    event_id: Optional[str] = None
+    books: List["BookLineSnapshot"] = field(default_factory=list)
+    books_used: List[str] = field(default_factory=list)
+    market_count: int = 0
+    consensus_method: Optional[str] = None
+    consensus_home_win_probability: Optional[float] = None
+    consensus_away_win_probability: Optional[float] = None
+
+    # Implied-runs explainability (research/game_environment/providers/implied_runs.py)
+    implied_runs_calculation_method: Optional[str] = None
+    implied_runs_input_total: Optional[float] = None
+    implied_runs_input_home_run_line: Optional[float] = None
+    implied_runs_input_home_moneyline: Optional[int] = None
+    implied_runs_input_away_moneyline: Optional[int] = None
+    implied_runs_is_valid: bool = True
+    validation_warnings: List[str] = field(default_factory=list)
+
+    # "First Observed" honesty (see providers/normalizer.py's module
+    # docstring and vegas.py's _resolve_first_observed()): True when
+    # THIS pull is the first one seen today for this game, meaning
+    # opening_home/opening_away are identical to current_home/current_away
+    # by construction, not a real earlier line. Never labeled "opening"
+    # (a real sportsbook open) anywhere in this project.
+    is_first_pull_of_day: bool = True
 
     def to_dict(self) -> dict:
         d = asdict(self)
         return d
+
+
+@dataclass
+class BookLineSnapshot:
+    """One sportsbook's line as stored on a VegasSnapshot -- same shape
+    as providers/models.py::BookLine, duplicated here (rather than
+    imported) so research/game_environment/models.py has no dependency
+    on the providers/ subpackage; vegas.py does the conversion."""
+
+    book: str
+    home_moneyline: Optional[int] = None
+    away_moneyline: Optional[int] = None
+    total: Optional[float] = None
+    total_over_odds: Optional[int] = None
+    total_under_odds: Optional[int] = None
+    home_run_line: Optional[float] = None
+    away_run_line: Optional[float] = None
+    home_run_line_odds: Optional[int] = None
+    away_run_line_odds: Optional[int] = None
+    last_updated: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass

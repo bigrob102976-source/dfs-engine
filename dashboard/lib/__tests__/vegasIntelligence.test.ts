@@ -3,14 +3,15 @@ import { describe, expect, it } from "vitest";
 import { buildGameEnvironmentReport } from "../environmentTestFixtures";
 import type { GameEnvironmentReport, SlateEnvironmentReport, VegasSlateAnalysis } from "../gameEnvironment";
 import {
+  buildRealTotalMovementSeries,
   buildTotalMovementSeries,
   buildVegasAiSummary,
   buildVegasGameRows,
   buildVegasSummaryStats,
   deriveVegasBadges,
+  firstObservedImpliedRuns,
   movementPercent,
   movementTone,
-  openingImpliedRuns,
   totalTier,
   vegasScore,
 } from "../vegasIntelligence";
@@ -53,20 +54,21 @@ describe("vegasScore", () => {
   });
 });
 
-describe("openingImpliedRuns", () => {
-  it("recomputes opening implied runs from the SAME formula the mock provider uses for current", () => {
+describe("firstObservedImpliedRuns", () => {
+  it("splits the first-observed total using the run-line-margin methodology (Milestone 24)", () => {
     const vegas = game().vegas!;
-    // opening_home: moneyline -120, total 9.0 (favorite gets a larger implied share)
-    const { home, away } = openingImpliedRuns(vegas);
-    expect(home).not.toBeNull();
-    expect(away).not.toBeNull();
+    // opening_home: total 9.0, run_line -1.5 -> marginHome = 1.5
+    // home = 9.0/2 + 1.5/2 = 5.25, away = 9.0/2 - 1.5/2 = 3.75, sum reconciles exactly.
+    const { home, away } = firstObservedImpliedRuns(vegas);
+    expect(home).toBeCloseTo(5.25, 2);
+    expect(away).toBeCloseTo(3.75, 2);
     expect(Math.round((home! + away!) * 100) / 100).toBeCloseTo(9.0, 1);
-    expect(home!).toBeGreaterThan(away!); // home is the opening favorite (-120)
+    expect(home!).toBeGreaterThan(away!);
   });
 
-  it("returns nulls when opening total or moneyline is missing", () => {
-    const vegas = { ...game().vegas!, opening_home: { moneyline: null, run_line: null, run_line_odds: null, total: null } };
-    expect(openingImpliedRuns(vegas)).toEqual({ home: null, away: null });
+  it("returns nulls when opening total or run line is missing", () => {
+    const vegas = { ...game().vegas!, opening_home: { moneyline: -120, run_line: null, run_line_odds: null, total: null } };
+    expect(firstObservedImpliedRuns(vegas)).toEqual({ home: null, away: null });
   });
 });
 
@@ -176,6 +178,44 @@ describe("buildTotalMovementSeries", () => {
     expect(series.points).toEqual([]);
     expect(series.open).toBeNull();
     expect(series.highest).toBeNull();
+  });
+});
+
+describe("buildRealTotalMovementSeries", () => {
+  function realReport(gameId: string, total: number, generatedAt: string): SlateEnvironmentReport {
+    const g = game({
+      game_id: gameId,
+      vegas: { ...game().vegas!, game_id: gameId, is_mock: false, provider_name: "SportsGameOdds", current_home: { ...game().vegas!.current_home, total } },
+    });
+    return { slate_date: "2026-08-13", generated_at: generatedAt, engine_version: "0.1.0", games: [g], vegas_slate_analysis: null, warnings: [] };
+  }
+
+  it("builds a genuine multi-point series from every saved snapshot's real (non-mock) current total, no fabricated points", () => {
+    const history = [
+      realReport("g1", 8.5, "2026-08-13T14:00:00Z"),
+      realReport("g1", 8.9, "2026-08-13T16:00:00Z"),
+      realReport("g1", 9.3, "2026-08-13T18:00:00Z"),
+    ];
+    const series = buildRealTotalMovementSeries(history, "g1");
+    expect(series.points).toEqual([8.5, 8.9, 9.3]);
+    expect(series.open).toBe(8.5);
+    expect(series.current).toBe(9.3);
+    expect(series.highest).toBe(9.3);
+    expect(series.lowest).toBe(8.5);
+  });
+
+  it("skips snapshots where the game's vegas is mock or missing rather than fabricating a point", () => {
+    const mockReport = realReport("g1", 5.0, "2026-08-13T13:00:00Z");
+    mockReport.games[0].vegas = { ...mockReport.games[0].vegas!, is_mock: true };
+    const history = [mockReport, realReport("g1", 8.9, "2026-08-13T16:00:00Z")];
+    const series = buildRealTotalMovementSeries(history, "g1");
+    expect(series.points).not.toContain(5.0);
+  });
+
+  it("falls back to a single-snapshot two-point series when fewer than 2 real points exist", () => {
+    const history = [realReport("g1", 8.9, "2026-08-13T16:00:00Z")];
+    const series = buildRealTotalMovementSeries(history, "g1");
+    expect(series.points.length).toBeLessThanOrEqual(2);
   });
 });
 

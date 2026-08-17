@@ -50,6 +50,17 @@ def _resolve_pitcher_environment(p: PitcherInput, game_report: Optional[dict]) -
     )
 
 
+def _vegas_invalid_warning(game_report: Optional[dict]) -> Optional[str]:
+    """See hitter_projection.py's identical helper for the full
+    rationale -- mirrored here for pitchers."""
+    if not game_report:
+        return None
+    vegas = game_report.get("vegas") or {}
+    if vegas and vegas.get("implied_runs_is_valid", True) is False:
+        return "Vegas implied-runs calculation was invalid for this game -- Vegas contribution excluded from this projection."
+    return None
+
+
 def project_pitcher(
     p: PitcherInput,
     opposing_lineup: Optional[OpposingLineupQuality] = None,
@@ -87,6 +98,7 @@ def project_pitcher(
         missing_fields=list(rates.coverage_missing_fields),
     )
     reasons = list(opportunity.reasons) + list(rates.reasons) + list(matchup_result.reasons) + list(env_result.reasons)
+    vegas_invalid_warning = _vegas_invalid_warning(game_environment)
 
     proj = NativePlayerProjection(
         player_id=p.player_id,
@@ -113,4 +125,6 @@ def project_pitcher(
         source_environment_snapshot_path=source_environment_snapshot_path,
     )
     proj.warnings = validation.validate_projection(proj, rates.season_opportunities)
+    if vegas_invalid_warning:
+        proj.warnings.append(vegas_invalid_warning)
     return proj

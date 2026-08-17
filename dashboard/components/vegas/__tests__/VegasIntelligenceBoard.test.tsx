@@ -67,7 +67,7 @@ function buildReport(): SlateEnvironmentReport {
 function renderBoard() {
   const report = buildReport();
   const rows = buildVegasGameRows(report.games, []);
-  return render(<VegasIntelligenceBoard report={report} rows={rows} />);
+  return render(<VegasIntelligenceBoard report={report} rows={rows} history={[report]} />);
 }
 
 describe("VegasIntelligenceBoard", () => {

@@ -1,5 +1,5 @@
 import { ARTIFACT_DIRS, artifactPath } from "./artifactRoot";
-import { findLatestFile, safeReadJson } from "./discovery";
+import { findAllFiles, findLatestFile, safeReadJson } from "./discovery";
 
 export interface WeatherReading {
   temperature_f: number | null;
@@ -43,6 +43,20 @@ export interface VegasLine {
   total: number | null;
 }
 
+export interface BookLineSnapshot {
+  book: string;
+  home_moneyline: number | null;
+  away_moneyline: number | null;
+  total: number | null;
+  total_over_odds: number | null;
+  total_under_odds: number | null;
+  home_run_line: number | null;
+  away_run_line: number | null;
+  home_run_line_odds: number | null;
+  away_run_line_odds: number | null;
+  last_updated: string | null;
+}
+
 export interface VegasSnapshot {
   game_id: string;
   home_team: string;
@@ -58,6 +72,27 @@ export interface VegasSnapshot {
   away_implied_runs: number | null;
   total_movement: number | null;
   moneyline_movement_home: number | null;
+
+  // Milestone 24: real-provider provenance, per-book detail, and
+  // explainable consensus/implied-runs methodology. All None/[] for
+  // MockVegasProvider.
+  event_id: string | null;
+  books: BookLineSnapshot[];
+  books_used: string[];
+  market_count: number;
+  consensus_method: string | null;
+  consensus_home_win_probability: number | null;
+  consensus_away_win_probability: number | null;
+
+  implied_runs_calculation_method: string | null;
+  implied_runs_input_total: number | null;
+  implied_runs_input_home_run_line: number | null;
+  implied_runs_input_home_moneyline: number | null;
+  implied_runs_input_away_moneyline: number | null;
+  implied_runs_is_valid: boolean;
+  validation_warnings: string[];
+
+  is_first_pull_of_day: boolean;
 }
 
 export interface VegasSlateAnalysis {
@@ -173,4 +208,19 @@ export function loadLatestEnvironmentReport(date: string): SlateEnvironmentRepor
   const dir = artifactPath(ARTIFACT_DIRS.gameEnvironmentSnapshots, date);
   const path = findLatestFile(dir, "environment_");
   return safeReadJson<SlateEnvironmentReport>(path);
+}
+
+/** Milestone 24: EVERY immutable Game Environment snapshot saved for
+ * `date`, oldest first -- not just the latest. Used to build genuine
+ * intraday Vegas line-movement history (First Observed / Current /
+ * High / Low / real sparkline series) from this project's OWN saved
+ * snapshots, since a real provider's response is only ever a single
+ * point in time; the milestone explicitly forbids fabricating
+ * intermediate history points, so this is the one honest source. Pure
+ * filesystem read -- never triggers generation. */
+export function loadEnvironmentReportHistory(date: string): SlateEnvironmentReport[] {
+  const dir = artifactPath(ARTIFACT_DIRS.gameEnvironmentSnapshots, date);
+  return findAllFiles(dir, "environment_")
+    .map((path) => safeReadJson<SlateEnvironmentReport>(path))
+    .filter((report): report is SlateEnvironmentReport => report !== null);
 }

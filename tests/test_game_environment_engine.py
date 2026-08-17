@@ -57,7 +57,11 @@ def test_every_game_has_a_score_and_summary(tmp_path, monkeypatch):
 
 
 def test_vegas_slate_analysis_is_computed_across_every_game(tmp_path, monkeypatch):
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 24: Vegas no longer defaults to mock (unlike weather/bullpen),
+    # so this test -- which specifically exercises Vegas slate analysis --
+    # must explicitly opt into mock mode.
+    monkeypatch.delenv("SPORTSGAMEODDS_API_KEY", raising=False)
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=3)
 
@@ -65,6 +69,18 @@ def test_vegas_slate_analysis_is_computed_across_every_game(tmp_path, monkeypatc
 
     assert report.vegas_slate_analysis is not None
     assert report.vegas_slate_analysis.highest_total_game_id in {g.game_id for g in report.games}
+
+
+def test_vegas_is_none_for_every_game_when_not_configured(tmp_path, monkeypatch):
+    monkeypatch.delenv("SPORTSGAMEODDS_API_KEY", raising=False)
+    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    root = tmp_path / "research_output"
+    _write_research_package(root, "2026-08-13", game_count=2)
+
+    report = build_slate_environment_report("2026-08-13", research_output_root=str(root))
+
+    assert all(g.vegas is None for g in report.games)
+    assert report.vegas_slate_analysis is None
 
 
 def test_umpire_defaults_to_unknown_for_every_game(tmp_path, monkeypatch):

@@ -53,26 +53,26 @@ def test_no_conclusions_returns_none():
 
 
 def test_high_total_game_favors_hitter():
-    vegas = {"current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
+    vegas = {"is_mock": False, "current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
     signal = vegas_signal("hitter", True, vegas)
     assert signal.raw_delta > 0
     assert "6.0 runs" in signal.reason
 
 
 def test_high_total_game_disfavors_pitcher():
-    vegas = {"current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
+    vegas = {"is_mock": False, "current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
     signal = vegas_signal("pitcher", True, vegas)
     assert signal.raw_delta < 0
 
 
 def test_low_total_game_favors_pitcher():
-    vegas = {"current_home": {"total": 6.5}, "home_implied_runs": 3.0, "away_implied_runs": 3.5, "total_movement": None}
+    vegas = {"is_mock": False, "current_home": {"total": 6.5}, "home_implied_runs": 3.0, "away_implied_runs": 3.5, "total_movement": None}
     signal = vegas_signal("pitcher", False, vegas)
     assert signal.raw_delta > 0
 
 
 def test_positive_movement_favors_hitter():
-    vegas = {"current_home": {"total": 8.5}, "home_implied_runs": 4.2, "away_implied_runs": 4.3, "total_movement": 1.2}
+    vegas = {"is_mock": False, "current_home": {"total": 8.5}, "home_implied_runs": 4.2, "away_implied_runs": 4.3, "total_movement": 1.2}
     signal = vegas_signal("hitter", True, vegas)
     assert signal.raw_delta > 0
     assert "moved up 1.2 runs" in signal.reason
@@ -81,13 +81,29 @@ def test_positive_movement_favors_hitter():
 def test_movement_is_capped():
     from config.projection_engine_config import VEGAS_MOVEMENT_MAX_POINTS
 
-    vegas = {"current_home": {"total": 8.5}, "home_implied_runs": 4.2, "away_implied_runs": 4.3, "total_movement": 50.0}
+    vegas = {"is_mock": False, "current_home": {"total": 8.5}, "home_implied_runs": 4.2, "away_implied_runs": 4.3, "total_movement": 50.0}
     signal = vegas_signal("hitter", True, vegas)
     assert signal.raw_delta <= VEGAS_MOVEMENT_MAX_POINTS + 0.001
 
 
 def test_missing_vegas_returns_none():
     assert vegas_signal("hitter", True, None) is None
+
+
+def test_mock_vegas_returns_no_signal():
+    # Milestone 24: mock market data must never influence a production/
+    # live AI projection, even though the shape is otherwise identical
+    # to a real high-total game.
+    vegas = {"is_mock": True, "current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
+    assert vegas_signal("hitter", True, vegas) is None
+
+
+def test_unknown_provenance_vegas_returns_no_signal():
+    # No "is_mock" key at all (unknown provenance) is treated the same
+    # as mock -- never assume data is real just because nobody said it
+    # was fake.
+    vegas = {"current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None}
+    assert vegas_signal("hitter", True, vegas) is None
 
 
 # ----------------------------------------------------------------------------

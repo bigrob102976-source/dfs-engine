@@ -7,8 +7,16 @@ import { VegasBadgeRow } from "./VegasBadgeRow";
 import { VegasExpandedDetail } from "./VegasExpandedDetail";
 import { VegasSparkline } from "./VegasSparkline";
 import type { VegasDisplaySettings } from "@/lib/vegasDisplaySettings";
-import type { VegasSlateAnalysis } from "@/lib/gameEnvironment";
-import { buildTotalMovementSeries, deriveVegasBadges, movementPercent, movementTone, vegasScore, type VegasGameRow } from "@/lib/vegasIntelligence";
+import type { SlateEnvironmentReport, VegasSlateAnalysis } from "@/lib/gameEnvironment";
+import {
+  buildRealTotalMovementSeries,
+  buildTotalMovementSeries,
+  deriveVegasBadges,
+  movementPercent,
+  movementTone,
+  vegasScore,
+  type VegasGameRow,
+} from "@/lib/vegasIntelligence";
 import type { VegasSortKey } from "@/lib/vegasSortFilter";
 
 function fmt(value: number | null | undefined, digits = 1): string {
@@ -54,6 +62,7 @@ export function VegasTable({
   onSort,
   expandedId,
   onToggleExpand,
+  history,
 }: {
   rows: VegasGameRow[];
   analysis: VegasSlateAnalysis | null;
@@ -63,6 +72,7 @@ export function VegasTable({
   onSort: (key: VegasSortKey) => void;
   expandedId: string | null;
   onToggleExpand: (gameId: string) => void;
+  history: SlateEnvironmentReport[];
 }) {
   const cellPad = settings.compactMode ? "px-3 py-1.5" : "px-3 py-2.5";
 
@@ -89,7 +99,8 @@ export function VegasTable({
             const vegas = game.vegas;
             const badges = deriveVegasBadges(game, analysis);
             const expanded = expandedId === game.game_id;
-            const series = buildTotalMovementSeries(vegas);
+            const series =
+              vegas && !vegas.is_mock ? buildRealTotalMovementSeries(history, game.game_id) : buildTotalMovementSeries(vegas);
             const totalMovePct = vegas ? movementPercent(vegas.opening_home.total, vegas.current_home.total) : null;
             const mlMovePct = vegas ? movementPercent(vegas.opening_home.moneyline, vegas.current_home.moneyline) : null;
 

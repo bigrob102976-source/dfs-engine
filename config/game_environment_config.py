@@ -131,6 +131,17 @@ LINE_MOVEMENT_SHARP_RUNS = 1.0  # total-line movement (open -> current) at/above
 MONEYLINE_BIG_FAVORITE = -170
 MONEYLINE_BIG_UNDERDOG = 150
 
+# --- Vegas sanity-check bounds (Milestone 24) ----------------------------------
+# A REAL MLB game total outside this range almost certainly indicates a
+# parsing/consensus bug, not a genuine market price -- real 9-inning MLB
+# totals have not been observed outside roughly 6.5-12.5 even at Coors
+# Field in extreme weather; this range is deliberately wider than that
+# observed band so a real, unusual-but-genuine total is never falsely
+# rejected, while still catching a clearly broken value (e.g. a
+# mis-parsed spread or moneyline landing in the total field).
+VEGAS_TOTAL_MIN_PLAUSIBLE = 4.0
+VEGAS_TOTAL_MAX_PLAUSIBLE = 16.0
+
 # --- Bullpen scoring ----------------------------------------------------------
 
 BULLPEN_ERA_STRONG = 3.50

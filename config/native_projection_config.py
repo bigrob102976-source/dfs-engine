@@ -167,12 +167,14 @@ OPPOSING_LINEUP_MIN_HITTERS_FOR_AGGREGATE = 4
 # eventually already price in).
 PARK_HITTER_POINTS_PER_FACTOR_POINT = 0.010  # points per (park_factor - 100)
 PARK_PITCHER_POINTS_PER_FACTOR_POINT = -0.008
-MOCK_VEGAS_MAX_POINTS = 0.15
 MOCK_WEATHER_MAX_POINTS = 0.10
 MOCK_BULLPEN_MAX_POINTS = 0.10
-# If a real (non-mock) Vegas provider is ever configured, it becomes the
-# PRIMARY run-environment signal and park's own weight above should be
-# revisited -- not automatically done here (no auto-tuning), just documented.
+# Milestone 24: mock Vegas data now contributes ZERO points to any
+# projection (native_projections/matchup.py::environment_adjustment),
+# not merely a small capped weight -- a real SportsGameOdds provider,
+# once configured, is the ONLY source that ever earns Vegas weight, at
+# this cap. Weather/bullpen are unchanged (still mock-only, still
+# capped small) -- this milestone's scope was explicitly Vegas only.
 REAL_VEGAS_MAX_POINTS = 0.50
 
 # --- Runs / RBI approximation --------------------------------------------------

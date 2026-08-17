@@ -52,6 +52,26 @@ def _resolve_hitter_environment(b: BatterInput, game_report: Optional[dict]) -> 
     )
 
 
+def _vegas_invalid_warning(game_report: Optional[dict]) -> Optional[str]:
+    """Milestone 24: an invalid Vegas implied-runs calculation (e.g. the
+    market components didn't reconcile) already contributes ZERO points
+    by construction -- providers/implied_runs.py nulls out both
+    home_implied_runs/away_implied_runs whenever implied_runs_is_valid
+    is False, so team_implied_runs naturally resolves to None above and
+    matchup.environment_adjustment's `if team_implied_runs is not None`
+    guard already skips it. This only adds the explicit WARNING the
+    milestone requires so that "why is Vegas missing from this
+    projection" is never silent. `.get(..., True)` defaults an OLDER
+    cached snapshot (saved before this field existed) to valid, never
+    treating a missing key as a red flag."""
+    if not game_report:
+        return None
+    vegas = game_report.get("vegas") or {}
+    if vegas and vegas.get("implied_runs_is_valid", True) is False:
+        return "Vegas implied-runs calculation was invalid for this game -- Vegas contribution excluded from this projection."
+    return None
+
+
 def project_hitter(
     b: BatterInput,
     game_environment: Optional[dict] = None,
@@ -89,6 +109,7 @@ def project_hitter(
         missing_fields=list(rates.coverage_missing_fields),
     )
     reasons = list(opportunity.reasons) + list(rates.reasons) + list(matchup_result.reasons) + list(env_result.reasons)
+    vegas_invalid_warning = _vegas_invalid_warning(game_environment)
 
     proj = NativePlayerProjection(
         player_id=b.player_id,
@@ -115,4 +136,6 @@ def project_hitter(
         source_environment_snapshot_path=source_environment_snapshot_path,
     )
     proj.warnings = validation.validate_projection(proj, b.season.plate_appearances)
+    if vegas_invalid_warning:
+        proj.warnings.append(vegas_invalid_warning)
     return proj

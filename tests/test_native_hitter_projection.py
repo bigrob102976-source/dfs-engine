@@ -64,6 +64,51 @@ def test_missing_all_optional_data_does_not_crash():
     assert proj.native_floor >= 0
 
 
+def test_mock_vegas_never_influences_projection_even_with_implied_runs_present():
+    # Milestone 24: a mock Vegas snapshot must never move the projection,
+    # even though it carries a (synthetic) implied_runs value.
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    no_vegas = project_hitter(b, game_environment={"home_team": "AAA"})
+    mock_vegas = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            "vegas": {"is_mock": True, "home_implied_runs": 6.5, "implied_runs_is_valid": True},
+        },
+    )
+    assert mock_vegas.native_projection == no_vegas.native_projection
+
+
+def test_real_vegas_does_influence_projection():
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    no_vegas = project_hitter(b, game_environment={"home_team": "AAA"})
+    real_vegas = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            "vegas": {"is_mock": False, "home_implied_runs": 6.5, "implied_runs_is_valid": True},
+        },
+    )
+    assert real_vegas.native_projection != no_vegas.native_projection
+
+
+def test_invalid_vegas_calculation_contributes_zero_and_warns():
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    no_vegas = project_hitter(b, game_environment={"home_team": "AAA"})
+    invalid_vegas = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            # An invalid calculation, per providers/implied_runs.py's own
+            # contract, always carries home_implied_runs=None alongside
+            # implied_runs_is_valid=False -- never a populated value.
+            "vegas": {"is_mock": False, "home_implied_runs": None, "away_implied_runs": None, "implied_runs_is_valid": False},
+        },
+    )
+    assert invalid_vegas.native_projection == no_vegas.native_projection
+    assert any("invalid" in w.lower() for w in invalid_vegas.warnings)
+
+
 def test_park_factor_from_game_environment_shifts_projection():
     b = make_batter(season=REALISTIC_SEASON, team="AAA")
     neutral = project_hitter(b, game_environment={"home_team": "AAA", "ballpark": {"park_factor": 100.0}})

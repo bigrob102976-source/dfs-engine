@@ -3,17 +3,24 @@
 import type { VegasDisplaySettings } from "@/lib/vegasDisplaySettings";
 
 const TOGGLES: Array<{ key: keyof VegasDisplaySettings; label: string }> = [
-  { key: "showOpeningLines", label: "Show Opening Lines" },
+  { key: "showOpeningLines", label: "Show First Observed Lines" },
   { key: "showMovementPercent", label: "Show Movement %" },
   { key: "showSparklines", label: "Show Sparklines" },
   { key: "compactMode", label: "Compact Mode" },
 ];
 
-/** Show Opening Lines / Show Movement % / Show Sparklines / Compact
- * Mode -- a display preference only, persisted in this browser (see
- * lib/vegasDisplaySettings.ts). Never changes what data the engine
+/** Show First Observed Lines / Show Movement % / Show Sparklines /
+ * Compact Mode -- a display preference only, persisted in this browser
+ * (see lib/vegasDisplaySettings.ts). Never changes what data the engine
  * collects. Mirrors components/environment/EnvironmentSectionToggles.tsx's
- * markup exactly. */
+ * markup exactly.
+ *
+ * Milestone 24: labeled "First Observed" rather than "Opening" because
+ * for the real SportsGameOdds provider this is this project's own
+ * earliest same-day observation, not a genuine sportsbook opening line
+ * (the free plan does not expose true opening-line history). Only
+ * MockVegasProvider's synthetic "opening" value is a true book-open
+ * analog, and even there the honest label is preferable for consistency. */
 export function VegasSettingsToggles({
   settings,
   onChange,

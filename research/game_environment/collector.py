@@ -2,13 +2,26 @@
 source, and resolves which providers are configured.
 
 Provider resolution mirrors dfs/providers/config.py's DFS-salary
-pattern for weather/vegas/bullpen (GAME_ENVIRONMENT_PROVIDER unset ->
+pattern for weather/bullpen (GAME_ENVIRONMENT_PROVIDER unset ->
 automatic mock fallback, so the engine is useful with zero setup) but
 deliberately does NOT auto-fallback umpire data to mock -- the
 milestone is explicit that umpire status must be UNKNOWN rather than
 guessed unless a provider is genuinely configured (see umpires.py's
 module docstring). Set GAME_ENVIRONMENT_UMPIRE_PROVIDER=mock to opt
 into the mock umpire provider for testing/demo purposes.
+
+Milestone 24: Vegas resolution is DIFFERENT from weather/bullpen and
+deliberately does NOT default to mock. Real market data (SportsGameOdds)
+is used automatically whenever SPORTSGAMEODDS_API_KEY is set; if it
+isn't, Vegas is NOT_CONFIGURED (vegas stays None for every game, exactly
+like an unconfigured weather/bullpen provider would) UNLESS
+GAME_ENVIRONMENT_PROVIDER=mock is explicitly set. This is an intentional
+product-behavior difference from weather/bullpen's "useful with zero
+setup" default: a Vegas number silently backed by fake data is far more
+likely to be trusted and acted on than a missing weather reading, so
+this milestone requires an explicit real key OR an explicit mock
+opt-in -- never a silent default to mock (see get_configured_vegas_provider()'s
+own docstring below for the exact resolution order).
 """
 
 import os
@@ -18,13 +31,13 @@ from typing import Callable, Dict, Optional, Tuple
 from research.game_environment import ballpark, bullpen, summary, travel, umpires, vegas, weather
 from research.game_environment.bullpen import BullpenProvider, MockBullpenProvider
 from research.game_environment.models import FutureAdjustmentPreview, GameEnvironmentReport
+from research.game_environment.providers.sportsgameodds import SportsGameOddsProvider
 from research.game_environment.scoring import score_environment
 from research.game_environment.umpires import MockUmpireProvider, UmpireProvider, UnknownUmpireProvider
-from research.game_environment.vegas import MockVegasProvider, VegasProvider
+from research.game_environment.vegas import MockVegasProvider, NotConfiguredVegasProvider, SportsGameOddsVegasProvider, VegasProvider
 from research.game_environment.weather import MockWeatherProvider, WeatherProvider
 
 WEATHER_PROVIDER_FACTORIES: Dict[str, Callable[[], WeatherProvider]] = {"mock": MockWeatherProvider}
-VEGAS_PROVIDER_FACTORIES: Dict[str, Callable[[], VegasProvider]] = {"mock": MockVegasProvider}
 BULLPEN_PROVIDER_FACTORIES: Dict[str, Callable[[], BullpenProvider]] = {"mock": MockBullpenProvider}
 UMPIRE_PROVIDER_FACTORIES: Dict[str, Callable[[], UmpireProvider]] = {"mock": MockUmpireProvider}
 
@@ -40,11 +53,26 @@ def get_configured_weather_provider() -> Tuple[WeatherProvider, str]:
 
 
 def get_configured_vegas_provider() -> Tuple[VegasProvider, str]:
-    name = (os.environ.get("GAME_ENVIRONMENT_PROVIDER") or "").strip().lower()
-    if not name:
-        return VEGAS_PROVIDER_FACTORIES[DEFAULT_FALLBACK_KEY](), "automatic_fallback"
-    factory = VEGAS_PROVIDER_FACTORIES.get(name, VEGAS_PROVIDER_FACTORIES[DEFAULT_FALLBACK_KEY])
-    return factory(), "explicit"
+    """Resolution order (Milestone 24):
+
+      1. SPORTSGAMEODDS_API_KEY set -> real SportsGameOddsVegasProvider,
+         source "sportsgameodds_configured". Always wins, regardless of
+         GAME_ENVIRONMENT_PROVIDER.
+      2. GAME_ENVIRONMENT_PROVIDER=mock explicitly set -> MockVegasProvider,
+         source "explicit_mock".
+      3. Neither -> NotConfiguredVegasProvider (is_configured()=False,
+         so build_game_report() below never calls it), source
+         "not_configured".
+    """
+    api_key = os.environ.get("SPORTSGAMEODDS_API_KEY")
+    if api_key:
+        return SportsGameOddsVegasProvider(SportsGameOddsProvider(api_key=api_key)), "sportsgameodds_configured"
+
+    explicit = (os.environ.get("GAME_ENVIRONMENT_PROVIDER") or "").strip().lower()
+    if explicit == "mock":
+        return MockVegasProvider(), "explicit_mock"
+
+    return NotConfiguredVegasProvider(), "not_configured"
 
 
 def get_configured_bullpen_provider() -> Tuple[BullpenProvider, str]:
@@ -77,19 +105,28 @@ def build_game_report(
     vegas_provider: VegasProvider,
     umpire_provider: UmpireProvider,
     bullpen_provider: BullpenProvider,
+    slate_date: Optional[str] = None,
 ) -> GameEnvironmentReport:
     """Collects every signal for one game and scores/summarizes it.
     Never raises for a missing/unavailable individual signal -- a
     provider failure for one game degrades that section to None/UNKNOWN
     rather than failing the whole report (see engine.py, which does the
-    same at the slate level)."""
+    same at the slate level). `slate_date` is passed through to
+    vegas_provider.get_vegas_line() (Milestone 24) so a real provider
+    fetches the RIGHT day's odds rather than assuming "now"; harmless
+    when None (MockVegasProvider ignores it)."""
     park = ballpark.get_ballpark_profile(home_team)
     roof = park.roof if park is not None else "open"
 
     weather_snapshot = weather_provider.get_weather(game_id, home_team, game_datetime_utc, roof) if weather_provider.is_configured() else None
     weather_analysis = weather.analyze_weather(weather_snapshot, park) if weather_snapshot is not None else None
 
-    vegas_snapshot = vegas_provider.get_vegas_line(game_id, home_team, away_team) if vegas_provider.is_configured() else None
+    vegas_snapshot = None
+    if vegas_provider.is_configured():
+        try:
+            vegas_snapshot = vegas_provider.get_vegas_line(game_id, home_team, away_team, slate_date=slate_date)
+        except (vegas.VegasProviderUnavailableError, vegas.VegasProviderNotConfiguredError):
+            vegas_snapshot = None
 
     umpire_profile = umpire_provider.get_umpire(game_id)
 

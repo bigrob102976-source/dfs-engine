@@ -40,26 +40,23 @@ export function vegasScore(total: number | null | undefined): number | null {
   return ((clamped - TOTAL_LOW_THRESHOLD) / (TOTAL_HIGH_THRESHOLD - TOTAL_LOW_THRESHOLD)) * 100;
 }
 
-/** Mirrors research/game_environment/vegas.py::_moneyline_to_win_probability(). */
-function moneylineToWinProbability(moneyline: number): number {
-  return moneyline < 0 ? -moneyline / (-moneyline + 100) : 100 / (moneyline + 100);
-}
-
-/** The Game Environment snapshot only stores CURRENT team implied runs
- * (home_implied_runs/away_implied_runs) -- there is no "opening implied
- * runs" field anywhere in the model. Rather than invent one, this
- * recomputes OPENING implied runs using the exact same deterministic
- * formula MockVegasProvider.get_vegas_line() already applies to CURRENT
- * odds (vegas.py: home_implied = total * (0.5 + (home_win_prob - 0.5) *
- * 0.3)), just against the opening total/moneyline instead. Same
- * real, stored inputs; same published formula -- not a guess. */
-export function openingImpliedRuns(vegas: VegasSnapshot): { home: number | null; away: number | null } {
+/** Milestone 24: the snapshot only stores CURRENT team implied runs
+ * (home_implied_runs/away_implied_runs) -- there is no separate "first
+ * observed implied runs" field. Rather than invent a NEW formula for
+ * it, this applies the exact SAME real, documented methodology
+ * research/game_environment/providers/implied_runs.py uses for current
+ * implied runs -- splitting the total by the run line's own margin --
+ * against the FIRST-OBSERVED total/run line instead (opening_home).
+ * Never labeled a real sportsbook "opening" (see providers/normalizer.py's
+ * module docstring); this project's own first-observed-today value. */
+export function firstObservedImpliedRuns(vegas: VegasSnapshot): { home: number | null; away: number | null } {
   const total = vegas.opening_home.total;
-  const homeMl = vegas.opening_home.moneyline;
-  if (total === null || homeMl === null) return { home: null, away: null };
-  const homeWinProb = moneylineToWinProbability(homeMl);
-  const home = Math.round(total * (0.5 + (homeWinProb - 0.5) * 0.3) * 100) / 100;
-  const away = Math.round((total - home) * 100) / 100;
+  const homeRunLine = vegas.opening_home.run_line;
+  if (total === null || homeRunLine === null) return { home: null, away: null };
+  const marginHome = -homeRunLine;
+  const home = Math.round((total / 2 + marginHome / 2) * 100) / 100;
+  const away = Math.round((total / 2 - marginHome / 2) * 100) / 100;
+  if (home < 0 || away < 0) return { home: null, away: null };
   return { home, away };
 }
 
@@ -182,17 +179,18 @@ export function buildVegasAiSummary(game: GameEnvironmentReport, analysis: Vegas
 }
 
 // ---------------------------------------------------------------------------
-// Line movement series (mini sparkline). The mock Vegas provider seeds
-// BOTH the opening total and the drift purely from game_id (vegas.py),
-// so regenerating the report never changes either value -- there is no
-// real intraday movement to sample from multiple snapshot files today.
-// The only two honest points are Opening and Current; a real provider
-// with genuine intraday ticks would extend this series, but inventing
-// intermediate points here would violate "never invent data".
+// Line movement series (mini sparkline). Milestone 24: for MOCK data,
+// the mock Vegas provider seeds BOTH the opening total and the drift
+// purely from game_id (vegas.py), so regenerating the report never
+// changes either value -- the only two honest points are Opening and
+// Current. For REAL data, buildRealTotalMovementSeries below reads
+// EVERY saved Game Environment snapshot for the day (gameEnvironment.ts
+// ::loadEnvironmentReportHistory) and plots this project's own genuine
+// intraday history -- never fabricated intermediate points.
 // ---------------------------------------------------------------------------
 
 export interface LineMovementSeries {
-  points: number[]; // [opening, current]
+  points: number[]; // [opening, current] for mock; every real observed total for real data
   open: number | null;
   current: number | null;
   highest: number | null;
@@ -209,6 +207,34 @@ export function buildTotalMovementSeries(vegas: VegasSnapshot | null): LineMovem
     current,
     highest: points.length ? Math.max(...points) : null,
     lowest: points.length ? Math.min(...points) : null,
+  };
+}
+
+/** Milestone 24: genuine intraday total-movement history for a REAL
+ * (non-mock) game, built from every Game Environment snapshot this
+ * project has actually saved today (oldest first) -- never a fabricated
+ * intermediate point. Skips a snapshot entirely if this game's Vegas
+ * data is missing, mock, or has no total at that point in time. Falls
+ * back to the plain [opening, current] shape (buildTotalMovementSeries)
+ * when fewer than 2 real observations exist. */
+export function buildRealTotalMovementSeries(reports: SlateEnvironmentReport[], gameId: string): LineMovementSeries {
+  const points: number[] = [];
+  for (const report of reports) {
+    const game = report.games.find((g) => g.game_id === gameId);
+    const vegas = game?.vegas;
+    if (!vegas || vegas.is_mock || vegas.current_home.total === null) continue;
+    points.push(vegas.current_home.total);
+  }
+  if (points.length < 2) {
+    const latestGame = reports.at(-1)?.games.find((g) => g.game_id === gameId);
+    return buildTotalMovementSeries(latestGame?.vegas ?? null);
+  }
+  return {
+    points,
+    open: points[0],
+    current: points[points.length - 1],
+    highest: Math.max(...points),
+    lowest: Math.min(...points),
   };
 }
 
