@@ -12,6 +12,8 @@ export interface User {
   display_name: string | null;
   email_verified_at: string | null;
   disabled_at: string | null;
+  stripe_customer_id: string | null;
+  trial_consumed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,15 +68,25 @@ export interface Plan {
 
 export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled" | "expired" | "complimentary";
 
+export type BillingProviderName = "dev" | "stripe";
+
 export interface Subscription {
   id: string;
   user_id: string;
   plan_id: string;
   status: SubscriptionStatus;
-  provider: "dev";
+  provider: BillingProviderName;
   provider_subscription_id: string | null;
+  provider_price_id: string | null;
   trial_ends_at: string | null;
+  current_period_start: string | null;
   current_period_end: string | null;
+  /** 0 or 1 (SQLite has no native boolean) -- true once the user has
+   * requested cancellation but access continues through current_period_end. */
+  cancel_at_period_end: number;
+  /** ISO timestamp of the Stripe event.created that last wrote this row --
+   * an out-of-order/stale-webhook-delivery guard, not a display field. */
+  last_stripe_event_at: string | null;
   canceled_at: string | null;
   created_at: string;
   updated_at: string;
@@ -113,6 +125,17 @@ export interface UsageEvent {
   event_type: string;
   metadata_json: string | null;
   created_at: string;
+}
+
+export type StripeWebhookEventStatus = "processing" | "processed" | "failed";
+
+export interface StripeWebhookEvent {
+  id: string;
+  type: string;
+  status: StripeWebhookEventStatus;
+  error: string | null;
+  received_at: string;
+  processed_at: string | null;
 }
 
 export interface AdminAuditLogEntry {

@@ -111,3 +111,24 @@ export function countAdmins(): number {
   const row = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN'").get() as { c: number };
   return row.c;
 }
+
+export function setStripeCustomerId(id: string, stripeCustomerId: string): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET stripe_customer_id = ?, updated_at = ? WHERE id = ?").run(stripeCustomerId, nowIso(), id);
+}
+
+export function findUserByStripeCustomerId(stripeCustomerId: string): User | null {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM users WHERE stripe_customer_id = ?").get(stripeCustomerId);
+  return mapUser(row);
+}
+
+/** One-trial-policy write path -- idempotent (COALESCE never overwrites
+ * an earlier consumption timestamp), and deliberately provider-agnostic:
+ * both DevBillingProvider and StripeBillingProvider call this through the
+ * same code path, so there is exactly one trial-tracking mechanism. */
+export function markTrialConsumed(id: string): void {
+  const db = getDb();
+  const now = nowIso();
+  db.prepare("UPDATE users SET trial_consumed_at = COALESCE(trial_consumed_at, ?), updated_at = ? WHERE id = ?").run(now, now, id);
+}

@@ -30,6 +30,13 @@ function firstParam(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
+/** Stripe object IDs (customer/subscription) are safe to display -- they
+ * are not secrets, unlike API keys. Never render process.env.STRIPE_*
+ * here. */
+function idOrDash(id: string | null): string {
+  return id ?? "--";
+}
+
 export default async function AdminSubscriptionsPage(props: PageProps<"/admin/subscriptions">) {
   const params = await props.searchParams;
   const statusParam = firstParam(params.status);
@@ -49,9 +56,13 @@ export default async function AdminSubscriptionsPage(props: PageProps<"/admin/su
               <th className="px-3 py-2 font-medium">User</th>
               <th className="px-3 py-2 font-medium">Plan</th>
               <th className="px-3 py-2 font-medium">Price</th>
+              <th className="px-3 py-2 font-medium">Provider</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Trial End</th>
               <th className="px-3 py-2 font-medium">Next Billing</th>
+              <th className="px-3 py-2 font-medium">Cancel At Period End</th>
+              <th className="px-3 py-2 font-medium">Stripe Customer ID</th>
+              <th className="px-3 py-2 font-medium">Stripe Subscription ID</th>
               <th className="px-3 py-2 font-medium">Created</th>
             </tr>
           </thead>
@@ -65,15 +76,19 @@ export default async function AdminSubscriptionsPage(props: PageProps<"/admin/su
                 </td>
                 <td className="px-3 py-2 text-text-muted">{s.plan_name}</td>
                 <td className="px-3 py-2 text-text-muted">{fmtPrice(s.plan_price_cents)}</td>
+                <td className="px-3 py-2 text-text-muted">{s.provider}</td>
                 <td className={`px-3 py-2 font-medium ${statusToneClass(s.status)}`}>{s.status}</td>
                 <td className="px-3 py-2 text-text-muted">{fmtDate(s.trial_ends_at)}</td>
                 <td className="px-3 py-2 text-text-muted">{fmtDate(s.current_period_end)}</td>
+                <td className="px-3 py-2 text-text-muted">{s.cancel_at_period_end ? "Yes" : "No"}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-text-faint">{idOrDash(s.user_stripe_customer_id)}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-text-faint">{idOrDash(s.provider_subscription_id)}</td>
                 <td className="px-3 py-2 text-text-muted">{fmtDate(s.created_at)}</td>
               </tr>
             ))}
             {subscriptions.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-text-faint">
+                <td colSpan={11} className="px-3 py-6 text-center text-text-faint">
                   No subscriptions match these filters.
                 </td>
               </tr>

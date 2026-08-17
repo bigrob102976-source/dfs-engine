@@ -2,6 +2,7 @@ import { listActivePlans } from "@/lib/db/plans";
 import {
   countActiveSubscribersByPlan,
   countCancellationsSince,
+  countCurrentSubscribersByPlan,
   countSubscriptionsByStatus,
   countSubscriptionsCreatedSince,
   getTrialConversionStats,
@@ -12,6 +13,15 @@ export interface AdminRevenueStats {
   arrCents: number;
   weeklyRevenueCents: number;
   monthlyRevenueCents: number;
+  /** Currently-paying (status='active') subscribers, all plans combined. */
+  activeSubscribers: number;
+  /** Current subscribers (trialing/active/complimentary) per plan --
+   * same "current" definition lib/admin/overviewStats.ts's Weekly/Monthly
+   * Members cards use, kept consistent across both admin pages. */
+  weeklySubscribers: number;
+  monthlySubscribers: number;
+  pastDueSubscribers: number;
+  canceledSubscribers: number;
   newSubscribersThisMonth: number;
   activeTrials: number;
   trialConversionRatePct: number | null;
@@ -50,6 +60,11 @@ export function computeAdminRevenueStats(): AdminRevenueStats {
     arrCents: mrrCents * 12,
     weeklyRevenueCents,
     monthlyRevenueCents,
+    activeSubscribers: statusCounts.active,
+    weeklySubscribers: weeklyPlan ? countCurrentSubscribersByPlan(weeklyPlan.id) : 0,
+    monthlySubscribers: monthlyPlan ? countCurrentSubscribersByPlan(monthlyPlan.id) : 0,
+    pastDueSubscribers: statusCounts.past_due,
+    canceledSubscribers: statusCounts.canceled,
     newSubscribersThisMonth: countSubscriptionsCreatedSince(since),
     activeTrials: statusCounts.trialing,
     trialConversionRatePct: conversion.trialUsersEver > 0 ? (conversion.converted / conversion.trialUsersEver) * 100 : null,

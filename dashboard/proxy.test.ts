@@ -51,4 +51,22 @@ describe("proxy (cheap Edge session-cookie gate)", () => {
       expect(res.status).toBe(200);
     }
   });
+
+  it("never redirects the public /pricing page, even without a cookie", () => {
+    const res = proxy(requestFor("/pricing"));
+    expect(res.status).toBe(200);
+  });
+
+  it("never redirects the Stripe webhook route, even without a cookie (it carries none -- signature verification is its own auth)", () => {
+    const res = proxy(requestFor("/api/billing/stripe/webhook"));
+    expect(res.status).toBe(200);
+  });
+
+  it("still redirects a cookie-less request to /subscribe (checkout requires a real account, unlike /pricing)", () => {
+    const res = proxy(requestFor("/subscribe"));
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/subscribe");
+  });
 });

@@ -20,7 +20,21 @@ import type { NextRequest } from "next/server";
 
 const SESSION_COOKIE = "bigmoney_session";
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/signup", "/forgot-password", "/reset-password", "/verify-email", "/api/auth", "/_next"];
+const PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+  "/api/auth",
+  "/_next",
+  // Milestone 22: public marketing page, no auth required to view pricing.
+  "/pricing",
+  // Stripe's webhook POST carries no session cookie at all -- signature
+  // verification (lib/billing/stripeClient.ts's stripeWebhooks) is the
+  // entire auth story for this one route, done inside the handler itself.
+  "/api/billing/stripe/webhook",
+];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

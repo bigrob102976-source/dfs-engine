@@ -84,4 +84,59 @@ describe("computeUserAccess", () => {
     const access = computeUserAccess(user);
     expect(access.entitlementKeys.has("mlb.optimizer")).toBe(true);
   });
+
+  // Milestone 22: computeUserAccess() was written before Stripe existed
+  // and only ever reads `status` -- never `provider` -- so a real
+  // Stripe-backed subscription should grant IDENTICAL access to an
+  // otherwise-equivalent dev-provider one, with zero code changes to
+  // this file. These tests prove that parity explicitly rather than
+  // just asserting it in a comment.
+  describe("Stripe-provider subscriptions grant identical access to dev-provider ones (no code change needed here)", () => {
+    it.each<[SubscriptionStatus, boolean]>([
+      ["trialing", true],
+      ["active", true],
+      ["complimentary", true],
+      ["past_due", false],
+      ["canceled", false],
+      ["expired", false],
+    ])("a real Stripe-provider subscription with status '%s' grants full catalog access = %s", (status, expectFullAccess) => {
+      const user = createUser({ email: `stripe-${status}@example.com`, passwordHash: "h" });
+      insertSubscription({
+        userId: user.id,
+        planId: "monthly",
+        status,
+        provider: "stripe",
+        providerSubscriptionId: `sub_${status}`,
+        providerPriceId: "price_monthly_test",
+        currentPeriodStart: "2026-08-01T00:00:00Z",
+        currentPeriodEnd: "2026-09-01T00:00:00Z",
+        cancelAtPeriodEnd: false,
+      });
+      const access = computeUserAccess(user);
+      expect(access.entitlementKeys.has("mlb.optimizer")).toBe(expectFullAccess);
+    });
+
+    it("a Stripe subscription with cancel_at_period_end=true still grants access until Stripe actually ends it (status stays active)", () => {
+      const user = createUser({ email: "stripe-cancelatperiodend@example.com", passwordHash: "h" });
+      insertSubscription({
+        userId: user.id,
+        planId: "weekly",
+        status: "active",
+        provider: "stripe",
+        providerSubscriptionId: "sub_cancelatperiodend",
+        cancelAtPeriodEnd: true,
+      });
+      const access = computeUserAccess(user);
+      expect(access.entitlementKeys.has("mlb.optimizer")).toBe(true);
+    });
+
+    it("an explicit entitlement grant still applies independently of a Stripe subscription's status", () => {
+      const user = createUser({ email: "stripe-explicitgrant@example.com", passwordHash: "h" });
+      insertSubscription({ userId: user.id, planId: "weekly", status: "canceled", provider: "stripe", providerSubscriptionId: "sub_explicit" });
+      grantUserEntitlement({ userId: user.id, entitlementKey: "mlb.optimizer", grantedBy: null });
+      const access = computeUserAccess(user);
+      expect(access.entitlementKeys.has("mlb.optimizer")).toBe(true);
+      expect(access.entitlementKeys.has("mlb.research")).toBe(false);
+    });
+  });
 });

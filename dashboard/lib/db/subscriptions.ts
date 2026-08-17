@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { getDb } from "./client";
-import type { Subscription, SubscriptionStatus } from "./types";
+import type { BillingProviderName, Subscription, SubscriptionStatus } from "./types";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -11,17 +11,50 @@ export function insertSubscription(args: {
   userId: string;
   planId: string;
   status: SubscriptionStatus;
+  provider?: BillingProviderName;
+  providerSubscriptionId?: string | null;
+  providerPriceId?: string | null;
   trialEndsAt?: string | null;
+  currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  lastStripeEventAt?: string | null;
 }): Subscription {
   const db = getDb();
   const id = crypto.randomUUID();
   const now = nowIso();
   db.prepare(
-    `INSERT INTO subscriptions (id, user_id, plan_id, status, provider, trial_ends_at, current_period_end, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'dev', ?, ?, ?, ?)`,
-  ).run(id, args.userId, args.planId, args.status, args.trialEndsAt ?? null, args.currentPeriodEnd ?? null, now, now);
+    `INSERT INTO subscriptions (
+       id, user_id, plan_id, status, provider, provider_subscription_id, provider_price_id,
+       trial_ends_at, current_period_start, current_period_end, cancel_at_period_end,
+       last_stripe_event_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    args.userId,
+    args.planId,
+    args.status,
+    args.provider ?? "dev",
+    args.providerSubscriptionId ?? null,
+    args.providerPriceId ?? null,
+    args.trialEndsAt ?? null,
+    args.currentPeriodStart ?? null,
+    args.currentPeriodEnd ?? null,
+    args.cancelAtPeriodEnd ? 1 : 0,
+    args.lastStripeEventAt ?? null,
+    now,
+    now,
+  );
   return getSubscriptionById(id)!;
+}
+
+/** The one place a local subscription row is looked up by its Stripe
+ * subscription ID -- used by webhook handlers to decide insert-vs-update,
+ * and by the admin "Resync from Stripe" action. */
+export function findSubscriptionByProviderSubscriptionId(providerSubscriptionId: string): Subscription | null {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM subscriptions WHERE provider_subscription_id = ?").get(providerSubscriptionId);
+  return (row as unknown as Subscription) ?? null;
 }
 
 export function getSubscriptionById(id: string): Subscription | null {
@@ -57,6 +90,7 @@ export interface ListSubscriptionsFilter {
 export interface SubscriptionWithUser extends Subscription {
   user_email: string;
   user_display_name: string | null;
+  user_stripe_customer_id: string | null;
   plan_name: string;
   plan_price_cents: number;
 }
@@ -85,7 +119,8 @@ export function listSubscriptions(filter: ListSubscriptionsFilter = {}): Subscri
   const offset = filter.offset ?? 0;
   const rows = db
     .prepare(
-      `SELECT s.*, u.email as user_email, u.display_name as user_display_name, p.name as plan_name, p.price_cents as plan_price_cents
+      `SELECT s.*, u.email as user_email, u.display_name as user_display_name, u.stripe_customer_id as user_stripe_customer_id,
+              p.name as plan_name, p.price_cents as plan_price_cents
        FROM subscriptions s
        JOIN users u ON u.id = s.user_id
        JOIN plans p ON p.id = s.plan_id
@@ -206,11 +241,37 @@ export function countCancellationsSince(sinceIso: string): number {
   return row.c;
 }
 
-export function updateSubscriptionStatus(id: string, status: SubscriptionStatus, patch: Partial<Pick<Subscription, "current_period_end" | "canceled_at">> = {}): void {
+export type UpdateSubscriptionStatusPatch = Partial<
+  Pick<
+    Subscription,
+    "current_period_start" | "current_period_end" | "canceled_at" | "cancel_at_period_end" | "provider_price_id" | "last_stripe_event_at"
+  >
+>;
+
+export function updateSubscriptionStatus(id: string, status: SubscriptionStatus, patch: UpdateSubscriptionStatusPatch = {}): void {
   const db = getDb();
   db.prepare(
-    "UPDATE subscriptions SET status = ?, current_period_end = COALESCE(?, current_period_end), canceled_at = COALESCE(?, canceled_at), updated_at = ? WHERE id = ?",
-  ).run(status, patch.current_period_end ?? null, patch.canceled_at ?? null, nowIso(), id);
+    `UPDATE subscriptions SET
+       status = ?,
+       current_period_start = COALESCE(?, current_period_start),
+       current_period_end = COALESCE(?, current_period_end),
+       canceled_at = COALESCE(?, canceled_at),
+       cancel_at_period_end = COALESCE(?, cancel_at_period_end),
+       provider_price_id = COALESCE(?, provider_price_id),
+       last_stripe_event_at = COALESCE(?, last_stripe_event_at),
+       updated_at = ?
+     WHERE id = ?`,
+  ).run(
+    status,
+    patch.current_period_start ?? null,
+    patch.current_period_end ?? null,
+    patch.canceled_at ?? null,
+    patch.cancel_at_period_end ?? null,
+    patch.provider_price_id ?? null,
+    patch.last_stripe_event_at ?? null,
+    nowIso(),
+    id,
+  );
 }
 
 export function cancelSubscription(id: string): void {

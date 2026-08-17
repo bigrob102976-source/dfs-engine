@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { ResyncSubscriptionButton } from "@/components/admin/ResyncSubscriptionButton";
 import { RevokeEntitlementButton, UserAdminActions } from "@/components/admin/UserAdminActions";
 import { TagBadge } from "@/components/ui/Badge";
 import { DataCard } from "@/components/ui/Card";
@@ -52,20 +53,41 @@ export default async function AdminUserDetailPage(props: PageProps<"/admin/users
             </dl>
           </DataCard>
 
-          <DataCard title="Subscription">
+          <DataCard title="Subscription &amp; Billing">
+            <dl className="grid grid-cols-2 gap-y-2 text-xs">
+              <dt className="text-text-faint">Trial Eligibility</dt>
+              <dd className="text-right text-text">{user.trial_consumed_at ? "Consumed" : "Eligible"}</dd>
+              <dt className="text-text-faint">Trial Used</dt>
+              <dd className="text-right text-text">{user.trial_consumed_at ? fmtDateTime(user.trial_consumed_at) : "No"}</dd>
+              <dt className="text-text-faint">Stripe Customer ID</dt>
+              <dd className="text-right font-mono text-[11px] text-text">{user.stripe_customer_id ?? "--"}</dd>
+            </dl>
             {subscription ? (
-              <dl className="grid grid-cols-2 gap-y-2 text-xs">
-                <dt className="text-text-faint">Plan</dt>
-                <dd className="text-right text-text">{subscription.plan_id}</dd>
-                <dt className="text-text-faint">Status</dt>
-                <dd className="text-right text-text">{subscription.status}</dd>
-                <dt className="text-text-faint">Trial Ends</dt>
-                <dd className="text-right text-text">{fmtDateTime(subscription.trial_ends_at)}</dd>
-                <dt className="text-text-faint">Next Billing</dt>
-                <dd className="text-right text-text">{fmtDateTime(subscription.current_period_end)}</dd>
-              </dl>
+              <>
+                <dl className="mt-3 grid grid-cols-2 gap-y-2 border-t border-border-subtle pt-3 text-xs">
+                  <dt className="text-text-faint">Plan</dt>
+                  <dd className="text-right text-text">{subscription.plan_id}</dd>
+                  <dt className="text-text-faint">Billing Status</dt>
+                  <dd className="text-right text-text">{subscription.status}</dd>
+                  <dt className="text-text-faint">Billing Provider</dt>
+                  <dd className="text-right text-text">{subscription.provider}</dd>
+                  <dt className="text-text-faint">Stripe Subscription ID</dt>
+                  <dd className="text-right font-mono text-[11px] text-text">{subscription.provider_subscription_id ?? "--"}</dd>
+                  <dt className="text-text-faint">Trial Ends</dt>
+                  <dd className="text-right text-text">{fmtDateTime(subscription.trial_ends_at)}</dd>
+                  <dt className="text-text-faint">Current Period End</dt>
+                  <dd className="text-right text-text">{fmtDateTime(subscription.current_period_end)}</dd>
+                  <dt className="text-text-faint">Cancel At Period End</dt>
+                  <dd className="text-right text-text">{subscription.cancel_at_period_end ? "Yes" : "No"}</dd>
+                </dl>
+                {subscription.provider === "stripe" && (
+                  <div className="mt-3">
+                    <ResyncSubscriptionButton subscriptionId={subscription.id} />
+                  </div>
+                )}
+              </>
             ) : (
-              <p className="text-xs text-text-faint">No subscription.</p>
+              <p className="mt-3 border-t border-border-subtle pt-3 text-xs text-text-faint">No subscription.</p>
             )}
           </DataCard>
 

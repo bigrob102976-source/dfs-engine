@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { __resetDbForTests } from "../client";
-import { countAdmins, countUsers, createUser, findUserByEmail, findUserById, listUsers, setUserDisabled, updateUserRole } from "../users";
+import {
+  countAdmins,
+  countUsers,
+  createUser,
+  findUserByEmail,
+  findUserById,
+  findUserByStripeCustomerId,
+  listUsers,
+  markTrialConsumed,
+  setStripeCustomerId,
+  setUserDisabled,
+  updateUserRole,
+} from "../users";
 
 beforeEach(() => {
   __resetDbForTests();
@@ -67,5 +79,39 @@ describe("users", () => {
     createUser({ email: "two@example.com", passwordHash: "h" });
     expect(countUsers({})).toBe(2);
     expect(countUsers({ search: "one" })).toBe(1);
+  });
+
+  it("a new user has null stripe_customer_id and trial_consumed_at", () => {
+    const user = createUser({ email: "fresh@example.com", passwordHash: "h" });
+    expect(user.stripe_customer_id).toBeNull();
+    expect(user.trial_consumed_at).toBeNull();
+  });
+
+  it("setStripeCustomerId / findUserByStripeCustomerId round-trip", () => {
+    const user = createUser({ email: "cus@example.com", passwordHash: "h" });
+    setStripeCustomerId(user.id, "cus_abc123");
+    expect(findUserById(user.id)!.stripe_customer_id).toBe("cus_abc123");
+    expect(findUserByStripeCustomerId("cus_abc123")?.id).toBe(user.id);
+  });
+
+  it("findUserByStripeCustomerId returns null for an unmapped customer id", () => {
+    expect(findUserByStripeCustomerId("cus_unknown")).toBeNull();
+  });
+
+  it("rejects two users mapped to the same stripe_customer_id", () => {
+    const a = createUser({ email: "dupecus1@example.com", passwordHash: "h" });
+    const b = createUser({ email: "dupecus2@example.com", passwordHash: "h" });
+    setStripeCustomerId(a.id, "cus_shared");
+    expect(() => setStripeCustomerId(b.id, "cus_shared")).toThrow();
+  });
+
+  it("markTrialConsumed sets trial_consumed_at once and never overwrites it on a later call", () => {
+    const user = createUser({ email: "trialonce@example.com", passwordHash: "h" });
+    markTrialConsumed(user.id);
+    const first = findUserById(user.id)!.trial_consumed_at;
+    expect(first).not.toBeNull();
+
+    markTrialConsumed(user.id); // second call, e.g. from a second webhook delivery
+    expect(findUserById(user.id)!.trial_consumed_at).toBe(first);
   });
 });

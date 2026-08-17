@@ -48,4 +48,23 @@ describe("AdminSystemPage", () => {
     render(await AdminSystemPage());
     expect(screen.getByText("ENABLED")).toBeInTheDocument();
   });
+
+  it("shows Stripe as not configured with the missing var names, and no failed webhooks yet", async () => {
+    render(await AdminSystemPage());
+    expect(screen.getByText("Stripe Webhooks")).toBeInTheDocument();
+    expect(screen.getByText("Missing Configuration")).toBeInTheDocument();
+    expect(screen.getByText("No failed webhook deliveries recorded.")).toBeInTheDocument();
+  });
+
+  it("shows real webhook status counts and recent failures, never a fabricated payload", async () => {
+    const { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } = await import("@/lib/db/stripeWebhookEvents");
+    claimWebhookEvent("evt_ok", "customer.subscription.updated");
+    markWebhookEventProcessed("evt_ok");
+    claimWebhookEvent("evt_bad", "invoice.payment_failed");
+    markWebhookEventFailed("evt_bad", "user not found for customer cus_x");
+
+    render(await AdminSystemPage());
+    expect(screen.getByText(/customer\.subscription\.updated/)).toBeInTheDocument();
+    expect(screen.getByText(/user not found for customer cus_x/)).toBeInTheDocument();
+  });
 });
