@@ -29,6 +29,7 @@ export const ARTIFACT_DIRS = {
   adjustedProjectionSnapshots: "adjusted_projection_snapshots",
   gameEnvironmentSnapshots: "game_environment_snapshots",
   aiProjectionSnapshots: "ai_projection_snapshots",
+  nativeProjectionSnapshots: "native_projection_snapshots",
 } as const;
 
 export function artifactPath(...segments: string[]): string {

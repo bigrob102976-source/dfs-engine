@@ -41,6 +41,16 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     aiSignals: [],
     aiReasons: [],
     aiSummary: null,
+    nativeProjection: null,
+    nativeCeiling: null,
+    nativeFloor: null,
+    nativeDelta: null,
+    nativeConfidence: null,
+    nativeReasons: [],
+    nativeExpectedPa: null,
+    nativeExpectedInnings: null,
+    nativeHitterComponents: null,
+    nativePitcherComponents: null,
     ...overrides,
   };
 }

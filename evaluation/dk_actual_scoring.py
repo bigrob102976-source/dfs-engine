@@ -15,7 +15,10 @@ which would be indistinguishable from "a legitimately bad start."
 
 from typing import Optional
 
+from config import batter_scoring_config as batter_cfg
 from config import scoring_config as cfg
+from evaluation.hitter_results_enrichment import STATUS_APPEARED as HITTER_STATUS_APPEARED
+from evaluation.hitter_results_enrichment import ActualHitterResult
 from evaluation.results_enrichment import (
     STATUS_COMPLETED,
     STATUS_DID_NOT_START,
@@ -24,6 +27,7 @@ from evaluation.results_enrichment import (
 from research import innings
 
 _SCOREABLE_STATUSES = {STATUS_COMPLETED, STATUS_DID_NOT_START}
+_HITTER_SCOREABLE_STATUSES = {HITTER_STATUS_APPEARED}
 
 
 def calculate_actual_dk_points(result: ActualPitcherResult, dk_scoring: Optional[dict] = None) -> dict:
@@ -53,6 +57,39 @@ def calculate_actual_dk_points(result: ActualPitcherResult, dk_scoring: Optional
         if result.no_hitter:
             complete_game_bonus += dk.get("no_hitter", 0.0)
     breakdown["complete_game_bonus_points"] = round(complete_game_bonus, 2)
+
+    dfs_points = round(sum(breakdown.values()), 2)
+    return {"scored": True, "dfs_points": dfs_points, "breakdown": breakdown}
+
+
+def calculate_actual_hitter_dk_points(result: ActualHitterResult, dk_scoring: Optional[dict] = None) -> dict:
+    """Returns {"scored": bool, "dfs_points": Optional[float], "breakdown": dict}.
+    Mirrors calculate_actual_dk_points() above -- same "explicit not-scored
+    rather than silent zero" discipline. No cycle bonus (DraftKings Classic
+    doesn't award one, and it's rare enough that config.batter_scoring_config
+    .DK_HITTER_SCORING's own docstring already documents skipping it)."""
+    dk = dk_scoring if dk_scoring is not None else batter_cfg.DK_HITTER_SCORING
+
+    if result.status not in _HITTER_SCOREABLE_STATUSES:
+        return {"scored": False, "dfs_points": None, "breakdown": {}}
+
+    hits = result.hits or 0
+    doubles = result.doubles or 0
+    triples = result.triples or 0
+    home_runs = result.home_runs or 0
+    singles = max(hits - doubles - triples - home_runs, 0)
+
+    breakdown = {
+        "single_points": round(singles * dk["single"], 2),
+        "double_points": round(doubles * dk["double"], 2),
+        "triple_points": round(triples * dk["triple"], 2),
+        "home_run_points": round(home_runs * dk["home_run"], 2),
+        "rbi_points": round((result.rbi or 0) * dk["rbi"], 2),
+        "run_points": round((result.runs or 0) * dk["run"], 2),
+        "walk_points": round((result.walks or 0) * dk["walk"], 2),
+        "hit_by_pitch_points": round((result.hit_by_pitch or 0) * dk["hit_by_pitch"], 2),
+        "stolen_base_points": round((result.stolen_bases or 0) * dk["stolen_base"], 2),
+    }
 
     dfs_points = round(sum(breakdown.values()), 2)
     return {"scored": True, "dfs_points": dfs_points, "breakdown": breakdown}

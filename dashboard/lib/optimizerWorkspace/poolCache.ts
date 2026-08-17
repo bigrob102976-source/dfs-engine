@@ -4,6 +4,7 @@ import { getAiProjectionByPlayerId } from "../aiProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
+import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
 import type { ProviderSource } from "../orchestrator/types";
@@ -100,11 +101,13 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
 
   const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
   const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
+  const nativeByPlayerId = getNativeProjectionByPlayerId(entry.date);
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
     const own = ownershipByDkId.get(p.dk_player_id) ?? (p.mlb_player_id ? ownershipByMlbId.get(p.mlb_player_id) : undefined);
     const comparison = p.mlb_player_id ? comparisonByPlayerId.get(p.mlb_player_id) : undefined;
     const ai = p.mlb_player_id ? aiByPlayerId.get(p.mlb_player_id) : undefined;
+    const native = p.mlb_player_id ? nativeByPlayerId.get(p.mlb_player_id) : undefined;
     return {
       dkPlayerId: p.dk_player_id,
       mlbPlayerId: p.mlb_player_id,
@@ -141,6 +144,16 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       aiSignals: ai?.signals ?? [],
       aiReasons: ai?.reasons ?? [],
       aiSummary: ai?.ai_summary ?? null,
+      nativeProjection: native?.native_projection ?? null,
+      nativeCeiling: native?.native_ceiling ?? null,
+      nativeFloor: native?.native_floor ?? null,
+      nativeDelta: native && p.projection != null ? Math.round((native.native_projection - p.projection) * 100) / 100 : null,
+      nativeConfidence: native?.confidence ?? null,
+      nativeReasons: native?.reasons ?? [],
+      nativeExpectedPa: native?.hitter_opportunity?.expected_pa ?? null,
+      nativeExpectedInnings: native?.pitcher_opportunity?.expected_innings ?? null,
+      nativeHitterComponents: native?.hitter_components ?? null,
+      nativePitcherComponents: native?.pitcher_components ?? null,
     };
   });
 
@@ -169,6 +182,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     rosterFeasibilityPass: pool?.roster_feasibility_pass ?? false,
     hasExternalProjections: comparisonByPlayerId.size > 0,
     hasAiProjections: aiByPlayerId.size > 0,
+    hasNativeProjections: nativeByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
   };

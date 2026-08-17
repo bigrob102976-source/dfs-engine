@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # are legitimately allowed to import research/models/config -- that
 # direction (postgame depending on pregame code) is fine. Only the
 # reverse is forbidden.
-PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine"]
+PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine", "native_projections"]
 PREGAME_EXTRA_FILES = [
     "config/scoring_config.py",
     "config/evaluation_config.py",  # config-only, no imports either way, but check anyway
@@ -42,6 +42,8 @@ PREGAME_EXTRA_FILES = [
     "scripts/list_dfs_slates.py",
     "config/projection_engine_config.py",
     "scripts/run_ai_projection_engine.py",
+    "config/native_projection_config.py",
+    "scripts/run_native_projection_engine.py",
 ]
 
 
@@ -198,6 +200,31 @@ def test_no_pregame_file_ever_imports_actual_ownership_modules():
         imported = _imported_module_names(path)
         forbidden = imported & forbidden_modules
         assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports post-lock module(s): {forbidden}"
+
+
+def test_native_projections_never_imports_ownership_external_projections_or_agents():
+    """Milestone 23's explicit independence requirement: the Native
+    Projection Model must never use ownership to move its expected-points
+    output (see native_projections/matchup.py's module docstring), must
+    be usable with NO external projection provider configured (never
+    imports external_projections/, structurally proving it doesn't need
+    BlueCollar or any other external CSV/API), and must never import
+    agents.pitcher_agent/agents.batter_agent (it re-derives its own
+    projections from research data -- models.pitcher/models.batter --
+    not from another model's already-computed 0-100 scores)."""
+    native_projections_dir = PROJECT_ROOT / "native_projections"
+    forbidden_prefixes = ("ownership", "external_projections", "agents")
+    for path in sorted(native_projections_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        imported = _imported_module_names(path)
+        forbidden = {name for name in imported if any(name == p or name.startswith(p + ".") for p in forbidden_prefixes)}
+        assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports forbidden module(s): {forbidden}"
+
+    script_path = PROJECT_ROOT / "scripts" / "run_native_projection_engine.py"
+    imported = _imported_module_names(script_path)
+    forbidden = {name for name in imported if any(name == p or name.startswith(p + ".") for p in forbidden_prefixes)}
+    assert not forbidden, f"scripts/run_native_projection_engine.py imports forbidden module(s): {forbidden}"
 
 
 def test_optimizer_dataclasses_have_no_actual_ownership_field():

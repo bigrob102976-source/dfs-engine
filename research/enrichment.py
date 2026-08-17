@@ -345,6 +345,13 @@ def apply_stats_to_pitcher_inputs(
                 k_percent=season_line.k_percent,
                 bb_percent=season_line.bb_percent,
                 k_minus_bb_percent=season_line.k_minus_bb_percent,
+                batters_faced=season_line.batters_faced,
+                strikeouts=season_line.strikeouts,
+                walks=season_line.walks,
+                earned_runs=season_line.earned_runs,
+                hits_allowed=season_line.hits_allowed,
+                home_runs_allowed=season_line.home_runs_allowed,
+                hit_by_pitch=season_line.hit_by_pitch,
             )
             provenance.append({"type": "season_pitching", **season_line.__dict__})
 
@@ -356,6 +363,9 @@ def apply_stats_to_pitcher_inputs(
                 k_percent=recent_line.k_percent,
                 bb_percent=recent_line.bb_percent,
                 pitch_count_average=recent_line.pitch_count_average,
+                batters_faced=recent_line.batters_faced,
+                strikeouts=recent_line.strikeouts,
+                walks=recent_line.walks,
             )
             provenance.append({"type": "recent_pitching", **recent_line.__dict__})
 

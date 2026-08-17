@@ -64,7 +64,12 @@ export function OptimizerWorkspace() {
   const [minUnique, setMinUnique] = useState(2);
   const [lineups, setLineups] = useState(20);
   const [objective, setObjective] = useState<Objective>("projection");
-  const [projectionSource, setProjectionSource] = useState<ProjectionSource>("independent");
+  // Milestone 23: defaults to Native Big Money DFS now that its
+  // real-slate validation and no-external-dependency acceptance checks
+  // have passed (see the milestone's final report) -- falls back to
+  // Independent / Legacy automatically (effect further down) the moment
+  // a slate has no native snapshot yet, so this is never a silent trap.
+  const [projectionSource, setProjectionSource] = useState<ProjectionSource>("native");
   const [showProjectionComparison, setShowProjectionComparison] = useState(false);
 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -93,7 +98,7 @@ export function OptimizerWorkspace() {
         setMinUnique(persisted.minUnique);
         setLineups(persisted.lineups);
         setObjective(persisted.objective);
-        setProjectionSource(persisted.projectionSource ?? "independent");
+        setProjectionSource(persisted.projectionSource ?? "native");
         setShowProjectionComparison(persisted.showProjectionComparison ?? false);
       }
       setHydrated(true);
@@ -238,15 +243,16 @@ export function OptimizerWorkspace() {
     projectionSource,
   ]);
 
-  // Milestone 17/20: if the newly-selected slate has no data for the
-  // currently-selected projection source, fall back to Big Money
-  // Independent rather than silently building against a source that
-  // doesn't exist for it.
+  // Milestone 17/20/23: if the newly-selected slate has no data for the
+  // currently-selected projection source, fall back to Independent /
+  // Legacy rather than silently building against a source that doesn't
+  // exist for it.
   useEffect(() => {
     if (!pool) return;
     const externalUnavailable = (projectionSource === "external" || projectionSource === "adjusted") && !pool.hasExternalProjections;
     const aiUnavailable = projectionSource === "ai" && !pool.hasAiProjections;
-    if (externalUnavailable || aiUnavailable) {
+    const nativeUnavailable = projectionSource === "native" && !pool.hasNativeProjections;
+    if (externalUnavailable || aiUnavailable || nativeUnavailable) {
       Promise.resolve().then(() => setProjectionSource("independent"));
     }
   }, [pool, projectionSource]);
@@ -381,19 +387,26 @@ export function OptimizerWorkspace() {
         </div>
       </div>
 
-      {/* Milestone 17: PROJECTION SOURCE SELECTOR */}
+      {/* Milestone 17/23: PROJECTION SOURCE SELECTOR. Reordered/relabeled
+          per Milestone 23: Native and AI (Big Money's own model-driven
+          sources) lead, External/Adjusted External follow, Independent /
+          Legacy (the original Milestone 2-era scoring baseline) is last. */}
       <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-border bg-bg-panel p-3 shadow-[var(--shadow-card)]">
         <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Projection Source</span>
         <div className="flex gap-1" role="group" aria-label="Projection Source">
           {(
             [
-              { value: "independent" as ProjectionSource, label: "Big Money Independent" },
-              { value: "external" as ProjectionSource, label: "External Baseline" },
-              { value: "adjusted" as ProjectionSource, label: "Big Money Adjusted" },
-              { value: "ai" as ProjectionSource, label: "AI Projection" },
+              { value: "native" as ProjectionSource, label: "Native Big Money DFS" },
+              { value: "ai" as ProjectionSource, label: "AI Big Money DFS" },
+              { value: "external" as ProjectionSource, label: "External" },
+              { value: "adjusted" as ProjectionSource, label: "Adjusted External" },
+              { value: "independent" as ProjectionSource, label: "Independent / Legacy" },
             ]
           ).map((opt) => {
-            const disabled = opt.value === "ai" ? !pool?.hasAiProjections : opt.value !== "independent" && !pool?.hasExternalProjections;
+            const disabled =
+              opt.value === "ai" ? !pool?.hasAiProjections
+              : opt.value === "native" ? !pool?.hasNativeProjections
+              : opt.value !== "independent" && !pool?.hasExternalProjections;
             return (
               <button
                 key={opt.value}
@@ -403,7 +416,7 @@ export function OptimizerWorkspace() {
                 aria-pressed={projectionSource === opt.value}
                 className={`rounded px-2 py-1 text-xs font-medium ${
                   projectionSource === opt.value
-                    ? opt.value === "ai"
+                    ? opt.value === "ai" || opt.value === "native"
                       ? "bg-purple/20 text-purple"
                       : "bg-accent-dim text-text"
                     : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
@@ -416,7 +429,10 @@ export function OptimizerWorkspace() {
         </div>
         {!pool?.hasExternalProjections && <span className="text-[11px] text-text-faint">External projection provider not connected.</span>}
         {!pool?.hasAiProjections && (
-          <span className="text-[11px] text-text-faint">AI Projection not generated yet -- run scripts/run_ai_projection_engine.py.</span>
+          <span className="text-[11px] text-text-faint">AI Big Money DFS not generated yet -- run scripts/run_ai_projection_engine.py.</span>
+        )}
+        {!pool?.hasNativeProjections && (
+          <span className="text-[11px] text-text-faint">Native Big Money DFS not generated yet -- run scripts/run_native_projection_engine.py.</span>
         )}
 
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">

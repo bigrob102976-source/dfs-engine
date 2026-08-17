@@ -36,6 +36,24 @@ class SeasonStats:
     # Milestone 2) so the existing velocity_change = recent.velocity -
     # recent.season_velocity calculation keeps working unchanged.
 
+    # Raw season event counts (Milestone 23). These were already being
+    # fetched and parsed by research/enrichment.py::parse_season_pitching_stats
+    # (battersFaced/strikeOuts/baseOnBalls/earnedRuns/hits/homeRuns/hitBatsmen
+    # from the MLB Stats API) but were previously discarded before reaching
+    # PitcherInput -- only the derived k_percent/bb_percent survived. The
+    # Native Projection Model's hit/home-run/HBP/earned-run rate regression
+    # needs real observed counts (not just percentages) to do count-based
+    # empirical-Bayes shrinkage, so these are now carried through. No new
+    # network call or invented data -- purely exposing what was already
+    # being computed.
+    batters_faced: Optional[int] = None
+    strikeouts: Optional[int] = None
+    walks: Optional[int] = None
+    earned_runs: Optional[int] = None
+    hits_allowed: Optional[int] = None
+    home_runs_allowed: Optional[int] = None
+    hit_by_pitch: Optional[int] = None
+
 
 @dataclass
 class RecentStats:
@@ -57,6 +75,16 @@ class RecentStats:
     avg_exit_velocity_allowed: Optional[float] = None
     pitch_mix: Optional[Dict[str, float]] = None
     starts_sampled: Optional[int] = None  # how many of the "last 3" starts actually had data (sample-size honesty)
+
+    # Raw recent-window event counts (Milestone 23), summed across the same
+    # starts k_percent/bb_percent are computed from -- see
+    # research/enrichment.py::parse_recent_pitching_stats. Lets the Native
+    # Projection Model's sample-size-weighted recency blend use the real
+    # recent opportunity count (batters_faced) instead of guessing it back
+    # out of a percentage.
+    batters_faced: Optional[int] = None
+    strikeouts: Optional[int] = None
+    walks: Optional[int] = None
 
 
 @dataclass

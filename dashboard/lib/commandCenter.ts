@@ -1,4 +1,5 @@
 import type { AiPlayerProjection } from "./aiProjections";
+import type { NativePlayerProjection } from "./nativeProjections";
 import type { GameEnvironmentReport, SlateEnvironmentReport } from "./gameEnvironment";
 import { weatherRiskValue } from "./environmentSortFilter";
 import { buildStackSummaries, type StackSummary } from "./stacks";
@@ -444,4 +445,88 @@ export function lowestAiConfidence(rows: AiRankedPlayer[], limit = 10): AiRanked
 export function buildAiStackSummaries(hitterRows: AiRankedPlayer[], teamPopularity: Record<string, TeamPopularity>): StackSummary[] {
   const asIndependentShaped: PlayerRow[] = hitterRows.map((r) => ({ ...r, projection: r.aiProjection }));
   return buildStackSummaries(asIndependentShaped, teamPopularity);
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 23: Native Projection Model -- Command Center rankings.
+// Mirrors the AI Projection Engine section immediately above exactly:
+// every field here is joined straight from the immutable
+// native_projection_*.json snapshot (native_projections/*.py's output,
+// see lib/nativeProjections.ts) onto the SAME PlayerRow data already
+// loaded for the rest of the page; nothing here recomputes a projection.
+// ---------------------------------------------------------------------------
+
+export interface NativeRankedPlayer extends PlayerRow {
+  nativeProjection: number | null;
+  nativeDelta: number | null; // nativeProjection - independent projection
+  nativeConfidence: number | null;
+}
+
+/** Joins the Native Projection Model's per-player output onto already
+ * -loaded PlayerRows by id (the mlb player_id both sides key on). A
+ * player with no Native Projection snapshot entry yet simply carries
+ * null native fields -- never a fabricated value. */
+export function joinNativeProjections(rows: PlayerRow[], nativeByPlayerId: Map<string, NativePlayerProjection>): NativeRankedPlayer[] {
+  return rows.map((r) => {
+    const native = nativeByPlayerId.get(r.id);
+    return {
+      ...r,
+      nativeProjection: native?.native_projection ?? null,
+      nativeDelta: native && r.projection !== null ? Math.round((native.native_projection - r.projection) * 100) / 100 : null,
+      nativeConfidence: native?.confidence ?? null,
+    };
+  });
+}
+
+/** Top N players by raw Native Projection (no salary weighting) --
+ * distinct from topNativeValues below, which divides by salary. */
+export function topNativeProjections(rows: NativeRankedPlayer[], limit = 10): NativeRankedPlayer[] {
+  return rows
+    .filter((r) => r.nativeProjection !== null)
+    .sort((a, b) => (b.nativeProjection ?? 0) - (a.nativeProjection ?? 0))
+    .slice(0, limit);
+}
+
+function nativeValueScore(row: NativeRankedPlayer): number | null {
+  if (row.nativeProjection === null || row.salary === null || row.salary <= 0) return null;
+  return Math.round((row.nativeProjection / row.salary) * 1000 * 100) / 100;
+}
+
+export interface NativeValuedPlayer extends NativeRankedPlayer {
+  nativeValue: number | null;
+}
+
+/** Top N players by Native Projection per $1,000 salary -- same "value"
+ * convention as topAiValues, applied to the native tier instead. */
+export function topNativeValues(rows: NativeRankedPlayer[], limit = 10): NativeValuedPlayer[] {
+  return rows
+    .map((r) => ({ ...r, nativeValue: nativeValueScore(r) }))
+    .filter((r): r is NativeValuedPlayer => r.nativeValue !== null)
+    .sort((a, b) => (b.nativeValue ?? 0) - (a.nativeValue ?? 0))
+    .slice(0, limit);
+}
+
+/** Players where Native and Independent/Legacy disagree the most, in
+ * either direction -- a single combined "biggest disagreement" list
+ * (unlike the AI section's separate upgrades/downgrades lists), since
+ * the milestone asks for one "Largest Native vs Legacy Differences" card. */
+export function largestNativeVsLegacyDifferences(rows: NativeRankedPlayer[], limit = 10): NativeRankedPlayer[] {
+  return rows
+    .filter((r) => r.nativeDelta !== null)
+    .sort((a, b) => Math.abs(b.nativeDelta ?? 0) - Math.abs(a.nativeDelta ?? 0))
+    .slice(0, limit);
+}
+
+export function highestNativeConfidence(rows: NativeRankedPlayer[], limit = 10): NativeRankedPlayer[] {
+  return rows
+    .filter((r) => r.nativeConfidence !== null)
+    .sort((a, b) => (b.nativeConfidence ?? 0) - (a.nativeConfidence ?? 0))
+    .slice(0, limit);
+}
+
+export function lowestNativeConfidence(rows: NativeRankedPlayer[], limit = 10): NativeRankedPlayer[] {
+  return rows
+    .filter((r) => r.nativeConfidence !== null)
+    .sort((a, b) => (a.nativeConfidence ?? 0) - (b.nativeConfidence ?? 0))
+    .slice(0, limit);
 }

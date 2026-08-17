@@ -5,6 +5,7 @@
 // against a player pool the user is actively browsing/locking/excluding.
 
 import type { AiSignalContribution } from "../aiProjections";
+import type { NativeHitterComponents, NativePitcherComponents } from "../nativeProjections";
 import type { ProviderSource, SlateOption } from "../orchestrator/types";
 import type { Lineup } from "../types";
 
@@ -71,9 +72,23 @@ export interface PoolPlayerRow {
   aiSignals: AiSignalContribution[];
   aiReasons: string[];
   aiSummary: string | null;
+
+  // Milestone 23: Native Projection Model -- joined in from the latest
+  // native_projection_*.json snapshot by mlbPlayerId. `projection` above
+  // is still ALWAYS the independent value; see lib/nativeProjections.ts.
+  nativeProjection: number | null;
+  nativeCeiling: number | null;
+  nativeFloor: number | null;
+  nativeDelta: number | null; // nativeProjection - projection (independent)
+  nativeConfidence: number | null;
+  nativeReasons: string[];
+  nativeExpectedPa: number | null; // hitters only
+  nativeExpectedInnings: number | null; // pitchers only
+  nativeHitterComponents: NativeHitterComponents | null;
+  nativePitcherComponents: NativePitcherComponents | null;
 }
 
-export type ProjectionSource = "independent" | "external" | "adjusted" | "ai";
+export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -96,6 +111,7 @@ export interface OptimizerPoolResult {
   hasOwnership: boolean;
   hasExternalProjections: boolean;
   hasAiProjections: boolean;
+  hasNativeProjections: boolean;
 }
 
 export interface OptimizerBuildRequest {

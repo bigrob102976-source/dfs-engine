@@ -38,9 +38,22 @@ function SignalBreakdownBar({ signal, maxAbsDelta }: { signal: AiSignalContribut
  * analysis (Independent, Adjusted) for one player. Renders a plain "no
  * external data" message rather than an error when no baseline/adjusted
  * snapshot covers this player yet. */
+function componentRow(label: string, component: { expected_count: number; dk_points: number } | null | undefined) {
+  if (!component) return null;
+  return (
+    <>
+      <dt className="text-text-faint">{label}</dt>
+      <dd className="text-right text-text">
+        {component.expected_count.toFixed(2)} <span className="text-text-faint">({component.dk_points >= 0 ? "+" : ""}{component.dk_points.toFixed(2)} pts)</span>
+      </dd>
+    </>
+  );
+}
+
 export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; onClose: () => void }) {
   const hasComparison = player.externalProjection !== null || player.adjustedProjection !== null;
   const hasAi = player.aiProjection !== null;
+  const hasNative = player.nativeProjection !== null;
   const maxAbsSignalDelta = hasAi ? Math.max(0, ...player.aiSignals.map((s) => Math.abs(s.delta))) : 0;
 
   return (
@@ -88,6 +101,96 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Milestone 23: Native Projection Model -- Big Money's own
+          bottom-up projection built from expected opportunities (PA /
+          innings-BF), regressed event rates, and DraftKings scoring --
+          independent of BlueCollar/external providers. Shows every
+          component so it's clear WHY the projection is what it is. */}
+      {hasNative && (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">Big Money DFS Projection</h3>
+
+          <div className="mt-1 grid grid-cols-4 gap-2 text-center">
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Projection</div>
+              <div className="text-xs font-semibold text-purple">{fmt(player.nativeProjection)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Ceiling</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.nativeCeiling)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Floor</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.nativeFloor)}</div>
+            </div>
+            <div className="rounded border border-border-subtle p-1.5">
+              <div className="text-[10px] uppercase text-text-faint">Confidence</div>
+              <div className="text-xs font-semibold text-text">{fmt(player.nativeConfidence, 0)}</div>
+            </div>
+          </div>
+
+          {player.nativeExpectedPa !== null && (
+            <div className="mt-2 text-xs text-text-faint">
+              Expected PA <span className="font-semibold text-text">{player.nativeExpectedPa.toFixed(1)}</span>
+            </div>
+          )}
+          {player.nativeExpectedInnings !== null && (
+            <div className="mt-2 text-xs text-text-faint">
+              Expected IP <span className="font-semibold text-text">{player.nativeExpectedInnings.toFixed(1)}</span>
+            </div>
+          )}
+
+          {player.nativeHitterComponents && (
+            <dl className="mt-3 grid grid-cols-2 gap-y-1.5 text-xs">
+              {componentRow("Singles", player.nativeHitterComponents.singles)}
+              {componentRow("Doubles", player.nativeHitterComponents.doubles)}
+              {componentRow("Triples", player.nativeHitterComponents.triples)}
+              {componentRow("Home Runs", player.nativeHitterComponents.home_runs)}
+              {componentRow("Walks + HBP", {
+                expected_count: player.nativeHitterComponents.walks.expected_count + player.nativeHitterComponents.hit_by_pitch.expected_count,
+                dk_points: player.nativeHitterComponents.walks.dk_points + player.nativeHitterComponents.hit_by_pitch.dk_points,
+              })}
+              {componentRow("Stolen Bases", player.nativeHitterComponents.stolen_bases)}
+              {componentRow("Runs", player.nativeHitterComponents.runs)}
+              {componentRow("RBI", player.nativeHitterComponents.rbi)}
+            </dl>
+          )}
+
+          {player.nativePitcherComponents && (
+            <dl className="mt-3 grid grid-cols-2 gap-y-1.5 text-xs">
+              {componentRow("Innings Pitched", player.nativePitcherComponents.innings_pitched)}
+              {componentRow("Strikeouts", player.nativePitcherComponents.strikeouts)}
+              {componentRow("Walks", player.nativePitcherComponents.walks)}
+              {componentRow("Hits Allowed", player.nativePitcherComponents.hits_allowed)}
+              {componentRow("Earned Runs", player.nativePitcherComponents.earned_runs)}
+              <dt className="text-text-faint">Win Probability</dt>
+              <dd className="text-right text-text">
+                {player.nativePitcherComponents.win_probability !== null
+                  ? `${(player.nativePitcherComponents.win_probability * 100).toFixed(0)}%${player.nativePitcherComponents.win_probability_is_mock ? " (mock)" : ""}`
+                  : "n/a"}
+              </dd>
+            </dl>
+          )}
+
+          {player.nativeReasons.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] uppercase tracking-wide text-text-faint">Reasons</div>
+              <div className="flex flex-wrap gap-1.5">
+                {player.nativeReasons.map((r, i) => (
+                  <AIInsightBadge key={i}>{r}</AIInsightBadge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {!hasNative && (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">Big Money DFS Projection</h3>
+          <p className="text-xs text-text-faint">No Native Projection generated yet for this player -- run scripts/run_native_projection_engine.py.</p>
         </div>
       )}
 

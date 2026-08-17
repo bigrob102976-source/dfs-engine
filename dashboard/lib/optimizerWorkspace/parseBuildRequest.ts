@@ -3,7 +3,7 @@ import { isValidSlateId } from "./validateSlateId";
 import type { OptimizerBuildRequest } from "./types";
 
 const OBJECTIVES = new Set(["projection", "ceiling", "balanced", "leverage"]);
-const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai"]);
+const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai", "native"]);
 
 export type ParseResult = { ok: true; request: OptimizerBuildRequest } | { ok: false; error: string };
 

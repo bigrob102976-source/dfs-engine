@@ -437,5 +437,55 @@ describe("buildLineups", () => {
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");
     });
+
+    it("native (Milestone 23) writes a --projection-overrides file with native projection/ceiling/floor", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      writeJson(`native_projection_snapshots/${DATE}/native_projection_20260812T200000.json`, {
+        slate_date: DATE, generated_at: `${DATE}T20:00:00Z`, model_version: "1.0.0",
+        pitcher_snapshot_path: null, batter_snapshot_path: null, environment_snapshot_path: null,
+        player_count: 1,
+        players: [
+          { player_id: "h1", name: "Kyle Schwarber", team: "PHI", player_type: "hitter", native_projection: 9.6, native_ceiling: 16.2, native_floor: 3.5, confidence: 75, reasons: [] },
+        ],
+        warnings: [],
+      });
+      let capturedOverrides: Record<string, { projection: number; ceiling: number; floor: number }> | null = null;
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner(
+          {
+            "scripts/optimize_dk_lineups.py": (args) => {
+              const overridesPath = argValue(args, "--projection-overrides");
+              if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+              return ok(JSON.stringify({ errors: [] }));
+            },
+          },
+          calls,
+        ),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "native" }));
+
+      expect(capturedOverrides).not.toBeNull();
+      expect(capturedOverrides!.h1.projection).toBe(9.6);
+      expect(capturedOverrides!.h1.ceiling).toBe(16.2);
+      expect(capturedOverrides!.h1.floor).toBe(3.5);
+    });
+
+    it("native with no native snapshot at all never passes --projection-overrides (graceful fallback)", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      // Deliberately no native snapshot written.
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      const errors = await validateBuildRequest(baseRequest({ projectionSource: "native" }));
+      expect(errors).toEqual([]);
+      const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+      expect(call.args).not.toContain("--projection-overrides");
+    });
   });
 });

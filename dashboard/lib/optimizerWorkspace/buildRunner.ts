@@ -5,6 +5,7 @@ import path from "node:path";
 import { getAiProjectionByPlayerId } from "../aiProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
+import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
 import type { LineupSet } from "../types";
@@ -15,17 +16,18 @@ import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
 /** Milestone 17's Projection Source selector: "independent" (the
  * default -- Big Money's own projections, exactly as before this
  * milestone) never writes anything and passes no extra flag, so that
- * path is byte-identical to pre-M17 behavior. "external"/"adjusted"/"ai"
- * write a small, ephemeral {mlb_player_id: {projection, ceiling,
+ * path is byte-identical to pre-M17 behavior. "external"/"adjusted"/"ai"/
+ * "native" write a small, ephemeral {mlb_player_id: {projection, ceiling,
  * floor}} JSON file under the OS temp directory and pass it via
  * --projection-overrides -- the persisted dk_player_pool_<ts>.json
  * (Big Money's independent projections) is NEVER written to. A player
  * missing from the chosen source simply has no override entry, so
  * scripts/optimize_dk_lineups.py falls back to their independent value
- * rather than dropping them. Milestone 20: "ai" is the only source that
- * also supplies its own ceiling/floor (projection_engine/scoring.py
- * computes both) -- external/adjusted still leave those two null, so
- * the optimizer falls back to the pool's own independent ceiling/floor. */
+ * rather than dropping them. Milestone 20: "ai" supplies its own
+ * ceiling/floor (projection_engine/scoring.py computes both); Milestone
+ * 23: "native" does too (native_projections/uncertainty.py) -- only
+ * external/adjusted still leave those two null, so the optimizer falls
+ * back to the pool's own independent ceiling/floor for those two. */
 function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
   if (request.projectionSource === "independent") return null;
 
@@ -36,6 +38,11 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
     for (const [mlbPlayerId, player] of aiByPlayerId) {
       if (player.ai_projection === null) continue;
       overrides[mlbPlayerId] = { projection: player.ai_projection, ceiling: player.ai_ceiling, floor: player.ai_floor };
+    }
+  } else if (request.projectionSource === "native") {
+    const nativeByPlayerId = getNativeProjectionByPlayerId(request.date);
+    for (const [mlbPlayerId, player] of nativeByPlayerId) {
+      overrides[mlbPlayerId] = { projection: player.native_projection, ceiling: player.native_ceiling, floor: player.native_floor };
     }
   } else {
     const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);

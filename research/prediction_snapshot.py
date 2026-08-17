@@ -93,6 +93,14 @@ def _pitcher_snapshot_record(entry: PitcherBoardEntry, p: PitcherInput) -> dict:
         "recent_metrics": asdict(p.recent),
         "trend_metrics": asdict(p.trends),
         "opponent_metrics": asdict(p.opponent_stats),
+        # Milestone 23: previously omitted here (nothing before this milestone
+        # needed a full PitcherInput reconstructed FROM a saved snapshot --
+        # projection_engine/scoring.py reads the metrics dicts above directly
+        # rather than rebuilding a PitcherInput). native_projections/ does
+        # need a full reconstruction, so these are now saved too -- purely
+        # additive, changes nothing for any existing snapshot reader.
+        "availability_metrics": asdict(p.availability),
+        "game_metrics": asdict(p.game),
 
         "data_status": pitcher_data_status(p),
     }

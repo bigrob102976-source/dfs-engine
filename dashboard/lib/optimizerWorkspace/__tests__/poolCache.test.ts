@@ -305,4 +305,43 @@ describe("loadPool", () => {
     expect(pool.hasOwnership).toBe(false);
     expect(pool.players.every((p) => p.ownership === null)).toBe(true);
   });
+
+  it("joins Native Projection data by mlbPlayerId when a snapshot exists (Milestone 23)", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    writeJson(`native_projection_snapshots/${DATE}/native_projection_20260812T180000.json`, {
+      slate_date: DATE, generated_at: `${DATE}T18:00:00Z`, model_version: "1.0.0",
+      pitcher_snapshot_path: null, batter_snapshot_path: null, environment_snapshot_path: null,
+      player_count: 2,
+      players: [
+        { player_id: "h1", name: "Leadoff Hitter", team: "BOS", player_type: "hitter", native_projection: 9.5, native_ceiling: 15.0, native_floor: 4.0, confidence: 70, reasons: ["r1"] },
+        { player_id: "p1", name: "Ace Pitcher", team: "TOR", player_type: "pitcher", native_projection: 22.5, native_ceiling: 30.0, native_floor: 14.0, confidence: 85, reasons: ["r2"] },
+      ],
+      warnings: [],
+    });
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+
+    expect(pool.hasNativeProjections).toBe(true);
+    const hitter = pool.players.find((p) => p.dkPlayerId === "d1")!;
+    expect(hitter.nativeProjection).toBe(9.5);
+    expect(hitter.nativeCeiling).toBe(15.0);
+    expect(hitter.nativeDelta).toBeCloseTo(-0.5, 5); // 9.5 - 10 (independent projection)
+    expect(hitter.nativeConfidence).toBe(70);
+    expect(hitter.nativeReasons).toEqual(["r1"]);
+  });
+
+  it("hasNativeProjections is false and native fields stay null when no snapshot exists", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+    expect(pool.hasNativeProjections).toBe(false);
+    expect(pool.players.every((p) => p.nativeProjection === null)).toBe(true);
+  });
 });

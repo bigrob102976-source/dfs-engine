@@ -20,13 +20,20 @@ import {
   buildSlateKpis,
   buildUpcomingLockTimes,
   highestAiConfidence,
+  highestNativeConfidence,
   joinAiProjections,
+  joinNativeProjections,
   largestAiDowngrades,
   largestAiUpgrades,
+  largestNativeVsLegacyDifferences,
   lowestAiConfidence,
+  lowestNativeConfidence,
   topAiValues,
+  topNativeProjections,
+  topNativeValues,
 } from "@/lib/commandCenter";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
+import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
@@ -85,6 +92,18 @@ export default function TodaysSlatePage() {
   const largestAiDowngrades10 = largestAiDowngrades(aiAllRows, 10);
   const highestAiConfidence10 = highestAiConfidence(aiAllRows, 10);
   const lowestAiConfidence10 = lowestAiConfidence(aiAllRows, 10);
+
+  // Milestone 23: Native Projection Model -- joined onto the same rows
+  // above, additive only (nothing above this line changes behavior).
+  const nativeByPlayerId = getNativeProjectionByPlayerId(date);
+  const nativeHitterRows = joinNativeProjections(hitterRows, nativeByPlayerId);
+  const nativePitcherRows = joinNativeProjections(pitcherRows, nativeByPlayerId);
+  const nativeAllRows = [...nativePitcherRows, ...nativeHitterRows];
+  const topNativeProjections10 = topNativeProjections(nativeAllRows, 10);
+  const topNativeValues10 = topNativeValues(nativeAllRows, 10);
+  const largestNativeVsLegacyDifferences10 = largestNativeVsLegacyDifferences(nativeAllRows, 10);
+  const highestNativeConfidence10 = highestNativeConfidence(nativeAllRows, 10);
+  const lowestNativeConfidence10 = lowestNativeConfidence(nativeAllRows, 10);
 
   const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
@@ -175,6 +194,11 @@ export default function TodaysSlatePage() {
         largestAiDowngrades={largestAiDowngrades10}
         highestAiConfidence={highestAiConfidence10}
         lowestAiConfidence={lowestAiConfidence10}
+        topNativeProjections={topNativeProjections10}
+        topNativeValues={topNativeValues10}
+        largestNativeVsLegacyDifferences={largestNativeVsLegacyDifferences10}
+        highestNativeConfidence={highestNativeConfidence10}
+        lowestNativeConfidence={lowestNativeConfidence10}
       />
 
       {/* Pipeline operations -- unchanged, existing widgets */}

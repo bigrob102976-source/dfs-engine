@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
 import type { GameEnvironmentReport } from "@/lib/gameEnvironment";
-import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry } from "@/lib/commandCenter";
+import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry, NativeRankedPlayer, NativeValuedPlayer } from "@/lib/commandCenter";
 import type { PlayerRow } from "@/lib/types";
 import type { StackSummary } from "@/lib/stacks";
 
@@ -70,6 +70,42 @@ function AiPlayerList({ rows, metric }: { rows: AiRankedPlayer[]; metric: "value
   );
 }
 
+/** Milestone 23: compact Native-ranked player lists (Top Native
+ * Projections, Top Native Values, Largest Native vs Legacy Differences,
+ * Highest/Lowest Native Confidence) -- mirrors AiPlayerList exactly,
+ * plus a "projection" metric for the raw-projection ranking AI's
+ * section doesn't have. Every value here is joined straight from the
+ * Native Projection Model's snapshot, never recomputed. */
+function NativePlayerList({ rows, metric }: { rows: NativeRankedPlayer[]; metric: "projection" | "value" | "delta" | "confidence" }) {
+  if (rows.length === 0) return <p className="text-xs text-text-faint">No Native Projections yet.</p>;
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {rows.map((r, i) => {
+        const value =
+          metric === "projection" ? r.nativeProjection
+          : metric === "value" ? (r as NativeValuedPlayer).nativeValue
+          : metric === "delta" ? r.nativeDelta
+          : r.nativeConfidence;
+        const digits = metric === "value" ? 2 : metric === "confidence" ? 0 : metric === "delta" ? 2 : 1;
+        const signed = metric === "delta" && value !== null && value >= 0;
+        return (
+          <li key={r.id} className="flex items-center justify-between gap-2 text-xs">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="w-4 shrink-0 text-text-faint">{i + 1}</span>
+              <span className="truncate text-text">{r.name}</span>
+              <span className="shrink-0 text-text-faint">{r.team}</span>
+            </span>
+            <span className={`shrink-0 font-semibold ${metric === "delta" ? (signed ? "text-green" : "text-red") : "text-purple"}`}>
+              {signed ? "+" : ""}
+              {fmt(value, digits)}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function MovementList({ entries, tone }: { entries: LineMovementEntry[]; tone: "positive" | "negative" }) {
   if (entries.length === 0) return <p className="text-xs text-text-faint">No movement yet.</p>;
   return (
@@ -106,6 +142,11 @@ export function BottomInsights({
   largestAiDowngrades,
   highestAiConfidence,
   lowestAiConfidence,
+  topNativeProjections,
+  topNativeValues,
+  largestNativeVsLegacyDifferences,
+  highestNativeConfidence,
+  lowestNativeConfidence,
 }: {
   topHitters: PlayerRow[];
   topPitchers: PlayerRow[];
@@ -120,6 +161,11 @@ export function BottomInsights({
   largestAiDowngrades: AiRankedPlayer[];
   highestAiConfidence: AiRankedPlayer[];
   lowestAiConfidence: AiRankedPlayer[];
+  topNativeProjections: NativeRankedPlayer[];
+  topNativeValues: NativeValuedPlayer[];
+  largestNativeVsLegacyDifferences: NativeRankedPlayer[];
+  highestNativeConfidence: NativeRankedPlayer[];
+  lowestNativeConfidence: NativeRankedPlayer[];
 }) {
   return (
     <div>
@@ -196,6 +242,25 @@ export function BottomInsights({
         </DataCard>
         <DataCard title="Lowest Confidence">
           <AiPlayerList rows={lowestAiConfidence} metric="confidence" />
+        </DataCard>
+      </div>
+
+      <SectionHeader title="Native Projection Engine" />
+      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+        <DataCard title="Top Native Projections">
+          <NativePlayerList rows={topNativeProjections} metric="projection" />
+        </DataCard>
+        <DataCard title="Top Native Values">
+          <NativePlayerList rows={topNativeValues} metric="value" />
+        </DataCard>
+        <DataCard title="Largest Native vs Legacy Differences">
+          <NativePlayerList rows={largestNativeVsLegacyDifferences} metric="delta" />
+        </DataCard>
+        <DataCard title="Highest Confidence">
+          <NativePlayerList rows={highestNativeConfidence} metric="confidence" />
+        </DataCard>
+        <DataCard title="Lowest Confidence">
+          <NativePlayerList rows={lowestNativeConfidence} metric="confidence" />
         </DataCard>
       </div>
 

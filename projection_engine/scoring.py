@@ -82,7 +82,17 @@ def build_ai_player_projection(
     """Returns None (never a fabricated record) when the player has no
     Independent Projection to build from -- see
     projection_engine/validator.py and scripts/run_ai_projection_engine.py
-    for how a missing baseline is reported, not silently dropped."""
+    for how a missing baseline is reported, not silently dropped.
+
+    Milestone 23 note: this baseline is deliberately LEFT as the
+    Independent Projection, not rewired to the new Native Projection
+    Model (native_projections/), even though the milestone's "Default
+    Source" section permits that as a future option. Making the AI
+    layer's baseline itself Native is a deeper, higher-blast-radius
+    change that needs validation across multiple real slates, not one --
+    out of scope for M23. The dashboard's optimizer dropdown default was
+    changed to Native (see components/optimizer/OptimizerWorkspace.tsx);
+    this function was not."""
     independent_projection = board_record.get("projection")
     if independent_projection is None:
         return None
