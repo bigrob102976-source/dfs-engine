@@ -2,30 +2,35 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Minimal password gate for this local, read-only dev dashboard -- no
- * user accounts/database, just a single shared password (DASHBOARD_PASSWORD
- * env var) and a signed-ish session cookie. This is the "protected route"
- * mechanism since no pre-existing auth system exists to reuse in this
- * project (see the milestone kickoff discussion).
+ * Milestone 21: cheap, Edge-compatible UX gate -- replaces the old
+ * single-shared-password check. This is NOT the security boundary: it
+ * only checks whether a session cookie is present at all, so a logged
+ * -out visitor gets redirected to /login immediately instead of
+ * rendering a protected page shell first.
  *
- * If DASHBOARD_PASSWORD is not set, the gate is disabled entirely (pure
- * localhost convenience during development) -- set it before exposing
- * this beyond your own machine.
+ * The REAL authorization (is this token valid? has it expired? what is
+ * this user's role?) happens server-side, on every request, via
+ * lib/auth/guards.ts's requireAuth()/requireAdmin() (Server Components/
+ * layouts) and requireAuthApi()/requireAdminApi() (API routes) -- those
+ * always do a fresh database lookup and are what actually enforces
+ * access. node:sqlite is a Node.js-runtime API and cannot run in this
+ * Edge-compatible proxy, which is exactly why the deep check lives
+ * downstream instead of here.
  */
 
-const SESSION_COOKIE = "dfs_dashboard_session";
+const SESSION_COOKIE = "bigmoney_session";
+
+const PUBLIC_PATH_PREFIXES = ["/login", "/signup", "/forgot-password", "/reset-password", "/verify-email", "/api/auth", "/_next"];
 
 export function proxy(request: NextRequest) {
-  const password = process.env.DASHBOARD_PASSWORD;
-  if (!password) return NextResponse.next();
-
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/login") || pathname.startsWith("/_next") || pathname.startsWith("/api/session")) {
+
+  if (PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
   }
 
-  const session = request.cookies.get(SESSION_COOKIE)?.value;
-  if (session === password) {
+  const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
+  if (hasSessionCookie) {
     return NextResponse.next();
   }
 

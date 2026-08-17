@@ -30,7 +30,7 @@ afterEach(() => {
 function renderTopNav(overrides: Partial<Parameters<typeof TopNavigation>[0]> = {}) {
   return render(
     <ThemeProvider>
-      <TopNavigation slateLabel="Today · 2026-08-14" {...overrides} />
+      <TopNavigation slateLabel="Today · 2026-08-14" user={{ email: "member@example.com", isAdmin: false }} {...overrides} />
     </ThemeProvider>,
   );
 }
@@ -62,10 +62,31 @@ describe("TopNavigation", () => {
     expect(screen.getByText("No new notifications.")).toBeInTheDocument();
   });
 
-  it("profile menu opens with a sign-out action", () => {
+  it("profile menu shows the signed-in email, an Account link, and a sign-out action", () => {
     renderTopNav();
     fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    expect(screen.getByText("member@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Account" })).toHaveAttribute("href", "/account");
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("hides the Admin Panel link for a non-admin user", () => {
+    renderTopNav({ user: { email: "member@example.com", isAdmin: false } });
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    expect(screen.queryByRole("menuitem", { name: "Admin Panel" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Admin Panel link for an admin user", () => {
+    renderTopNav({ user: { email: "admin@example.com", isAdmin: true } });
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    expect(screen.getByRole("menuitem", { name: "Admin Panel" })).toHaveAttribute("href", "/admin");
+  });
+
+  it("the sign-out form posts to /api/auth/logout", () => {
+    renderTopNav();
+    fireEvent.click(screen.getByRole("button", { name: "Profile" }));
+    const form = screen.getByRole("menuitem", { name: "Sign out" }).closest("form");
+    expect(form).toHaveAttribute("action", "/api/auth/logout");
   });
 
   it("refresh button POSTs to /api/refresh and revalidates once the run completes", async () => {

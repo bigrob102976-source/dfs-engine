@@ -4,6 +4,8 @@ import path from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getTodayChicagoDate } from "@/lib/currentDate";
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
   usePathname: () => "/dashboard",
@@ -49,7 +51,11 @@ function writeJson(relPath: string, data: unknown) {
   fs.writeFileSync(filePath, JSON.stringify(data));
 }
 
-const DATE = "2026-08-14";
+// The page itself always resolves "today" via getTodayChicagoDate() with
+// no argument (real wall-clock time) -- this fixture must track that
+// same value rather than a fixed literal, or it silently stops matching
+// once the calendar date advances past whatever day this was written on.
+const DATE = getTodayChicagoDate();
 
 function seedEnvironmentReport() {
   writeJson(`game_environment_snapshots/${DATE}/environment_20260814T180000.json`, {

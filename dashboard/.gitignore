@@ -42,3 +42,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Milestone 21: membership/admin SQLite database -- local runtime state
+# owned entirely by this Next.js app (never a Python artifact), not
+# source or a reproducible artifact. Migrations (lib/db/migrations/*.sql)
+# ARE tracked; the .db file they produce is not.
+/data/bigmoney.db
+/data/bigmoney.db-wal
+/data/bigmoney.db-shm

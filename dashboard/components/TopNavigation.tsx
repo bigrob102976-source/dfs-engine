@@ -89,7 +89,12 @@ function NotificationsMenu() {
   );
 }
 
-function ProfileMenu() {
+function initialsFor(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  return (local.slice(0, 2) || "BM").toUpperCase();
+}
+
+function ProfileMenu({ email, isAdmin }: { email: string; isAdmin: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -100,14 +105,23 @@ function ProfileMenu() {
         aria-expanded={open}
         className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-dim text-xs font-semibold text-accent transition-colors duration-150 hover:brightness-110"
       >
-        BM
+        {initialsFor(email)}
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-1 w-40 overflow-hidden rounded-[var(--radius-control)] border border-border bg-bg-panel-raised text-xs shadow-[var(--shadow-popover)]"
+          className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-[var(--radius-control)] border border-border bg-bg-panel-raised text-xs shadow-[var(--shadow-popover)]"
         >
-          <form action="/api/session/sign-out" method="post">
+          <div className="truncate border-b border-border-subtle px-3 py-2 text-text-faint">{email}</div>
+          <a href="/account" role="menuitem" className="block w-full px-3 py-2 text-left text-text-muted hover:bg-bg-panel hover:text-text">
+            Account
+          </a>
+          {isAdmin && (
+            <a href="/admin" role="menuitem" className="block w-full px-3 py-2 text-left font-semibold text-gold hover:bg-bg-panel">
+              Admin Panel
+            </a>
+          )}
+          <form action="/api/auth/logout" method="post">
             <button type="submit" role="menuitem" className="w-full px-3 py-2 text-left text-text-muted hover:bg-bg-panel hover:text-text">
               Sign out
             </button>
@@ -123,7 +137,17 @@ function ProfileMenu() {
  * `rightSlot`), global search, refresh, theme toggle, notifications, and
  * profile. Every dashboard route renders this once via
  * app/dashboard/layout.tsx. */
-export function TopNavigation({ slateLabel, search, rightSlot }: { slateLabel: string; search?: ReactNode; rightSlot?: ReactNode }) {
+export function TopNavigation({
+  slateLabel,
+  search,
+  rightSlot,
+  user,
+}: {
+  slateLabel: string;
+  search?: ReactNode;
+  rightSlot?: ReactNode;
+  user: { email: string; isAdmin: boolean };
+}) {
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-bg-panel/95 px-4 py-2.5 backdrop-blur">
       <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-border bg-bg-panel-raised px-2.5 py-1.5 text-xs text-text-muted">
@@ -138,7 +162,7 @@ export function TopNavigation({ slateLabel, search, rightSlot }: { slateLabel: s
         <RefreshButton />
         <ThemeToggle />
         <NotificationsMenu />
-        <ProfileMenu />
+        <ProfileMenu email={user.email} isAdmin={user.isAdmin} />
       </div>
     </header>
   );

@@ -1,6 +1,7 @@
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { Sidebar } from "@/components/Sidebar";
 import { TopNavigation } from "@/components/TopNavigation";
+import { requireAuth } from "@/lib/auth/guards";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import {
   latestKnownSlateDate,
@@ -23,6 +24,13 @@ export const dynamic = "force-dynamic";
  * yet today), so search keeps working across the whole dashboard instead
  * of going empty every morning before the first refresh. */
 export default async function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
+  // The single choke point every /dashboard/* page passes through --
+  // redirects to /login when there's no valid session. Role/entitlement
+  // -specific checks happen per-feature, not here (this dashboard is
+  // MLB-only and every current feature is seeded PRODUCTION/entitled by
+  // subscription; a future per-feature gate would call
+  // isFeatureVisibleToUser() from a specific page, not this shared layout).
+  const user = await requireAuth();
   const today = getTodayChicagoDate();
   const searchDate = latestKnownSlateDate();
   const mockModeEnabled = await getMockModeEnabled();
@@ -54,7 +62,11 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
             <span aria-hidden="true">⚠</span> DEV MODE -- Mock DFS data is active. No real DraftKings salaries.
           </div>
         )}
-        <TopNavigation slateLabel={slateLabel} search={<GlobalSearch index={searchIndex} />} />
+        <TopNavigation
+          slateLabel={slateLabel}
+          search={<GlobalSearch index={searchIndex} />}
+          user={{ email: user.email, isAdmin: user.role === "ADMIN" }}
+        />
         <main className="min-w-0 flex-1 overflow-y-auto p-5">{children}</main>
       </div>
     </div>
