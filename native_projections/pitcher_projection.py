@@ -59,7 +59,17 @@ def _vegas_invalid_warning(game_report: Optional[dict]) -> Optional[str]:
     if not game_report:
         return None
     vegas = game_report.get("vegas") or {}
-    if vegas and vegas.get("implied_runs_is_valid", True) is False:
+    if not vegas:
+        return None
+    status = vegas.get("vegas_projection_status")
+    if status == "IN_PLAY_ONLY":
+        return (
+            "In-play Vegas ignored -- no valid pregame snapshot was captured for this game before it started; "
+            "Vegas contribution excluded from this projection."
+        )
+    if status == "MISSING":
+        return "Vegas unavailable -- no valid pregame market data was captured for this game; Vegas contribution excluded from this projection."
+    if vegas.get("implied_runs_is_valid", True) is False:
         return "Vegas implied-runs calculation was invalid for this game -- Vegas contribution excluded from this projection."
     return None
 

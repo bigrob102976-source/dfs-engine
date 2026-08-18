@@ -2,8 +2,10 @@ import path from "node:path";
 
 import { getAiProjectionByPlayerId } from "../aiProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
+import { buildDkSlateVegasCoverage } from "../dkVegasCoverage";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
+import { loadLatestEnvironmentReport } from "../gameEnvironment";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
@@ -102,6 +104,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
   const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
   const nativeByPlayerId = getNativeProjectionByPlayerId(entry.date);
+  const vegasCoverage = buildDkSlateVegasCoverage(matchReport, loadLatestEnvironmentReport(entry.date));
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
     const own = ownershipByDkId.get(p.dk_player_id) ?? (p.mlb_player_id ? ownershipByMlbId.get(p.mlb_player_id) : undefined);
@@ -185,6 +188,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     hasNativeProjections: nativeByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
+    vegasCoverage,
   };
 }
 

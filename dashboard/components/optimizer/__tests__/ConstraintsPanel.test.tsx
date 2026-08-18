@@ -78,6 +78,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     rosterFeasibilityPass: true,
     salaryCap: 50000,
     hasOwnership: true,
+    vegasCoverage: { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, games: [] },
   };
 }
 

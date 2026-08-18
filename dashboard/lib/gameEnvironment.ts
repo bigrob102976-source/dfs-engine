@@ -93,6 +93,16 @@ export interface VegasSnapshot {
   validation_warnings: string[];
 
   is_first_pull_of_day: boolean;
+
+  // Milestone 25: pregame lock / freeze provenance. `game_status` is the
+  // PREGAME/IN_PLAY/FINAL/UNKNOWN classification AT CAPTURE TIME for
+  // THIS specific snapshot -- frozen forever, never recomputed against
+  // the game's current status. `vegas_projection_status` is the
+  // dashboard-ready label this same snapshot object always carries:
+  // "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID" | "IN_PLAY_ONLY".
+  game_status: "PREGAME" | "IN_PLAY" | "FINAL" | "UNKNOWN";
+  is_frozen_pregame: boolean;
+  vegas_projection_status: "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID" | "IN_PLAY_ONLY";
 }
 
 export interface VegasSlateAnalysis {
@@ -190,6 +200,15 @@ export interface GameEnvironmentReport {
   bullpen_away: BullpenProfile | null;
   travel_home: TravelProfile | null;
   travel_away: TravelProfile | null;
+
+  // Milestone 25: `vegas` above is ALWAYS the pregame-safe value Native/AI
+  // consume (live pregame, frozen pregame, or None) -- never replaced by
+  // in-play odds. `vegas_live` is the CURRENT market snapshot regardless
+  // of game status, for research/history display only (the Vegas
+  // Intelligence page's LIVE MARKET tab) -- never read by Native/AI.
+  mlb_game_status: string | null;
+  game_status: "PREGAME" | "IN_PLAY" | "FINAL" | "UNKNOWN";
+  vegas_live: VegasSnapshot | null;
 }
 
 export interface SlateEnvironmentReport {

@@ -76,4 +76,32 @@ describe("VegasExpandedDetail", () => {
     expect(screen.queryByText("Sportsbook Lines")).not.toBeInTheDocument();
     expect(screen.queryByText("Market Consensus")).not.toBeInTheDocument();
   });
+
+  it("shows the Pregame Lock comparison when the pregame snapshot is frozen and vegas_live confirms the game left PREGAME", () => {
+    const frozenVegas = { ...buildGameEnvironmentReport().vegas!, is_mock: false, is_frozen_pregame: true, vegas_projection_status: "PREGAME_FROZEN" as const };
+    const liveVegas = { ...buildGameEnvironmentReport().vegas!, is_mock: false, game_status: "IN_PLAY" as const, current_home: { moneyline: 3300, run_line: 8.5, run_line_odds: null, total: 12.5 } };
+    const game = buildGameEnvironmentReport({ vegas: frozenVegas, vegas_live: liveVegas, mlb_game_status: "In Progress", game_status: "IN_PLAY" });
+
+    render(<VegasExpandedDetail row={{ game, homePitcher: null, awayPitcher: null }} analysis={null} marketView="pregame" />);
+
+    expect(screen.getByText("Pregame Lock")).toBeInTheDocument();
+    expect(screen.getByText(/NOT USED FOR DFS PROJECTIONS/)).toBeInTheDocument();
+    expect(screen.getByText("+3300")).toBeInTheDocument(); // the live/in-play moneyline, shown only in the comparison callout
+  });
+
+  it("does not show the Pregame Lock comparison on the Live Market tab (would be redundant)", () => {
+    const frozenVegas = { ...buildGameEnvironmentReport().vegas!, is_mock: false, is_frozen_pregame: true, vegas_projection_status: "PREGAME_FROZEN" as const };
+    const liveVegas = { ...buildGameEnvironmentReport().vegas!, is_mock: false, game_status: "IN_PLAY" as const };
+    const game = buildGameEnvironmentReport({ vegas: frozenVegas, vegas_live: liveVegas, mlb_game_status: "In Progress", game_status: "IN_PLAY" });
+
+    render(<VegasExpandedDetail row={{ game, homePitcher: null, awayPitcher: null }} analysis={null} marketView="live" />);
+
+    expect(screen.queryByText("Pregame Lock")).not.toBeInTheDocument();
+  });
+
+  it("shows NO VALID PREGAME VEGAS when vegas is null", () => {
+    const game = buildGameEnvironmentReport({ vegas: null });
+    render(<VegasExpandedDetail row={{ game, homePitcher: null, awayPitcher: null }} analysis={null} />);
+    expect(screen.getByText("NO VALID PREGAME VEGAS")).toBeInTheDocument();
+  });
 });

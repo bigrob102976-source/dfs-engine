@@ -43,6 +43,7 @@ export function VegasMobileCard({
   expanded,
   onToggleExpand,
   history,
+  marketView,
 }: {
   row: VegasGameRow;
   analysis: VegasSlateAnalysis | null;
@@ -50,6 +51,7 @@ export function VegasMobileCard({
   expanded: boolean;
   onToggleExpand: () => void;
   history: SlateEnvironmentReport[];
+  marketView: "pregame" | "live";
 }) {
   const { game } = row;
   const vegas = game.vegas;
@@ -112,7 +114,7 @@ export function VegasMobileCard({
       </button>
       {expanded && (
         <div className="border-t border-border-subtle">
-          <VegasExpandedDetail row={row} analysis={analysis} />
+          <VegasExpandedDetail row={row} analysis={analysis} marketView={marketView} />
         </div>
       )}
     </div>

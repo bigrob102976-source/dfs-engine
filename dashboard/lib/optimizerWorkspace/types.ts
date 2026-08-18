@@ -5,6 +5,7 @@
 // against a player pool the user is actively browsing/locking/excluding.
 
 import type { AiSignalContribution } from "../aiProjections";
+import type { DkSlateVegasCoverage } from "../dkVegasCoverage";
 import type { NativeHitterComponents, NativePitcherComponents } from "../nativeProjections";
 import type { ProviderSource, SlateOption } from "../orchestrator/types";
 import type { Lineup } from "../types";
@@ -112,6 +113,7 @@ export interface OptimizerPoolResult {
   hasExternalProjections: boolean;
   hasAiProjections: boolean;
   hasNativeProjections: boolean;
+  vegasCoverage: DkSlateVegasCoverage;
 }
 
 export interface OptimizerBuildRequest {

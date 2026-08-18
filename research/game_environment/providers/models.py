@@ -54,6 +54,15 @@ class NormalizedGameOdds:
     retrieved_at: str
     books: List[BookLine] = field(default_factory=list)
     parse_warnings: List[str] = field(default_factory=list)
+    # Milestone 25: the provider's own raw per-event status object (e.g.
+    # SportsGameOdds' {"started": bool, "live": bool, "ended": bool,
+    # "completed": bool, "cancelled": bool, ...}, confirmed live in
+    # Milestone 24's validation) -- used ONLY as a fallback pregame/
+    # in-play/final classification signal when MLB Stats API's own
+    # authoritative status is unavailable (research/game_environment/
+    # game_status.py::resolve_game_status()). Never itself the primary
+    # signal.
+    event_status: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -66,6 +75,7 @@ class NormalizedGameOdds:
             "retrieved_at": self.retrieved_at,
             "books": [b.to_dict() for b in self.books],
             "parse_warnings": list(self.parse_warnings),
+            "event_status": self.event_status,
         }
 
 

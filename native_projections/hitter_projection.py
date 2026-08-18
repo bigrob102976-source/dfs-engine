@@ -56,11 +56,11 @@ def _resolve_hitter_environment(b: BatterInput, game_report: Optional[dict]) -> 
 
 
 def _vegas_invalid_warning(game_report: Optional[dict]) -> Optional[str]:
-    """Milestone 24: an invalid Vegas implied-runs calculation (e.g. the
-    market components didn't reconcile) already contributes ZERO points
-    by construction -- providers/implied_runs.py nulls out both
-    home_implied_runs/away_implied_runs whenever implied_runs_is_valid
-    is False, so team_implied_runs naturally resolves to None above and
+    """Milestone 24/25: an invalid, missing, or in-play-only Vegas value
+    already contributes ZERO points by construction -- vegas.py's
+    SportsGameOddsVegasProvider.get_vegas_line() nulls out both
+    home_implied_runs/away_implied_runs whenever pregame data isn't
+    usable, so team_implied_runs naturally resolves to None above and
     matchup.environment_adjustment's `if team_implied_runs is not None`
     guard already skips it. This only adds the explicit WARNING the
     milestone requires so that "why is Vegas missing from this
@@ -70,7 +70,17 @@ def _vegas_invalid_warning(game_report: Optional[dict]) -> Optional[str]:
     if not game_report:
         return None
     vegas = game_report.get("vegas") or {}
-    if vegas and vegas.get("implied_runs_is_valid", True) is False:
+    if not vegas:
+        return None
+    status = vegas.get("vegas_projection_status")
+    if status == "IN_PLAY_ONLY":
+        return (
+            "In-play Vegas ignored -- no valid pregame snapshot was captured for this game before it started; "
+            "Vegas contribution excluded from this projection."
+        )
+    if status == "MISSING":
+        return "Vegas unavailable -- no valid pregame market data was captured for this game; Vegas contribution excluded from this projection."
+    if vegas.get("implied_runs_is_valid", True) is False:
         return "Vegas implied-runs calculation was invalid for this game -- Vegas contribution excluded from this projection."
     return None
 

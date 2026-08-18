@@ -110,3 +110,18 @@ def test_report_has_no_validation_warnings_for_a_clean_slate(tmp_path, monkeypat
 
     report = build_slate_environment_report("2026-08-13", research_output_root=str(root))
     assert report.warnings == []
+
+
+def test_mlb_game_status_from_research_package_flows_through_to_each_game(tmp_path, monkeypatch):
+    # Milestone 25: research_output/<date>/games.json's "status" field
+    # (already collected, previously discarded before reaching
+    # GameEnvironmentReport) must now flow through end to end.
+    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    root = tmp_path / "research_output"
+    _write_research_package(root, "2026-08-13", game_count=2)  # fixture uses "status": "scheduled"
+
+    report = build_slate_environment_report("2026-08-13", research_output_root=str(root))
+
+    for game in report.games:
+        assert game.mlb_game_status == "scheduled"
+        assert game.game_status == "PREGAME"

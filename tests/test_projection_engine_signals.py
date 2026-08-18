@@ -106,6 +106,38 @@ def test_unknown_provenance_vegas_returns_no_signal():
     assert vegas_signal("hitter", True, vegas) is None
 
 
+def test_frozen_pregame_vegas_produces_a_signal_same_as_live_pregame():
+    # Milestone 25: a PREGAME_FROZEN snapshot carries the SAME real
+    # current_home/total_movement shape a live pregame one does -- no new
+    # gating code needed, this proves it.
+    live = {"is_mock": False, "current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None, "vegas_projection_status": "LIVE_PREGAME"}
+    frozen = {"is_mock": False, "current_home": {"total": 11.0}, "home_implied_runs": 6.0, "away_implied_runs": 5.0, "total_movement": None, "vegas_projection_status": "PREGAME_FROZEN", "is_frozen_pregame": True}
+    assert vegas_signal("hitter", True, live).raw_delta == vegas_signal("hitter", True, frozen).raw_delta
+
+
+def test_in_play_only_vegas_returns_no_signal():
+    # Milestone 25: SportsGameOddsVegasProvider.get_vegas_line() nulls out
+    # current_home/current_away/total_movement/implied runs entirely for
+    # an IN_PLAY_ONLY snapshot (see test_vegas_pregame_lock.py) -- this
+    # confirms that exact shape produces no AI signal at all, covering the
+    # Dodgers extreme in-play scenario at the AI layer too.
+    vegas = {
+        "is_mock": False, "current_home": {"total": None}, "current_away": {"total": None},
+        "home_implied_runs": None, "away_implied_runs": None, "total_movement": None,
+        "vegas_projection_status": "IN_PLAY_ONLY",
+    }
+    assert vegas_signal("hitter", True, vegas) is None
+
+
+def test_missing_pregame_vegas_returns_no_signal():
+    vegas = {
+        "is_mock": False, "current_home": {"total": None}, "current_away": {"total": None},
+        "home_implied_runs": None, "away_implied_runs": None, "total_movement": None,
+        "vegas_projection_status": "MISSING",
+    }
+    assert vegas_signal("hitter", True, vegas) is None
+
+
 # ----------------------------------------------------------------------------
 # bullpen_signal
 # ----------------------------------------------------------------------------

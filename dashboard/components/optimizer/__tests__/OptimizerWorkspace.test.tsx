@@ -129,6 +129,7 @@ const POOL_RESULT = {
   rosterFeasibilityPass: true,
   salaryCap: 50000,
   hasOwnership: true,
+  vegasCoverage: { dkGames: 1, pregameCovered: 1, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 100, games: [] },
 };
 
 function jsonResponse(body: unknown) {

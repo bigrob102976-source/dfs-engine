@@ -356,6 +356,17 @@ export function OptimizerWorkspace() {
 
         {providerIsMock && <span className="rounded bg-yellow/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow">DEV / MOCK DATA</span>}
 
+        {pool && pool.vegasCoverage.dkGames > 0 && (
+          <span
+            className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+              pool.vegasCoverage.pregameCovered === pool.vegasCoverage.dkGames ? "bg-green/15 text-green" : "bg-yellow/20 text-yellow"
+            }`}
+            title="Native/AI projections still run with missing Vegas -- a missing game's Vegas adjustment is simply 0."
+          >
+            Vegas {pool.vegasCoverage.pregameCovered}/{pool.vegasCoverage.dkGames} Pregame Covered
+          </span>
+        )}
+
         <span className="text-[11px] text-text-faint">Updated: {pool ? formatTime(pool.generatedAt) : "--"}</span>
 
         <div className="ml-auto flex items-center gap-3">

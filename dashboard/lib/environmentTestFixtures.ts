@@ -71,6 +71,9 @@ export function buildGameEnvironmentReport(overrides: Partial<GameEnvironmentRep
       implied_runs_is_valid: true,
       validation_warnings: [],
       is_first_pull_of_day: true,
+      game_status: "PREGAME",
+      is_frozen_pregame: false,
+      vegas_projection_status: "LIVE_PREGAME",
     },
     ballpark: {
       team_abbr: "DET",
@@ -122,6 +125,9 @@ export function buildGameEnvironmentReport(overrides: Partial<GameEnvironmentRep
     },
     travel_home: { team_abbr: "DET", opponent_abbr: "CLE", is_home: true, status: "KNOWN", distance_miles: 0, timezones_crossed: 0, back_to_back: null, getaway_day: null },
     travel_away: { team_abbr: "CLE", opponent_abbr: "DET", is_home: false, status: "KNOWN", distance_miles: 90, timezones_crossed: 0, back_to_back: null, getaway_day: null },
+    mlb_game_status: "Scheduled",
+    game_status: "PREGAME",
+    vegas_live: null,
   };
 
   return { ...base, ...overrides };

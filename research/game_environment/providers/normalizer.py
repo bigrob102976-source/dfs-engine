@@ -224,4 +224,5 @@ def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Option
         retrieved_at=retrieved_at,
         books=list(lines_by_book.values()),
         parse_warnings=parse_warnings,
+        event_status=status or None,
     )

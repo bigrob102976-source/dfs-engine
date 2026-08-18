@@ -139,6 +139,22 @@ class VegasSnapshot:
     # (a real sportsbook open) anywhere in this project.
     is_first_pull_of_day: bool = True
 
+    # --- Milestone 25: pregame lock / freeze provenance -----------------
+    # `game_status` is the PREGAME/IN_PLAY/FINAL/UNKNOWN classification
+    # (research/game_environment/game_status.py) AT THE MOMENT this
+    # specific snapshot's underlying market data was captured -- frozen
+    # into the snapshot forever, never recomputed later against the
+    # game's CURRENT status. `is_frozen_pregame` is True only when this
+    # object is an OLDER, already-PREGAME-classified snapshot being
+    # reused (unmodified, including its original retrieved_at) because a
+    # fresh pregame fetch is no longer possible. `vegas_projection_status`
+    # is the dashboard-ready label ("LIVE_PREGAME" | "PREGAME_FROZEN" |
+    # "MISSING" | "INVALID" | "IN_PLAY_ONLY") computed once here so the
+    # dashboard never has to re-derive it.
+    game_status: str = "UNKNOWN"
+    is_frozen_pregame: bool = False
+    vegas_projection_status: str = "MISSING"
+
     def to_dict(self) -> dict:
         d = asdict(self)
         return d
@@ -333,6 +349,22 @@ class GameEnvironmentReport:
     travel_home: Optional[TravelProfile] = None
     travel_away: Optional[TravelProfile] = None
 
+    # --- Milestone 25: pregame lock / DK slate coverage ------------------
+    # `mlb_game_status` is the RAW MLB Stats API detailedState string
+    # (e.g. "Scheduled", "In Progress", "Final") -- already collected by
+    # research/collector.py into research_output/<date>/games.json but,
+    # before this milestone, never threaded past there. `game_status` is
+    # its PREGAME/IN_PLAY/FINAL/UNKNOWN classification (game_status.py).
+    # `vegas` (above) is ALWAYS the pregame-safe value Native/AI consume
+    # (live pregame, frozen pregame, or None/zero-contribution) -- it is
+    # NEVER replaced by in-play odds. `vegas_live` is the CURRENT market
+    # snapshot regardless of game status, for research/history display
+    # only (the Vegas Intelligence page's LIVE MARKET tab) -- nothing in
+    # native_projections/ or projection_engine/ ever reads this field.
+    mlb_game_status: Optional[str] = None
+    game_status: str = "UNKNOWN"
+    vegas_live: Optional[VegasSnapshot] = None
+
     def to_dict(self) -> dict:
         return {
             "game_id": self.game_id,
@@ -352,6 +384,9 @@ class GameEnvironmentReport:
             "bullpen_away": self.bullpen_away.to_dict() if self.bullpen_away else None,
             "travel_home": self.travel_home.to_dict() if self.travel_home else None,
             "travel_away": self.travel_away.to_dict() if self.travel_away else None,
+            "mlb_game_status": self.mlb_game_status,
+            "game_status": self.game_status,
+            "vegas_live": self.vegas_live.to_dict() if self.vegas_live else None,
         }
 
 

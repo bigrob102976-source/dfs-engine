@@ -4,9 +4,10 @@ import { GenerateEnvironmentButton } from "@/components/environment/GenerateEnvi
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import { loadEnvironmentReportHistory, loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
-import { loadLatestPitcherSnapshot } from "@/lib/loaders";
+import { loadLatestDkMatchReport, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { buildVegasGameRows } from "@/lib/vegasIntelligence";
 
 export const dynamic = "force-dynamic";
@@ -65,6 +66,8 @@ export default async function VegasPage() {
   const rows = buildVegasGameRows(report.games, pitcherSnapshot?.pitchers ?? []);
   const sampleVegas = gamesWithVegas[0]?.vegas ?? null;
   const history = loadEnvironmentReportHistory(date);
+  const matchReport = loadLatestDkMatchReport(date).data;
+  const coverage = buildDkSlateVegasCoverage(matchReport, report);
 
   return (
     <div>
@@ -73,7 +76,7 @@ export default async function VegasPage() {
         description="Track line movement, implied totals, betting trends, and AI market analysis."
         actions={<VegasHeaderActions generatedAt={report.generated_at} providerName={sampleVegas?.provider_name ?? null} isMock={sampleVegas?.is_mock ?? false} />}
       />
-      <VegasIntelligenceBoard report={report} rows={rows} history={history} />
+      <VegasIntelligenceBoard report={report} rows={rows} history={history} coverage={coverage} />
     </div>
   );
 }

@@ -147,12 +147,26 @@ const FUTURE_PLACEHOLDERS = ["Public %", "Sharp %", "Bet %", "Steam %", "Closing
  * documented in lib/vegasIntelligence.ts; Public %/Sharp %/Bet %/Steam
  * %/Closing Line Value are explicit "Coming Soon" placeholders with no
  * functionality, per the milestone's FUTURE PLACEHOLDERS section. */
-export function VegasExpandedDetail({ row, analysis }: { row: VegasGameRow; analysis: VegasSlateAnalysis | null }) {
+export function VegasExpandedDetail({
+  row,
+  analysis,
+  marketView = "pregame",
+}: {
+  row: VegasGameRow;
+  analysis: VegasSlateAnalysis | null;
+  marketView?: "pregame" | "live";
+}) {
   const { game, homePitcher, awayPitcher } = row;
   const vegas = game.vegas;
   const bullpenStrength = averageBullpenStrength(game);
   const aiSummary = buildVegasAiSummary(game, analysis);
   const firstObserved = vegas ? firstObservedImpliedRuns(vegas) : { home: null, away: null };
+  // Milestone 25: only on the PREGAME DFS tab is `vegas` potentially a
+  // frozen/zero-contribution value distinct from the real current
+  // market -- on the LIVE MARKET tab `vegas` already IS the current
+  // market, so showing this comparison again would be redundant.
+  const vegasLive = game.vegas_live ?? null;
+  const showLiveComparison = marketView === "pregame" && vegasLive != null && vegasLive.game_status !== "PREGAME";
 
   return (
     <div className="grid grid-cols-1 gap-4 p-4 text-xs lg:grid-cols-2">
@@ -166,6 +180,46 @@ export function VegasExpandedDetail({ row, analysis }: { row: VegasGameRow; anal
 
         {vegas ? (
           <>
+            {showLiveComparison && vegasLive && (
+              <>
+                <SectionHeader title="Pregame Lock" />
+                <div className="mb-4 grid grid-cols-2 gap-2">
+                  <OddsColumn
+                    title={vegas.is_frozen_pregame ? "Pregame Projection Market (Frozen)" : "Pregame Projection Market"}
+                    home={vegas.current_home}
+                    away={vegas.current_away}
+                    homeTeam={game.home_team}
+                    awayTeam={game.away_team}
+                  />
+                  <div className="rounded border border-yellow/40 bg-bg-panel-raised p-2.5 text-xs">
+                    <div className="mb-1.5 font-semibold text-yellow">Current Market -- IN-PLAY -- NOT USED FOR DFS PROJECTIONS</div>
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-text-faint">
+                          <th className="pb-1 text-left font-normal"> </th>
+                          <th className="pb-1 text-right font-normal">ML</th>
+                          <th className="pb-1 text-right font-normal">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-text">
+                        <tr>
+                          <td className="py-0.5 text-text-muted">{game.home_team}</td>
+                          <td className="py-0.5 text-right">{fmtMl(vegasLive.current_home.moneyline)}</td>
+                          <td className="py-0.5 text-right">{fmt(vegasLive.current_home.total)}</td>
+                        </tr>
+                        <tr>
+                          <td className="py-0.5 text-text-muted">{game.away_team}</td>
+                          <td className="py-0.5 text-right">{fmtMl(vegasLive.current_away.moneyline)}</td>
+                          <td className="py-0.5 text-right">{fmt(vegasLive.current_away.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div className="mt-1.5 text-[10px] text-text-faint">MLB Status: {game.mlb_game_status ?? "unknown"}</div>
+                  </div>
+                </div>
+              </>
+            )}
+
             <SectionHeader title="Odds" />
             <div className="mb-4 grid grid-cols-2 gap-2">
               <OddsColumn title="First Observed" home={vegas.opening_home} away={vegas.opening_away} homeTeam={game.home_team} awayTeam={game.away_team} />
@@ -196,7 +250,15 @@ export function VegasExpandedDetail({ row, analysis }: { row: VegasGameRow; anal
             )}
           </>
         ) : (
-          <p className="mb-4 text-text-faint">Vegas lines are unavailable for this game.</p>
+          <div className="mb-4">
+            <p className="text-red">NO VALID PREGAME VEGAS</p>
+            <p className="mt-1 text-text-faint">
+              No valid pregame market snapshot was ever captured for this game -- Vegas contribution is 0 for Native/AI projections.
+              {marketView === "pregame" && vegasLive && vegasLive.game_status !== "PREGAME"
+                ? " Live/in-play market data may be available under the Live Market tab, for research only."
+                : ""}
+            </p>
+          </div>
         )}
 
         <SectionHeader title="Future Data" />

@@ -71,7 +71,7 @@ def test_is_configured_delegates_to_underlying_odds_provider():
 
 def test_get_vegas_line_returns_real_consensus_and_implied_runs(tmp_path):
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[make_event()]), snapshot_root=tmp_path)
-    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     assert snapshot.is_mock is False
     assert snapshot.provider_name == "SportsGameOdds"
@@ -87,7 +87,7 @@ def test_get_vegas_line_returns_real_consensus_and_implied_runs(tmp_path):
 
 def test_first_pull_of_day_uses_current_as_opening(tmp_path):
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[make_event()]), snapshot_root=tmp_path)
-    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     assert snapshot.is_first_pull_of_day is True
     assert snapshot.opening_home.total == snapshot.current_home.total
@@ -106,6 +106,7 @@ def test_second_pull_uses_first_saved_snapshot_as_opening(tmp_path):
                     "is_mock": False,
                     "current_home": {"moneyline": -150, "run_line": -1.5, "run_line_odds": None, "total": 8.0},
                     "current_away": {"moneyline": 130, "run_line": 1.5, "run_line_odds": None, "total": 8.0},
+                    "game_status": "PREGAME",
                 },
             }
         ],
@@ -113,7 +114,7 @@ def test_second_pull_uses_first_saved_snapshot_as_opening(tmp_path):
     ge_storage.save_environment_report(earlier_doc, output_root=tmp_path)
 
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[make_event()]), snapshot_root=tmp_path)
-    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     assert snapshot.is_first_pull_of_day is False
     assert snapshot.opening_home.total == 8.0  # from the earlier snapshot
@@ -129,7 +130,7 @@ def test_ignores_mock_snapshots_when_resolving_first_observed(tmp_path):
     ge_storage.save_environment_report(mock_doc, output_root=tmp_path)
 
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[make_event()]), snapshot_root=tmp_path)
-    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     # A prior MOCK snapshot must never be used as the real "first observed" baseline.
     assert snapshot.is_first_pull_of_day is True
@@ -144,7 +145,7 @@ def test_ignores_mock_snapshots_when_resolving_first_observed(tmp_path):
 def test_no_matching_event_raises_unavailable():
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[make_event(home_team="NYY", away_team="BOS")]))
     with pytest.raises(VegasProviderUnavailableError):
-        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
 
 def test_underlying_not_configured_error_translates_to_vegas_not_configured():
@@ -152,7 +153,7 @@ def test_underlying_not_configured_error_translates_to_vegas_not_configured():
 
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(error=OddsProviderNotConfiguredError("no key")))
     with pytest.raises(VegasProviderNotConfiguredError):
-        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
 
 def test_underlying_rate_limit_error_translates_to_vegas_unavailable():
@@ -160,7 +161,7 @@ def test_underlying_rate_limit_error_translates_to_vegas_unavailable():
 
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(error=OddsProviderRateLimitedError("429")))
     with pytest.raises(VegasProviderUnavailableError):
-        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
 
 def test_underlying_auth_error_translates_to_vegas_unavailable():
@@ -168,7 +169,7 @@ def test_underlying_auth_error_translates_to_vegas_unavailable():
 
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(error=OddsProviderAuthenticationError("401")))
     with pytest.raises(VegasProviderUnavailableError):
-        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+        provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
 
 # ----------------------------------------------------------------------------
@@ -180,8 +181,8 @@ def test_multiple_games_same_date_share_one_underlying_fetch(tmp_path):
     fake = FakeOddsProvider(events=[make_event(), make_event(event_id="evt_2", home_team="NYY", away_team="BOS")])
     provider = SportsGameOddsVegasProvider(fake, snapshot_root=tmp_path)
 
-    provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
-    provider.get_vegas_line("g2", "NYY", "BOS", slate_date="2026-08-17")
+    provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
+    provider.get_vegas_line("g2", "NYY", "BOS", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     assert fake.call_count == 1
 
@@ -194,7 +195,7 @@ def test_multiple_games_same_date_share_one_underlying_fetch(tmp_path):
 def test_no_run_line_available_gives_none_implied_runs_with_warning(tmp_path):
     event = make_event(books=[BookLine(book="draftkings", home_moneyline=-165, away_moneyline=140, total=8.5)])
     provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[event]), snapshot_root=tmp_path)
-    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17")
+    snapshot = provider.get_vegas_line("g1", "LAD", "SD", slate_date="2026-08-17", mlb_game_status="Scheduled")
 
     assert snapshot.home_implied_runs is None
     assert snapshot.away_implied_runs is None

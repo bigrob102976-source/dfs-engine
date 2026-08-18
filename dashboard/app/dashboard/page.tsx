@@ -6,6 +6,7 @@ import { CommandCenterHeader } from "@/components/command-center/CommandCenterHe
 import { QuickActionsPanel } from "@/components/command-center/QuickActionsPanel";
 import { SlateKpiGrid } from "@/components/command-center/SlateKpiGrid";
 import { SlateRankingsColumn } from "@/components/command-center/SlateRankingsColumn";
+import { VegasCoverageCard } from "@/components/command-center/VegasCoverageCard";
 import { AiProjectionPerformanceCard } from "@/components/AiProjectionPerformanceCard";
 import { ExternalProjectionsStatusCard } from "@/components/ExternalProjectionsStatusCard";
 import { RefreshPanel } from "@/components/RefreshPanel";
@@ -13,6 +14,7 @@ import { SlateReadiness } from "@/components/SlateReadiness";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
+import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import {
   buildGameRankings,
   buildLineMovementFeed,
@@ -117,6 +119,7 @@ export default function TodaysSlatePage() {
   const aiSummaryBullets = buildSlateAiSummary({ report: environmentReport, ownership, pitcherRows, hitterRows, stacks });
   const movement = buildLineMovementFeed(environmentReport);
   const lockTimes = buildUpcomingLockTimes(environmentReport);
+  const vegasCoverage = buildDkSlateVegasCoverage(matchReport, environmentReport);
 
   const playerCount = (pitcherSnapshot?.pitcher_count ?? 0) + (batterSnapshot?.hitter_count ?? 0);
   const salaryCoverage = typeof matchReport?.salary_coverage_percent === "number" ? (matchReport.salary_coverage_percent as number) : null;
@@ -158,6 +161,11 @@ export default function TodaysSlatePage() {
       {/* TOP KPI CARDS */}
       <div className="mb-6">
         <SlateKpiGrid kpis={kpis} />
+      </div>
+
+      {/* VEGAS COVERAGE (Milestone 25) -- scoped to the selected DK slate, not raw SportsGameOdds event count */}
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <VegasCoverageCard coverage={vegasCoverage} />
       </div>
 
       {/* CENTER LAYOUT -- AI Slate Summary / Slate Rankings / Quick Actions */}

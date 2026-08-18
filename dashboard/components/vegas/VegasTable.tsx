@@ -63,6 +63,7 @@ export function VegasTable({
   expandedId,
   onToggleExpand,
   history,
+  marketView,
 }: {
   rows: VegasGameRow[];
   analysis: VegasSlateAnalysis | null;
@@ -73,6 +74,7 @@ export function VegasTable({
   expandedId: string | null;
   onToggleExpand: (gameId: string) => void;
   history: SlateEnvironmentReport[];
+  marketView: "pregame" | "live";
 }) {
   const cellPad = settings.compactMode ? "px-3 py-1.5" : "px-3 py-2.5";
 
@@ -212,7 +214,7 @@ export function VegasTable({
                 {expanded && (
                   <tr className="border-b border-border-subtle bg-bg-panel-raised/40">
                     <td colSpan={COLUMN_HEADERS.length + 1} className="p-0">
-                      <VegasExpandedDetail row={{ game, homePitcher, awayPitcher }} analysis={analysis} />
+                      <VegasExpandedDetail row={{ game, homePitcher, awayPitcher }} analysis={analysis} marketView={marketView} />
                     </td>
                   </tr>
                 )}

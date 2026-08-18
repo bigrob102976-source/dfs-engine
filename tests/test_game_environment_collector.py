@@ -30,7 +30,7 @@ class _NotConfiguredVegasProvider(VegasProvider):
     def is_configured(self) -> bool:
         return False
 
-    def get_vegas_line(self, game_id, home_team_abbr, away_team_abbr, slate_date=None) -> VegasSnapshot:
+    def get_vegas_line(self, game_id, home_team_abbr, away_team_abbr, slate_date=None, mlb_game_status=None) -> VegasSnapshot:
         raise AssertionError("should never be called when is_configured() is False")
 
 
@@ -192,6 +192,106 @@ def test_build_game_report_degrades_gracefully_with_missing_bullpen():
     assert report.bullpen_home is None
     assert report.bullpen_away is None
     assert 0.0 <= report.environment_score.overall <= 100.0
+
+
+def test_build_game_report_threads_mlb_game_status_through():
+    report = collector.build_game_report(
+        game_id="g1", home_team="PHI", away_team="COL", game_datetime_utc="2026-08-13T23:00:00Z", venue_name="Citizens Bank Park",
+        weather_provider=MockWeatherProvider(), vegas_provider=MockVegasProvider(),
+        umpire_provider=MockUmpireProvider(), bullpen_provider=MockBullpenProvider(),
+        mlb_game_status="In Progress",
+    )
+    assert report.mlb_game_status == "In Progress"
+    assert report.game_status == "IN_PLAY"
+
+
+def test_build_game_report_defaults_mlb_game_status_to_unknown():
+    report = collector.build_game_report(
+        game_id="g1", home_team="PHI", away_team="COL", game_datetime_utc="2026-08-13T23:00:00Z", venue_name="Citizens Bank Park",
+        weather_provider=MockWeatherProvider(), vegas_provider=MockVegasProvider(),
+        umpire_provider=MockUmpireProvider(), bullpen_provider=MockBullpenProvider(),
+    )
+    assert report.mlb_game_status is None
+    assert report.game_status == "UNKNOWN"
+
+
+def test_build_game_report_game_status_prefers_fresh_sportsgameodds_over_stale_mlb_status():
+    # Confirmed real bug (Milestone 25 live validation, 2026-08-17: LAD @
+    # COL): the top-level GameEnvironmentReport.game_status field must
+    # match the same fresher-wins classification vegas_live_snapshot
+    # already uses -- not a bare MLB-only classification, which can be
+    # stale if the research package wasn't rebuilt after the game started.
+    class _LiveCapableVegasProvider(SportsGameOddsVegasProvider):
+        pass
+
+    class _FakeOddsProvider:
+        name = "fake"
+        is_mock = False
+
+        def is_configured(self):
+            return True
+
+        def get_odds(self, league, date):
+            from research.game_environment.providers.models import BookLine, NormalizedGameOdds
+            return [
+                NormalizedGameOdds(
+                    provider="sportsgameodds", event_id="evt_1", league="MLB", home_team="PHI", away_team="COL",
+                    game_time_utc="2026-08-13T23:00:00Z", retrieved_at="2026-08-13T20:00:00+00:00",
+                    books=[BookLine(book="draftkings", home_moneyline=-120, away_moneyline=110, total=8.5, home_run_line=-1.5, away_run_line=1.5)],
+                    event_status={"started": True, "live": True, "ended": False, "completed": False},
+                )
+            ]
+
+    vegas_provider = _LiveCapableVegasProvider(_FakeOddsProvider())
+    report = collector.build_game_report(
+        game_id="g1", home_team="PHI", away_team="COL", game_datetime_utc="2026-08-13T23:00:00Z", venue_name="Citizens Bank Park",
+        weather_provider=MockWeatherProvider(), vegas_provider=vegas_provider,
+        umpire_provider=MockUmpireProvider(), bullpen_provider=MockBullpenProvider(),
+        slate_date="2026-08-13", mlb_game_status="Pre-Game",  # stale -- research package wasn't rebuilt after the game started
+    )
+    assert report.mlb_game_status == "Pre-Game"
+    assert report.game_status == "IN_PLAY"  # NOT "PREGAME" -- SportsGameOdds' fresher status wins
+
+
+def test_build_game_report_populates_vegas_live_for_real_provider_only():
+    class _LiveCapableVegasProvider(SportsGameOddsVegasProvider):
+        pass
+
+    class _FakeOddsProvider:
+        name = "fake"
+        is_mock = False
+
+        def is_configured(self):
+            return True
+
+        def get_odds(self, league, date):
+            from research.game_environment.providers.models import BookLine, NormalizedGameOdds
+            return [
+                NormalizedGameOdds(
+                    provider="sportsgameodds", event_id="evt_1", league="MLB", home_team="PHI", away_team="COL",
+                    game_time_utc="2026-08-13T23:00:00Z", retrieved_at="2026-08-13T20:00:00+00:00",
+                    books=[BookLine(book="draftkings", home_moneyline=-120, away_moneyline=110, total=8.5, home_run_line=-1.5, away_run_line=1.5)],
+                )
+            ]
+
+    vegas_provider = _LiveCapableVegasProvider(_FakeOddsProvider())
+    report = collector.build_game_report(
+        game_id="g1", home_team="PHI", away_team="COL", game_datetime_utc="2026-08-13T23:00:00Z", venue_name="Citizens Bank Park",
+        weather_provider=MockWeatherProvider(), vegas_provider=vegas_provider,
+        umpire_provider=MockUmpireProvider(), bullpen_provider=MockBullpenProvider(),
+        slate_date="2026-08-13", mlb_game_status="Scheduled",
+    )
+    assert report.vegas_live is not None
+    assert report.vegas_live.current_home.total == 8.5
+
+    # MockVegasProvider has no get_live_vegas_line() -- collector.py must
+    # skip it gracefully (hasattr check) rather than crashing.
+    mock_report = collector.build_game_report(
+        game_id="g1", home_team="PHI", away_team="COL", game_datetime_utc="2026-08-13T23:00:00Z", venue_name="Citizens Bank Park",
+        weather_provider=MockWeatherProvider(), vegas_provider=MockVegasProvider(),
+        umpire_provider=MockUmpireProvider(), bullpen_provider=MockBullpenProvider(),
+    )
+    assert mock_report.vegas_live is None
 
 
 def test_build_game_report_never_touches_an_unknown_ballpark():

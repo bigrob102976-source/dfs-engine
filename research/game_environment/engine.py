@@ -45,7 +45,7 @@ def build_slate_environment_report(slate_date: str, research_output_root: str = 
             game_datetime_utc=g.get("game_datetime_utc"), venue_name=g.get("venue_name"),
             weather_provider=weather_provider, vegas_provider=vegas_provider,
             umpire_provider=umpire_provider, bullpen_provider=bullpen_provider,
-            slate_date=slate_date,
+            slate_date=slate_date, mlb_game_status=g.get("status"),
         )
         game_reports.append(report)
 

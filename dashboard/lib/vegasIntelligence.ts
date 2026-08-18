@@ -81,7 +81,7 @@ export function movementTone(delta: number | null): MovementTone {
 // Badges
 // ---------------------------------------------------------------------------
 
-export type VegasBadgeKey = "highestTotal" | "sharpMove" | "steamMove" | "trapGame" | "pitchersDuel" | "homeFavorite" | "roadFavorite";
+export type VegasBadgeKey = "highestTotal" | "sharpMove" | "steamMove" | "trapGame" | "pitchersDuel" | "homeFavorite" | "roadFavorite" | "pregameStatus";
 
 export interface VegasBadge {
   key: VegasBadgeKey;
@@ -97,6 +97,18 @@ const BADGE_LABELS: Record<VegasBadgeKey, string> = {
   pitchersDuel: "Pitcher's Duel",
   homeFavorite: "Home Favorite",
   roadFavorite: "Road Favorite",
+  pregameStatus: "", // label computed dynamically per vegas_projection_status -- see deriveVegasBadges
+};
+
+// Milestone 25: dashboard-facing label/tone for each pregame-lock status
+// VegasSnapshot.vegas_projection_status can carry. "INVALID" reuses the
+// same "negative" tone as MISSING -- both mean "not usable for DFS."
+const PREGAME_STATUS_BADGE: Record<string, { label: string; tone: VegasBadge["tone"] }> = {
+  LIVE_PREGAME: { label: "Live Pregame", tone: "positive" },
+  PREGAME_FROZEN: { label: "Pregame Frozen", tone: "interactive" },
+  IN_PLAY_ONLY: { label: "In-Play Ignored", tone: "negative" },
+  MISSING: { label: "No Pregame Data", tone: "negative" },
+  INVALID: { label: "No Pregame Data", tone: "negative" },
 };
 
 /** Deterministic badge derivation -- every badge is a pure function of
@@ -109,6 +121,9 @@ export function deriveVegasBadges(game: GameEnvironmentReport, analysis: VegasSl
   const vegas = game.vegas;
   if (!vegas) return [];
   const badges: VegasBadge[] = [];
+
+  const statusBadge = PREGAME_STATUS_BADGE[vegas.vegas_projection_status];
+  if (statusBadge) badges.push({ key: "pregameStatus", label: statusBadge.label, tone: statusBadge.tone });
 
   if (analysis?.highest_total_game_id === game.game_id) badges.push({ key: "highestTotal", label: BADGE_LABELS.highestTotal, tone: "negative" });
 

@@ -109,6 +109,62 @@ def test_invalid_vegas_calculation_contributes_zero_and_warns():
     assert any("invalid" in w.lower() for w in invalid_vegas.warnings)
 
 
+def test_frozen_pregame_vegas_influences_projection_same_as_live_pregame():
+    # Milestone 25: a PREGAME_FROZEN snapshot is shaped identically to a
+    # LIVE_PREGAME one by the time it reaches project_hitter() -- real
+    # implied runs, is_mock=False -- so it must influence the projection
+    # exactly the same way. No new gating code exists for this
+    # distinction; this proves the existing is_mock/implied-runs gate is
+    # sufficient.
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    live = project_hitter(
+        b, game_environment={"home_team": "AAA", "vegas": {"is_mock": False, "home_implied_runs": 6.5, "implied_runs_is_valid": True, "vegas_projection_status": "LIVE_PREGAME"}}
+    )
+    frozen = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            "vegas": {"is_mock": False, "home_implied_runs": 6.5, "implied_runs_is_valid": True, "vegas_projection_status": "PREGAME_FROZEN", "is_frozen_pregame": True},
+        },
+    )
+    assert frozen.native_projection == live.native_projection
+
+
+def test_in_play_only_vegas_never_influences_projection():
+    # Milestone 25: vegas.py's SportsGameOddsVegasProvider.get_vegas_line()
+    # never populates home_implied_runs/away_implied_runs for an
+    # IN_PLAY_ONLY snapshot (see test_vegas_pregame_lock.py) -- this
+    # confirms the shape it DOES produce (implied runs None,
+    # vegas_projection_status "IN_PLAY_ONLY") is correctly a zero-influence
+    # no-op at the projection layer, covering the exact Dodgers extreme
+    # in-play scenario Milestone 24's live validation found.
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    no_vegas = project_hitter(b, game_environment={"home_team": "AAA"})
+    in_play_only = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            "vegas": {"is_mock": False, "home_implied_runs": None, "away_implied_runs": None, "implied_runs_is_valid": False, "vegas_projection_status": "IN_PLAY_ONLY"},
+        },
+    )
+    assert in_play_only.native_projection == no_vegas.native_projection
+    assert any("in-play" in w.lower() for w in in_play_only.warnings)
+
+
+def test_missing_pregame_vegas_never_influences_projection():
+    b = make_batter(season=REALISTIC_SEASON, team="AAA")
+    no_vegas = project_hitter(b, game_environment={"home_team": "AAA"})
+    missing = project_hitter(
+        b,
+        game_environment={
+            "home_team": "AAA",
+            "vegas": {"is_mock": False, "home_implied_runs": None, "away_implied_runs": None, "implied_runs_is_valid": False, "vegas_projection_status": "MISSING"},
+        },
+    )
+    assert missing.native_projection == no_vegas.native_projection
+    assert any("unavailable" in w.lower() for w in missing.warnings)
+
+
 def test_park_factor_from_game_environment_shifts_projection():
     b = make_batter(season=REALISTIC_SEASON, team="AAA")
     neutral = project_hitter(b, game_environment={"home_team": "AAA", "ballpark": {"park_factor": 100.0}})

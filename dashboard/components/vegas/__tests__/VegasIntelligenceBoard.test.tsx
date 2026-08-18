@@ -67,7 +67,8 @@ function buildReport(): SlateEnvironmentReport {
 function renderBoard() {
   const report = buildReport();
   const rows = buildVegasGameRows(report.games, []);
-  return render(<VegasIntelligenceBoard report={report} rows={rows} history={[report]} />);
+  const coverage = { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, games: [] };
+  return render(<VegasIntelligenceBoard report={report} rows={rows} history={[report]} coverage={coverage} />);
 }
 
 describe("VegasIntelligenceBoard", () => {
@@ -144,5 +145,21 @@ describe("VegasIntelligenceBoard", () => {
 
     const mobileList = container.querySelector(".flex.flex-col.gap-3.lg\\:hidden");
     expect(mobileList).toBeTruthy();
+  });
+
+  it("defaults to the Pregame DFS tab and shows a warning banner only on Live Market", () => {
+    renderBoard();
+    expect(screen.getByRole("tab", { name: "Pregame DFS" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Live Market" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByText(/never use this view/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Live Market" }));
+    expect(screen.getByRole("tab", { name: "Live Market" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/never use this view/)).toBeInTheDocument();
+  });
+
+  it("shows the pregame-lock status badge (LIVE PREGAME by default) for every game", () => {
+    renderBoard();
+    expect(screen.getAllByText("Live Pregame").length).toBeGreaterThan(0);
   });
 });
