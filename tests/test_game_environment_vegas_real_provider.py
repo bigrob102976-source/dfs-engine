@@ -218,3 +218,124 @@ def test_not_configured_provider_raises_if_called_directly():
     provider = NotConfiguredVegasProvider()
     with pytest.raises(VegasProviderNotConfiguredError):
         provider.get_vegas_line("g1", "LAD", "SD")
+
+
+# ----------------------------------------------------------------------------
+# Milestone 27.1 -- end-to-end event resolution + impossible-state guard,
+# through the REAL SportsGameOddsVegasProvider.get_vegas_line() pipeline
+# (not just the resolver/guard in isolation). Regression fixture modeled
+# exactly on the confirmed 2026-08-18 LAD @ COL bug.
+# ----------------------------------------------------------------------------
+
+
+def test_lad_col_regression_end_to_end_resolves_todays_pregame_event(tmp_path):
+    # Scheduled far in the future (relative to whenever this suite
+    # actually runs) so the impossible-state guard is deterministically
+    # applicable regardless of the real wall clock -- get_vegas_line()'s
+    # public signature has no now_utc override, so this test relies on
+    # "now" always being before this fixture's scheduled start.
+    game_a_yesterday = make_event(
+        event_id="evt_yesterday", home_team="COL", away_team="LAD", game_time_utc="2099-08-18T00:40:00.000Z",
+        event_status={"started": True, "live": True, "ended": False, "completed": False},
+    )
+    game_b_today = make_event(
+        event_id="evt_today", home_team="COL", away_team="LAD", game_time_utc="2099-08-19T00:40:00.000Z",
+        event_status={"started": False, "live": False, "ended": False, "completed": False},
+        books=[BookLine(book="draftkings", home_moneyline=200, away_moneyline=-250, total=9.5, home_run_line=1.5, away_run_line=-1.5)],
+    )
+    game_c_tomorrow = make_event(event_id="evt_tomorrow", home_team="COL", away_team="LAD", game_time_utc="2099-08-20T00:40:00.000Z")
+
+    provider = SportsGameOddsVegasProvider(
+        FakeOddsProvider(events=[game_a_yesterday, game_b_today, game_c_tomorrow]), snapshot_root=tmp_path
+    )
+    snapshot = provider.get_vegas_line(
+        "824319", "COL", "LAD", slate_date="2099-08-18", mlb_game_status="Scheduled",
+        mlb_scheduled_start_utc="2099-08-19T00:40:00Z",
+    )
+
+    assert snapshot.event_id == "evt_today"
+    assert snapshot.event_id != "evt_yesterday"
+    assert snapshot.game_status == "PREGAME"
+    assert snapshot.vegas_projection_status == "LIVE_PREGAME"
+    assert snapshot.current_home.total == 9.5
+
+
+def test_future_game_cannot_become_in_play_from_mismatched_provider_event(tmp_path):
+    # A provider feed that ONLY contains the wrong (out-of-tolerance) day's
+    # event can never be silently accepted as "close enough" just because
+    # the teams match -- the event resolver itself rejects it as
+    # NOT_MATCHED (a real gap, not a wrong-day guess) before the game ever
+    # has a chance to be misclassified IN_PLAY from mismatched provider data.
+    game_a_yesterday = make_event(
+        event_id="evt_yesterday", home_team="COL", away_team="LAD", game_time_utc="2099-08-18T00:40:00.000Z",
+        event_status={"started": True, "live": True, "ended": False, "completed": False},
+    )
+    provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[game_a_yesterday]), snapshot_root=tmp_path)
+    with pytest.raises(VegasProviderUnavailableError):
+        provider.get_vegas_line(
+            "824319", "COL", "LAD", slate_date="2099-08-18", mlb_game_status="Scheduled",
+            mlb_scheduled_start_utc="2099-08-19T00:40:00Z",
+        )
+
+
+def test_wrong_day_event_rejected_ambiguity_falls_back_or_errors(tmp_path):
+    events = [
+        make_event(event_id="evt_yesterday", home_team="COL", away_team="LAD", game_time_utc="2026-08-18T00:40:00.000Z"),
+        make_event(event_id="evt_tomorrow", home_team="COL", away_team="LAD", game_time_utc="2026-08-20T00:40:00.000Z"),
+    ]
+    provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=events), snapshot_root=tmp_path)
+    # Neither candidate is within tolerance of today's actual scheduled
+    # start -- NOT_MATCHED, never a wrong-day guess.
+    with pytest.raises(VegasProviderUnavailableError):
+        provider._fetch_and_build_current(  # noqa: SLF001 -- exercising the raise path directly
+            "824319", "COL", "LAD", "2026-08-18", "Scheduled", "2026-08-19T00:40:00Z"
+        )
+
+
+def test_same_day_doubleheader_ambiguous_events_raise_unavailable(tmp_path):
+    events = [
+        make_event(event_id="evt_g1", home_team="CHC", away_team="STL", game_time_utc="2026-08-18T18:05:00Z"),
+        make_event(event_id="evt_g2", home_team="CHC", away_team="STL", game_time_utc="2026-08-18T21:00:00Z"),
+    ]
+    provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=events), snapshot_root=tmp_path)
+    with pytest.raises(VegasProviderUnavailableError, match="ambiguous"):
+        provider._fetch_and_build_current(  # noqa: SLF001
+            "g1", "CHC", "STL", "2026-08-18", "Scheduled", "2026-08-18T19:30:00Z"
+        )
+
+
+def test_provider_status_conflict_flag_set_when_guard_fires(tmp_path):
+    game_today_but_reported_in_play = make_event(
+        event_id="evt_today", home_team="COL", away_team="LAD", game_time_utc="2099-08-19T00:40:00.000Z",
+        event_status={"started": True, "live": True, "ended": False, "completed": False},
+        books=[BookLine(book="draftkings", home_moneyline=200, away_moneyline=-250, total=9.5, home_run_line=1.5, away_run_line=-1.5)],
+    )
+    provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[game_today_but_reported_in_play]), snapshot_root=tmp_path)
+    snapshot = provider.get_vegas_line(
+        "824319", "COL", "LAD", slate_date="2099-08-18", mlb_game_status="Scheduled",
+        mlb_scheduled_start_utc="2099-08-19T00:40:00Z",
+    )
+    assert snapshot.provider_status_conflict is True
+    assert snapshot.game_status == "PREGAME"
+    # Even a provider falsely claiming in-play must never suppress the
+    # actual real market data that WAS returned for the correctly-matched event.
+    assert snapshot.current_home.total == 9.5
+    assert snapshot.vegas_projection_status == "LIVE_PREGAME"
+
+
+def test_status_override_correctly_applies_once_scheduled_start_has_passed(tmp_path):
+    # Uses a scheduled start comfortably in the past (relative to whenever
+    # this test actually runs) so "now" (the real wall clock, since
+    # get_vegas_line()'s public signature doesn't expose overriding it)
+    # is always safely after it -- the guard must never fire here.
+    game_now_live = make_event(
+        event_id="evt_past", home_team="COL", away_team="LAD", game_time_utc="2020-01-01T00:40:00.000Z",
+        event_status={"started": True, "live": True, "ended": False, "completed": False},
+    )
+    provider = SportsGameOddsVegasProvider(FakeOddsProvider(events=[game_now_live]), snapshot_root=tmp_path)
+    snapshot = provider.get_vegas_line(
+        "824319", "COL", "LAD", slate_date="2020-01-01", mlb_game_status="Scheduled",
+        mlb_scheduled_start_utc="2020-01-01T00:40:00Z",
+    )
+    assert snapshot.game_status == "IN_PLAY"
+    assert snapshot.provider_status_conflict is False

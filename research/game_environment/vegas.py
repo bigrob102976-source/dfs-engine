@@ -32,6 +32,7 @@ from research.game_environment.providers.base import (
     OddsProviderUnavailableError,
 )
 from research.game_environment.providers.consensus import ConsensusMarket, build_consensus
+from research.game_environment.providers.event_resolver import AMBIGUOUS, MATCHED, NOT_MATCHED, resolve_provider_event
 from research.game_environment.providers.implied_runs import ImpliedRunsResult, compute_team_implied_runs
 from research.game_environment.providers.models import BookLine, NormalizedGameOdds
 
@@ -65,6 +66,7 @@ class VegasProvider(ABC):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         raise NotImplementedError
 
@@ -107,6 +109,7 @@ class MockVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         # Milestone 25: defaults to PREGAME (unchanged prior behavior --
         # every existing test/call site that doesn't pass mlb_game_status
@@ -189,6 +192,7 @@ class NotConfiguredVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         raise VegasProviderNotConfiguredError("SPORTSGAMEODDS_API_KEY is not set and mock mode was not explicitly requested.")
 
@@ -201,15 +205,6 @@ def _book_line_snapshot(b: BookLine) -> BookLineSnapshot:
         home_run_line_odds=b.home_run_line_odds, away_run_line_odds=b.away_run_line_odds,
         last_updated=b.last_updated,
     )
-
-
-def _find_matching_event(
-    events: List[NormalizedGameOdds], home_team_abbr: str, away_team_abbr: str
-) -> Optional[NormalizedGameOdds]:
-    for event in events:
-        if event.home_team == home_team_abbr and event.away_team == away_team_abbr:
-            return event
-    return None
 
 
 def _resolve_first_observed(slate_date: str, game_id: str, snapshot_root=None) -> Optional[tuple]:
@@ -325,6 +320,7 @@ def _vegas_snapshot_from_dict(vegas: dict) -> VegasSnapshot:
         primary_provider_status=vegas.get("primary_provider_status"),
         secondary_provider_status=vegas.get("secondary_provider_status"),
         missing_reason=vegas.get("missing_reason"),
+        provider_status_conflict=bool(vegas.get("provider_status_conflict", False)),
     )
 
 
@@ -415,7 +411,13 @@ class SportsGameOddsVegasProvider(VegasProvider):
         return events
 
     def _fetch_and_build_current(
-        self, game_id: str, home_team_abbr: str, away_team_abbr: str, slate_date: Optional[str], mlb_game_status: Optional[str]
+        self,
+        game_id: str,
+        home_team_abbr: str,
+        away_team_abbr: str,
+        slate_date: Optional[str],
+        mlb_game_status: Optional[str],
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         """Always returns whatever the market says RIGHT NOW, correctly
         classified/labeled -- regardless of whether the game is still
@@ -423,7 +425,15 @@ class SportsGameOddsVegasProvider(VegasProvider):
         allowed to hand a live in-play/final/unknown result to a
         projection; it never returns this directly except when the
         classification IS PREGAME. get_live_vegas_line() returns this
-        verbatim for research/history display."""
+        verbatim for research/history display.
+
+        Milestone 27.1: `mlb_scheduled_start_utc` (the authoritative MLB
+        scheduled start, when known) is required to disambiguate a
+        same-teams multi-date series -- see
+        providers/event_resolver.py's module docstring for the confirmed
+        real bug this fixes (SportsGameOdds returning yesterday's/today's/
+        tomorrow's LAD @ COL as three separate events, team-name-only
+        matching picking the wrong one)."""
         resolved_date = slate_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
             events = self._get_events(resolved_date)
@@ -432,13 +442,21 @@ class SportsGameOddsVegasProvider(VegasProvider):
         except (OddsProviderAuthenticationError, OddsProviderRateLimitedError, OddsProviderUnavailableError) as exc:
             raise VegasProviderUnavailableError(str(exc)) from exc
 
-        matched = _find_matching_event(events, home_team_abbr, away_team_abbr)
+        resolution = resolve_provider_event(events, home_team_abbr, away_team_abbr, mlb_scheduled_start_utc)
         retrieved_at = _now()
 
-        if matched is None:
+        if resolution.status == AMBIGUOUS:
+            raise VegasProviderUnavailableError(
+                f"{self.provider_name()} returned {resolution.candidates_considered} same-team "
+                f"{away_team_abbr}@{home_team_abbr} events for {resolved_date} and none could be "
+                f"confidently matched to the authoritative MLB scheduled start (event ambiguous)."
+            )
+        if resolution.status == NOT_MATCHED or resolution.event is None:
             raise VegasProviderUnavailableError(
                 f"No {self.provider_name()} MLB event matched {away_team_abbr}@{home_team_abbr} for {resolved_date}."
             )
+
+        matched = resolution.event
 
         consensus: ConsensusMarket = build_consensus(matched.books)
         implied: ImpliedRunsResult = compute_team_implied_runs(consensus)
@@ -471,7 +489,24 @@ class SportsGameOddsVegasProvider(VegasProvider):
 
         # Milestone 25: MLB Stats API status is authoritative; SportsGameOdds'
         # own event status is only a fallback (game_status.resolve_game_status).
-        resolved_status = game_status_module.resolve_game_status(mlb_game_status, matched.event_status)
+        # Milestone 27.1: mlb_scheduled_start_utc feeds the impossible-state
+        # guard (a provider cannot honestly claim IN_PLAY/FINAL before its
+        # own authoritative first pitch) -- see resolve_game_status's docstring.
+        resolved_status = game_status_module.resolve_game_status(
+            mlb_game_status, matched.event_status, mlb_scheduled_start_utc=mlb_scheduled_start_utc
+        )
+        # Recorded for observability even though resolve_game_status already
+        # applied the guard: True exactly when the provider's own status
+        # WOULD have overridden MLB's PREGAME but was rejected by the
+        # impossible-state guard, per the milestone's explicit
+        # "provider_status_conflict = true" requirement.
+        mlb_status_for_conflict = game_status_module.classify_mlb_game_status(mlb_game_status)
+        sgo_status_for_conflict = game_status_module.classify_sportsgameodds_status(matched.event_status)
+        provider_status_conflict = (
+            mlb_status_for_conflict == game_status_module.PREGAME
+            and sgo_status_for_conflict in (game_status_module.IN_PLAY, game_status_module.FINAL)
+            and game_status_module.game_has_not_started_yet(mlb_scheduled_start_utc)
+        )
 
         if resolved_status == game_status_module.PREGAME:
             if implied.is_valid:
@@ -514,6 +549,7 @@ class SportsGameOddsVegasProvider(VegasProvider):
             fallback_used=False,
             primary_provider_status=(coverage_module.VALID if projection_status == "LIVE_PREGAME" else None),
             secondary_provider_status=None,
+            provider_status_conflict=provider_status_conflict,
         )
 
     def get_vegas_line(
@@ -523,6 +559,7 @@ class SportsGameOddsVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         """Milestone 25: the ONLY value Native/AI projections may
         consume. Returns the current fetch directly when (and only when)
@@ -537,7 +574,9 @@ class SportsGameOddsVegasProvider(VegasProvider):
         matchup.py and projection_engine/signals.py already exclude it
         -- no new gating code needed there."""
         resolved_date = slate_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        current = self._fetch_and_build_current(game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        current = self._fetch_and_build_current(
+            game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc
+        )
 
         if current.game_status == game_status_module.PREGAME:
             return current
@@ -570,6 +609,7 @@ class SportsGameOddsVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         """Milestone 25: ALWAYS returns the current market snapshot,
         regardless of pregame/in-play/final status -- for research/
@@ -579,7 +619,9 @@ class SportsGameOddsVegasProvider(VegasProvider):
         abstract VegasProvider interface -- MockVegasProvider/
         NotConfiguredVegasProvider don't define it, so callers check
         `hasattr`/`getattr` defensively (see collector.py)."""
-        return self._fetch_and_build_current(game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        return self._fetch_and_build_current(
+            game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc
+        )
 
 
 class TheOddsAPIVegasProvider(SportsGameOddsVegasProvider):
@@ -645,6 +687,7 @@ class MultiProviderVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str],
         mlb_game_status: Optional[str],
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> _ProviderAttempt:
         """Reaches into SportsGameOddsVegasProvider's own
         _fetch_and_build_current() -- an intentional same-module
@@ -653,20 +696,22 @@ class MultiProviderVegasProvider(VegasProvider):
         never re-implements consensus/implied-runs logic a second time.
         The provider-level exception message is pattern-matched (rather
         than a richer exception type) only to distinguish "no event
-        matched" and "rate limited" from a generic provider error --
-        documented here as a known, pragmatic limitation rather than a
-        silent guess."""
+        matched", "event ambiguous" (Milestone 27.1), and "rate limited"
+        from a generic provider error -- documented here as a known,
+        pragmatic limitation rather than a silent guess."""
         if provider is None or not provider.is_configured():
             return _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
 
         try:
             snapshot = provider._fetch_and_build_current(  # noqa: SLF001 -- same-module friend call, see docstring
-                game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status
+                game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc
             )
         except VegasProviderNotConfiguredError:
             return _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
         except VegasProviderUnavailableError as exc:
             message = str(exc).lower()
+            if "ambiguous" in message:
+                return _ProviderAttempt(None, coverage_module.EVENT_MATCH_AMBIGUOUS)
             if "event matched" in message:
                 return _ProviderAttempt(None, coverage_module.EVENT_NOT_MATCHED)
             if "rate limit" in message or "quota" in message:
@@ -704,10 +749,11 @@ class MultiProviderVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         resolved_date = slate_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc)
         secondary = _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
 
         selected_snapshot: Optional[VegasSnapshot] = None
@@ -718,7 +764,7 @@ class MultiProviderVegasProvider(VegasProvider):
             selected_snapshot = primary.snapshot
             selected_provider_name = self._primary.provider_name()
         elif self._secondary is not None:
-            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc)
             if secondary.status == coverage_module.VALID:
                 selected_snapshot = secondary.snapshot
                 selected_provider_name = self._secondary.provider_name()
@@ -781,6 +827,7 @@ class MultiProviderVegasProvider(VegasProvider):
         away_team_abbr: str,
         slate_date: Optional[str] = None,
         mlb_game_status: Optional[str] = None,
+        mlb_scheduled_start_utc: Optional[str] = None,
     ) -> VegasSnapshot:
         """Research/history display only (see SportsGameOddsVegasProvider's
         own get_live_vegas_line docstring) -- ALWAYS returns the current
@@ -788,14 +835,14 @@ class MultiProviderVegasProvider(VegasProvider):
         Prefers the primary provider's raw current fetch whenever it
         produced ANY event match; only falls back to the secondary's raw
         fetch when the primary didn't even match the event."""
-        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc)
         if primary.snapshot is not None:
             primary.snapshot.selected_provider = self._primary.provider_name()
             primary.snapshot.primary_provider_status = primary.status
             return primary.snapshot
 
         if self._secondary is not None:
-            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status, mlb_scheduled_start_utc)
             if secondary.snapshot is not None:
                 secondary.snapshot.selected_provider = self._secondary.provider_name()
                 secondary.snapshot.fallback_used = True

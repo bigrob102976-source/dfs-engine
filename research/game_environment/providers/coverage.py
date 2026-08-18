@@ -49,8 +49,16 @@ PLAN_RESTRICTED = "PLAN_RESTRICTED"
 PREGAME_NOT_AVAILABLE = "PREGAME_NOT_AVAILABLE"
 PROVIDER_ERROR = "PROVIDER_ERROR"
 UNKNOWN = "UNKNOWN"
-NOT_CONFIGURED = "NOT_CONFIGURED"  # not one of the 7 "missing" reasons -- means "never attempted"
+NOT_CONFIGURED = "NOT_CONFIGURED"  # not one of the 8 "missing" reasons -- means "never attempted"
 VALID = "VALID"  # not a missing reason -- the provider produced usable data
+
+# Milestone 27.1: the provider returned MULTIPLE same-team events (a
+# real series can have the same matchup on consecutive days) and none
+# could be confidently disambiguated by scheduled start time against the
+# authoritative MLB start (see providers/event_resolver.py). Distinct
+# from EVENT_NOT_MATCHED (zero candidates) -- this is "too many,
+# unresolvable," never a guess at which one is right.
+EVENT_MATCH_AMBIGUOUS = "EVENT_MATCH_AMBIGUOUS"
 
 ALL_MISSING_REASONS = (
     EVENT_NOT_MATCHED,
@@ -60,6 +68,7 @@ ALL_MISSING_REASONS = (
     PREGAME_NOT_AVAILABLE,
     PROVIDER_ERROR,
     UNKNOWN,
+    EVENT_MATCH_AMBIGUOUS,
 )
 
 

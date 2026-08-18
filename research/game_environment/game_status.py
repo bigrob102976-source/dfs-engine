@@ -25,10 +25,14 @@ exists"):
      since MLB Stats API is this project's one authoritative schedule
      source everywhere else (see engine.py's own module docstring).
 
-Wall-clock time (game_datetime_utc vs "now") is never used to classify
-status -- only to label displayed lock/start times.
+Wall-clock time (game_datetime_utc vs "now") is never used to PROMOTE a
+game's status (e.g. never "it's past first pitch so assume IN_PLAY") --
+only to label displayed lock/start times, AND (Milestone 27.1) as an
+"impossible state" GUARD that can only ever hold a game back at PREGAME,
+never push it forward. See game_has_not_started_yet()'s own docstring.
 """
 
+from datetime import datetime, timezone
 from typing import Optional
 
 PREGAME = "PREGAME"
@@ -101,7 +105,55 @@ def classify_sportsgameodds_status(status: Optional[dict]) -> str:
     return UNKNOWN
 
 
-def resolve_game_status(mlb_detailed_state: Optional[str], sgo_status: Optional[dict] = None) -> str:
+def _parse_iso_utc(ts: Optional[str]) -> Optional[datetime]:
+    """Parses an ISO-8601 timestamp (with or without a trailing "Z", with
+    or without fractional seconds) into a timezone-AWARE UTC datetime.
+    Returns None (never raises, never guesses) for anything unparseable
+    -- callers must then treat the guard below as inapplicable rather
+    than crash on a malformed provider timestamp."""
+    if not ts:
+        return None
+    try:
+        cleaned = ts.strip()
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1] + "+00:00"
+        dt = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        # A naive timestamp from this project's own sources is always
+        # already UTC (see this module's own docstring: never compare a
+        # naive local timestamp against a UTC one) -- never silently
+        # reinterpreted in another zone.
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def game_has_not_started_yet(mlb_scheduled_start_utc: Optional[str], now_utc: Optional[datetime] = None) -> bool:
+    """Milestone 27.1 "impossible state" guard: True only when we have an
+    authoritative MLB scheduled start timestamp AND the current moment is
+    still strictly before it. No real provider can honestly report a
+    game IN_PLAY/FINAL before its own authoritative first pitch --  if
+    one does, that's a signal the wrong event was matched (or the
+    provider itself is stale/wrong), never a signal to trust it. Returns
+    False (never blocks) whenever `mlb_scheduled_start_utc` is missing or
+    unparseable -- this guard only ever HOLDS a game back at PREGAME, it
+    never promotes one forward, so an inapplicable guard is always safe
+    to skip rather than guess."""
+    scheduled = _parse_iso_utc(mlb_scheduled_start_utc)
+    if scheduled is None:
+        return False
+    now = now_utc if now_utc is not None else datetime.now(timezone.utc)
+    return now < scheduled
+
+
+def resolve_game_status(
+    mlb_detailed_state: Optional[str],
+    sgo_status: Optional[dict] = None,
+    *,
+    mlb_scheduled_start_utc: Optional[str] = None,
+    now_utc: Optional[datetime] = None,
+) -> str:
     """The one function callers should use.
 
     MLB status is preferred (it's this project's one authoritative
@@ -116,6 +168,19 @@ def resolve_game_status(mlb_detailed_state: Optional[str], sgo_status: Optional[
     has left pregame (IN_PLAY or FINAL), SportsGameOdds wins -- a stale
     "Pre-Game" must never let genuinely live/in-play odds be classified
     (and therefore used) as if they were still a valid pregame snapshot.
+
+    Milestone 27.1: that override is ONLY trustworthy when the provider
+    event is genuinely the SAME game (see providers/event_resolver.py --
+    this project confirmed live that SportsGameOdds can return several
+    same-team events across consecutive days of a series, and naive
+    team-only matching can pick the wrong one). As a second, independent
+    line of defense at the status layer itself: if `mlb_scheduled_start_utc`
+    is provided and `now_utc` (defaults to the real current time) is
+    still BEFORE it, an IN_PLAY/FINAL claim from SportsGameOdds is an
+    impossible state -- no real game can be in progress before its own
+    authoritative first pitch -- so it's rejected and MLB's own PREGAME
+    is kept instead. See game_has_not_started_yet()'s docstring.
+
     In every other case MLB wins when recognized; SportsGameOdds is only
     a fallback when MLB status is UNKNOWN/unrecognized -- EXCEPT that an
     explicit Postponed/Cancelled MLB status is never overridden back into
@@ -125,6 +190,8 @@ def resolve_game_status(mlb_detailed_state: Optional[str], sgo_status: Optional[
     sgo_result = classify_sportsgameodds_status(sgo_status)
 
     if mlb_result == PREGAME and sgo_result in (IN_PLAY, FINAL):
+        if game_has_not_started_yet(mlb_scheduled_start_utc, now_utc):
+            return PREGAME
         return sgo_result
 
     if mlb_result != UNKNOWN:

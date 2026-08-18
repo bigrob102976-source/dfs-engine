@@ -161,7 +161,10 @@ def build_game_report(
     vegas_live_snapshot = None
     if vegas_provider.is_configured():
         try:
-            vegas_snapshot = vegas_provider.get_vegas_line(game_id, home_team, away_team, slate_date=slate_date, mlb_game_status=mlb_game_status)
+            vegas_snapshot = vegas_provider.get_vegas_line(
+                game_id, home_team, away_team, slate_date=slate_date, mlb_game_status=mlb_game_status,
+                mlb_scheduled_start_utc=game_datetime_utc,
+            )
         except (vegas.VegasProviderUnavailableError, vegas.VegasProviderNotConfiguredError):
             vegas_snapshot = None
 
@@ -173,7 +176,10 @@ def build_game_report(
         live_getter = getattr(vegas_provider, "get_live_vegas_line", None)
         if live_getter is not None:
             try:
-                vegas_live_snapshot = live_getter(game_id, home_team, away_team, slate_date=slate_date, mlb_game_status=mlb_game_status)
+                vegas_live_snapshot = live_getter(
+                    game_id, home_team, away_team, slate_date=slate_date, mlb_game_status=mlb_game_status,
+                    mlb_scheduled_start_utc=game_datetime_utc,
+                )
             except (vegas.VegasProviderUnavailableError, vegas.VegasProviderNotConfiguredError):
                 vegas_live_snapshot = None
 

@@ -20,9 +20,47 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import datetime, timezone  # noqa: E402
+
 from research.game_environment import ballpark, bullpen, collector, game_status as game_status_module, scoring, weather  # noqa: E402
 from research.game_environment.providers import coverage as coverage_module  # noqa: E402
+from research.game_environment.providers.event_resolver import resolve_provider_event  # noqa: E402
 from research.game_environment.vegas import MultiProviderVegasProvider  # noqa: E402
+
+
+def _print_event_resolution_trace(games: list, date: str) -> None:
+    """Milestone 27.1 -- SAFE diagnostic trace (no API keys) for every
+    team pair present multiple times in the raw SportsGameOdds feed,
+    proving which event each MLB game actually resolves to and why."""
+    from research.game_environment.providers.sportsgameodds import SportsGameOddsProvider
+
+    sgo = SportsGameOddsProvider()
+    if not sgo.is_configured():
+        print("SportsGameOdds not configured -- skipping raw event-resolution trace.")
+        return
+
+    try:
+        events = sgo.get_odds("MLB", date)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Could not fetch raw SportsGameOdds events for trace: {exc}")
+        return
+
+    print(f"\n=== Event resolution trace (current UTC: {datetime.now(timezone.utc).isoformat()}) ===")
+    for g in games:
+        home, away = g["home_team_abbr"], g["away_team_abbr"]
+        candidates = [e for e in events if {e.home_team, e.away_team} == {home, away}]
+        if len(candidates) <= 1:
+            continue  # only print the interesting (multi-candidate) cases
+        print(f"\n{away}@{home} -- {len(candidates)} same-team SportsGameOdds candidates:")
+        print(f"  MLB game_id={g['game_id']}  MLB scheduled_start_utc={g.get('game_datetime_utc')}  MLB detailedState={g.get('status')!r}")
+        for e in candidates:
+            print(
+                f"    SGO event_id={e.event_id}  home={e.home_team}  away={e.away_team}  "
+                f"scheduled_start_utc={e.game_time_utc}  raw_status={e.event_status}  "
+                f"normalized_status={game_status_module.classify_sportsgameodds_status(e.event_status)}"
+            )
+        resolution = resolve_provider_event(events, home, away, g.get("game_datetime_utc"))
+        print(f"  RESOLVED: status={resolution.status}  matched_event_id={resolution.event.event_id if resolution.event else None}")
 
 
 def _load_games(date: str) -> list:
@@ -66,6 +104,8 @@ def main() -> None:
     if slate_game_ids is not None:
         games = [g for g in games if g.get("game_id") in slate_game_ids]
 
+    _print_event_resolution_trace(games, args.date)
+
     vegas_provider, provider_source = collector.get_configured_vegas_provider()
     print(f"Vegas provider source: {provider_source} ({vegas_provider.provider_name()})")
     print(f"Games audited: {len(games)}\n")
@@ -79,7 +119,10 @@ def main() -> None:
 
         snapshot = None
         try:
-            snapshot = vegas_provider.get_vegas_line(game_id, home, away, slate_date=args.date, mlb_game_status=mlb_status)
+            snapshot = vegas_provider.get_vegas_line(
+                game_id, home, away, slate_date=args.date, mlb_game_status=mlb_status,
+                mlb_scheduled_start_utc=g.get("game_datetime_utc"),
+            )
         except Exception as exc:  # noqa: BLE001 -- diagnostic script, report anything that goes wrong
             print(f"{away}@{home}: ERROR building snapshot: {exc}")
             continue

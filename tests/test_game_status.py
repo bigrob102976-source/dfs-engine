@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from research.game_environment.game_status import (
     FINAL,
     IN_PLAY,
@@ -5,6 +7,7 @@ from research.game_environment.game_status import (
     UNKNOWN,
     classify_mlb_game_status,
     classify_sportsgameodds_status,
+    game_has_not_started_yet,
     resolve_game_status,
 )
 
@@ -112,3 +115,91 @@ def test_mlb_postponed_status_still_wins_over_sportsgameodds():
     # Postponed/Suspended nuance only MLB status models -- SportsGameOdds
     # confirming "not started" doesn't override it into PREGAME.
     assert resolve_game_status("Postponed", {"started": False}) == UNKNOWN
+
+
+# ----------------------------------------------------------------------------
+# Milestone 27.1 -- impossible-state guard (confirmed real bug, 2026-08-18:
+# LAD @ COL, real SportsGameOdds IN_PLAY claim ~3.6 hours before the
+# authoritative MLB scheduled first pitch -- see providers/event_resolver.py
+# for the root cause of WHY the wrong event's status was fed in here; this
+# is the second, independent line of defense at the status layer itself.)
+# ----------------------------------------------------------------------------
+
+
+def test_game_has_not_started_yet_true_when_now_before_scheduled_start():
+    now = datetime(2026, 8, 18, 21, 0, 0, tzinfo=timezone.utc)
+    assert game_has_not_started_yet("2026-08-19T00:40:00Z", now_utc=now) is True
+
+
+def test_game_has_not_started_yet_false_when_now_after_scheduled_start():
+    now = datetime(2026, 8, 19, 1, 0, 0, tzinfo=timezone.utc)
+    assert game_has_not_started_yet("2026-08-19T00:40:00Z", now_utc=now) is False
+
+
+def test_game_has_not_started_yet_false_when_no_scheduled_start_available():
+    # Never blocks anything when we have no authoritative time to compare --
+    # only ever a guard, never itself a source of a wrong answer.
+    assert game_has_not_started_yet(None) is False
+
+
+def test_game_has_not_started_yet_false_for_unparseable_timestamp():
+    assert game_has_not_started_yet("not-a-real-timestamp") is False
+
+
+def test_game_has_not_started_yet_handles_z_suffix_and_milliseconds():
+    now = datetime(2026, 8, 18, 21, 0, 0, tzinfo=timezone.utc)
+    assert game_has_not_started_yet("2026-08-19T00:40:00.000Z", now_utc=now) is True
+
+
+def test_impossible_state_guard_blocks_in_play_before_scheduled_start():
+    # THE confirmed real regression: MLB says Pre-Game, SportsGameOdds
+    # (from the WRONG matched event) says in-play, but the authoritative
+    # scheduled start is still ~3.6 hours in the future -- PREGAME must
+    # be preserved, not overridden.
+    now = datetime(2026, 8, 18, 21, 0, 0, tzinfo=timezone.utc)
+    result = resolve_game_status(
+        "Scheduled",
+        {"started": True, "live": True, "ended": False, "completed": False},
+        mlb_scheduled_start_utc="2026-08-19T00:40:00Z",
+        now_utc=now,
+    )
+    assert result == PREGAME
+
+
+def test_status_override_still_applies_after_scheduled_start_has_passed():
+    # The guard must never block a GENUINE override once the game's own
+    # scheduled start has actually arrived.
+    now = datetime(2026, 8, 19, 1, 30, 0, tzinfo=timezone.utc)
+    result = resolve_game_status(
+        "Scheduled",
+        {"started": True, "live": True, "ended": False, "completed": False},
+        mlb_scheduled_start_utc="2026-08-19T00:40:00Z",
+        now_utc=now,
+    )
+    assert result == IN_PLAY
+
+
+def test_final_override_also_blocked_before_scheduled_start():
+    now = datetime(2026, 8, 18, 21, 0, 0, tzinfo=timezone.utc)
+    result = resolve_game_status(
+        "Scheduled",
+        {"started": True, "ended": True, "completed": True},
+        mlb_scheduled_start_utc="2026-08-19T00:40:00Z",
+        now_utc=now,
+    )
+    assert result == PREGAME
+
+
+def test_guard_inapplicable_without_scheduled_start_preserves_old_behavior():
+    # Backward compatibility: every pre-Milestone-27.1 caller that never
+    # passes mlb_scheduled_start_utc gets EXACTLY the old unconditional
+    # override behavior.
+    assert resolve_game_status("Pre-Game", {"started": True, "live": True, "ended": False}) == IN_PLAY
+
+
+def test_guard_does_not_affect_mlb_authoritative_states():
+    # The guard only ever gates the PREGAME->override branch -- an
+    # explicit MLB Final/In Progress is untouched regardless of scheduled
+    # start comparisons.
+    now = datetime(2026, 8, 18, 12, 0, 0, tzinfo=timezone.utc)
+    assert resolve_game_status("Final", None, mlb_scheduled_start_utc="2026-08-19T00:40:00Z", now_utc=now) == FINAL

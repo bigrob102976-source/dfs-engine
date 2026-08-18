@@ -175,6 +175,17 @@ class VegasSnapshot:
     secondary_provider_status: Optional[str] = None
     missing_reason: Optional[str] = None
 
+    # Milestone 27.1: True when a provider's own status (e.g.
+    # SportsGameOdds saying IN_PLAY/FINAL) was REJECTED by the
+    # impossible-state guard (research/game_environment/game_status.py
+    # ::game_has_not_started_yet()) because the current moment is still
+    # before the authoritative MLB scheduled start -- an "impossible
+    # state" that either means the wrong provider event was matched, or
+    # the provider itself is stale/wrong. When True, this snapshot's
+    # game_status was deliberately kept at PREGAME instead of trusting
+    # the provider.
+    provider_status_conflict: bool = False
+
     def to_dict(self) -> dict:
         d = asdict(self)
         return d
