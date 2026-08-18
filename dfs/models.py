@@ -21,6 +21,15 @@ class DKSalaryRow:
     avg_points_per_game: Optional[float] = None
     roster_position_raw: Optional[str] = None
 
+    # Milestone 27.4: source-to-pool trace -- lets an admin/debug view
+    # trace any normalized player back to the exact raw source row it
+    # came from. Populated only by dfs/draftkings_parser.py (a real CSV
+    # file on disk has a row number/filename/hash); left None for rows
+    # built from a provider adapter, which has no single raw file.
+    source_row_number: Optional[int] = None
+    source_filename: Optional[str] = None
+    source_sha256: Optional[str] = None
+
 
 @dataclass
 class CanonicalPlayer:
@@ -101,6 +110,12 @@ class DFSPlayer:
     match_confidence: Optional[str] = None
 
     avg_points_per_game_dk: Optional[float] = None  # DK's own metric, preserved but never fed into our model
+
+    # Milestone 27.4: source-to-pool trace -- see DKSalaryRow's identical
+    # fields, which these are copied verbatim from.
+    source_row_number: Optional[int] = None
+    source_filename: Optional[str] = None
+    source_sha256: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

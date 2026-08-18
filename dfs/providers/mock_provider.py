@@ -148,6 +148,7 @@ class MockProvider(DFSSalaryProvider):
         slate_info = ProviderSlateInfo(
             slate_id=slate_id, slate_name="Mock Main (Dev)", site=site, sport=sport,
             start_time=None, game_count=len(games_by_id), game_ids=sorted(games_by_id.keys()), player_count=len(players),
+            source_provenance="DEVELOPMENT_MOCK",
         )
         return ProviderSlateResult(
             slates=[slate_info], players_by_slate={slate_id: players}, source=self.name,

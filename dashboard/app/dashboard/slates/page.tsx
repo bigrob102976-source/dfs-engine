@@ -1,7 +1,7 @@
 import { SlateManagerClient } from "@/components/slates/SlateManagerClient";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
-import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot } from "@/lib/loaders";
+import { loadLatestDKPlayerPool, loadLatestDkMatchReport, loadLatestOwnershipSnapshot } from "@/lib/loaders";
 import { resolveSlateContext } from "@/lib/slateContext";
 import type { SlateManagerRow } from "@/components/slates/types";
 
@@ -22,6 +22,9 @@ export default async function SlateManagerPage() {
     const pool = loadLatestDKPlayerPool(date, s.slateId).data;
     const ownership = loadLatestOwnershipSnapshot(date, s.slateId).data;
     const status: SlateManagerRow["status"] = pool && ownership ? "READY" : pool || ownership ? "PARTIAL" : "MISSING";
+    const matchReport = loadLatestDkMatchReport(date, s.slateId).data;
+    const sourceProvenance = (matchReport?.source_provenance as string | undefined) ?? null;
+    const realism = matchReport?.source_realism as { blocked?: boolean } | undefined;
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -29,6 +32,8 @@ export default async function SlateManagerPage() {
       playerCount: pool?.player_count ?? s.playerCount,
       startTime: s.startTime,
       status,
+      sourceProvenance,
+      realismBlocked: realism?.blocked ?? false,
     };
   });
 

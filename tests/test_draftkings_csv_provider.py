@@ -134,3 +134,30 @@ def test_player_count_matches_dk_row_count(tmp_path):
     provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
     result = provider.get_slate("2026-08-14")
     assert result.slates[0].player_count == 2  # Ace Pitcher + Lead Off
+
+
+def test_realistic_upload_is_classified_official_user_upload(tmp_path):
+    save_upload(MAIN_CSV, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
+    result = provider.get_slate("2026-08-14")
+    assert result.slates[0].source_provenance == "OFFICIAL_USER_UPLOAD"
+    assert result.slates[0].realism_blocked is False
+
+
+def test_impossible_pitcher_count_upload_is_reclassified_synthetic(tmp_path):
+    # Modeled on the real 2026-08-18 LAD case this milestone traced:
+    # dozens of pitcher-eligible rows salaried for one team in one game.
+    rows = "".join(
+        f"RP,Pitcher {i} ({100 + i}),Pitcher {i},{100 + i},RP,4000,TOR@BOS 7:05PM ET,TOR,5.0\n" for i in range(25)
+    )
+    rows += "OF,Lead Off (999),Lead Off,999,OF,4200,TOR@BOS 7:05PM ET,BOS,9.4\n"
+    synthetic_csv = _csv(rows)
+    save_upload(synthetic_csv, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+
+    provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
+    result = provider.get_slate("2026-08-14")
+
+    assert result.slates[0].source_provenance == "SYNTHETIC_VALIDATION"
+    assert result.slates[0].realism_blocked is True
+    assert result.slates[0].realism_findings  # never blocked silently -- reasons are recorded
+    assert any("SYNTHETIC_VALIDATION" in w for w in result.warnings)

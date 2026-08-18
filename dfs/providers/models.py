@@ -56,6 +56,16 @@ class ProviderSlateInfo:
     game_ids: List[str] = field(default_factory=list)
     player_count: Optional[int] = None
 
+    # Milestone 27.4: dfs/providers/source_provenance.py's classification
+    # for THIS slate's players (may differ per slate label even within
+    # one provider result) and the content-realism findings that
+    # produced it (dfs/providers/source_realism.py) -- "UNKNOWN"/empty
+    # for any provider that hasn't been wired to compute these yet,
+    # never invented.
+    source_provenance: str = "UNKNOWN"
+    realism_blocked: bool = False
+    realism_findings: List[str] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         return asdict(self)
 

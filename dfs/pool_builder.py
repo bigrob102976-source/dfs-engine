@@ -12,12 +12,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from config.runtime_settings import is_mock_mode_enabled
 from dfs.lineup_smoke_test import find_one_legal_lineup
 from dfs.models import DFSPlayer, DKSalaryRow
 from dfs.persistence import save_match_report, save_player_pool
 from dfs.player_integrity import PlayerIntegrityResult, summarize as summarize_integrity, validate_pool
 from dfs.player_pool import build_dfs_players, build_match_report
 from dfs.player_resolver import build_canonical_by_id, build_canonical_index, build_name_only_index, resolve_all
+from dfs.providers.source_provenance import TRUSTED_FOR_PRODUCTION, UNKNOWN, classify_source_provenance
+from dfs.providers.source_realism import check_source_realism
 from dfs.roster_feasibility import check_roster_feasibility
 from dfs.slate_validation import validate_slate
 from dfs.snapshot_selection import select_snapshot
@@ -26,6 +29,16 @@ from research.adapters import pitcher_input as pitcher_adapter
 from research.adapters.pitcher_input import ResearchPackageNotFoundError
 from research.engine import build_research_package
 from research.prediction_snapshot import timestamp_tag
+
+
+class UnsafeSourceProvenanceError(Exception):
+    """Raised by build_pool() when a caller explicitly identified this
+    data's source provenance claim, that claim (possibly downgraded by
+    content-realism checks -- dfs/providers/source_realism.py) is not
+    trusted for a production pool build
+    (dfs/providers/source_provenance.py::TRUSTED_FOR_PRODUCTION), and no
+    explicit dev-mode override is in effect. Milestone 27.4: synthetic/
+    mock validation data must never silently become the live slate."""
 
 
 def ensure_research_package(date: str, output_root: str) -> dict:
@@ -77,11 +90,26 @@ def build_pool(
     dk_rows: List[DKSalaryRow], date: str, research_output_root: str, predictions_root: str,
     pitcher_snapshot_path: Optional[str] = None, batter_snapshot_path: Optional[str] = None,
     crosswalk: Optional[Dict[str, str]] = None,
+    source_provenance_claim: Optional[str] = None, dev_mode: Optional[bool] = None,
 ) -> PoolBuildResult:
     """Runs identity matching, slate validation, player-pool assembly,
     and roster-feasibility checking -- identical to what
     scripts/build_dk_player_pool.py has always done, just factored out
-    so a provider-sourced caller can reuse it verbatim."""
+    so a provider-sourced caller can reuse it verbatim.
+
+    `source_provenance_claim` (Milestone 27.4): what the caller's own
+    ingestion mechanism can honestly assert about this data's origin --
+    one of dfs/providers/source_provenance.py's constants (e.g.
+    OFFICIAL_USER_UPLOAD, DEVELOPMENT_MOCK), or None when the caller
+    doesn't know/care (every existing caller that predates this
+    milestone -- left as None, so this is fully backward compatible and
+    NEVER blocks unless a caller opts in by passing a claim). Content-
+    realism checks (dfs/providers/source_realism.py) can downgrade that
+    claim to SYNTHETIC_VALIDATION; if the final provenance isn't trusted
+    for production and `dev_mode` (or config.runtime_settings's Mock
+    Mode toggle, when `dev_mode` is left None) isn't enabled, this
+    raises UnsafeSourceProvenanceError rather than silently building a
+    production pool from synthetic/mock data."""
     package = ensure_research_package(date, research_output_root)
     pitcher_snapshot, pitcher_snapshot_path = load_snapshot_arg(
         pitcher_snapshot_path, date, predictions_root, "pitcher_board", "Pitcher")
@@ -95,6 +123,19 @@ def build_pool(
     slate_validation = validate_slate(dk_rows, package)
     pitcher_raw_by_id = {str(r["player_id"]): r for r in package["pitchers"]}
 
+    game_count = len({row.game_info for row in dk_rows if row.game_info})
+    realism = check_source_realism(dk_rows, game_count=game_count)
+    resolved_provenance = classify_source_provenance(source_provenance_claim or UNKNOWN, realism)
+    if source_provenance_claim is not None:
+        effective_dev_mode = is_mock_mode_enabled() if dev_mode is None else dev_mode
+        if resolved_provenance not in TRUSTED_FOR_PRODUCTION and not effective_dev_mode:
+            raise UnsafeSourceProvenanceError(
+                f"Refusing to build a production player pool: source provenance resolved to "
+                f"{resolved_provenance!r} (claimed {source_provenance_claim!r}), which is not trusted for "
+                f"production ({sorted(TRUSTED_FOR_PRODUCTION)}), and dev mode is not enabled. "
+                f"Realism findings: {[f.message for f in realism.findings]}"
+            )
+
     players = build_dfs_players(
         dk_rows, matches, canonical_by_id, slate_validation.dk_game_matches, pitcher_raw_by_id,
         pitcher_snapshot, batter_snapshot, pitcher_snapshot_path, batter_snapshot_path,
@@ -103,6 +144,8 @@ def build_pool(
 
     integrity_results = validate_pool(players, package["games"], canonical_by_id)
     report["identity_integrity"] = summarize_integrity(integrity_results)
+    report["source_provenance"] = resolved_provenance
+    report["source_realism"] = realism.to_dict()
 
     active_pool = [p for p in players if p.lineup_status == "active"]
     feasibility = check_roster_feasibility(active_pool)

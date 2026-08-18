@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from dfs.providers.draftkings_csv_storage import delete_upload, list_uploads, save_upload
@@ -63,3 +65,35 @@ def test_delete_upload_refuses_path_not_in_uploaded_subdir(tmp_path):
     rogue.write_bytes(CSV_BYTES)
     with pytest.raises(ValueError):
         delete_upload(str(rogue), output_root=tmp_path)
+
+
+def test_save_upload_records_sha256_over_exact_bytes(tmp_path):
+    upload = save_upload(CSV_BYTES, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    assert upload.sha256 == hashlib.sha256(CSV_BYTES).hexdigest()
+
+
+def test_save_upload_records_row_count(tmp_path):
+    upload = save_upload(CSV_BYTES, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    assert upload.row_count == 1  # one data row, header excluded
+
+
+def test_save_upload_defaults_provenance_to_official_user_upload(tmp_path):
+    upload = save_upload(CSV_BYTES, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    assert upload.source_provenance == "OFFICIAL_USER_UPLOAD"
+
+
+def test_source_hash_persists_through_list_uploads(tmp_path):
+    saved = save_upload(CSV_BYTES, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    reloaded = list_uploads("2026-08-14", output_root=tmp_path)[0]
+    assert reloaded.sha256 == saved.sha256 == hashlib.sha256(CSV_BYTES).hexdigest()
+
+
+def test_original_upload_bytes_are_never_rewritten(tmp_path):
+    from pathlib import Path
+
+    upload = save_upload(CSV_BYTES, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    original_bytes = Path(upload.path).read_bytes()
+    # A second save under a DIFFERENT label must never touch the first file.
+    save_upload(CSV_BYTES, "2026-08-14", "Turbo", "DKSalariesTurbo.csv", output_root=tmp_path)
+    assert Path(upload.path).read_bytes() == original_bytes
+    assert hashlib.sha256(Path(upload.path).read_bytes()).hexdigest() == upload.sha256

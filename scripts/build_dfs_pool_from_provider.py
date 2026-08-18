@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dfs.pool_builder import build_pool, print_pool_report, save_pool
+from dfs.pool_builder import UnsafeSourceProvenanceError, build_pool, print_pool_report, save_pool
 from dfs.providers.adapter import provider_players_to_dk_rows
 
 
@@ -80,7 +80,27 @@ def main() -> None:
         print("ERROR: The selected provider slate has zero players.")
         sys.exit(1)
 
-    result = build_pool(dk_rows, args.date, args.output, args.predictions_root, args.pitcher_snapshot, args.batter_snapshot)
+    # Milestone 27.4: this slate's own source_provenance claim (from
+    # DraftKingsCsvProvider/MockProvider's ProviderSlateInfo), so
+    # build_pool() can refuse to build a production pool from a
+    # synthetic/mock-contaminated source. `None` (never seen this field)
+    # is treated the same as "UNKNOWN" -- still guarded, not skipped.
+    chosen_slate = next(
+        (s for s in slate_doc.get("slates", []) if s.get("slate_id") == slate_doc.get("selected_slate_id")), None,
+    )
+    source_provenance_claim = (chosen_slate or {}).get("source_provenance", "UNKNOWN")
+
+    try:
+        result = build_pool(
+            dk_rows, args.date, args.output, args.predictions_root, args.pitcher_snapshot, args.batter_snapshot,
+            source_provenance_claim=source_provenance_claim,
+        )
+    except UnsafeSourceProvenanceError as e:
+        print(f"\nDFS SALARIES: SOURCE PROVENANCE BLOCKED\n{e}")
+        print("\nThis is TEST / SYNTHETIC DATA, not a genuine DraftKings export. "
+              "Enable Mock Mode to build a pool from it anyway (dev/testing only), "
+              "or upload a real DraftKings salary CSV for this date.")
+        sys.exit(1)
     print()
 
     print_pool_report(result)

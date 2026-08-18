@@ -22,8 +22,20 @@ overwrites the earlier one -- both are kept, and
 draftkings_csv_provider.py always uses only the newest upload per label
 (the same "newest wins" rule every other immutable snapshot in this
 project already follows).
+
+Milestone 27.4: this module is specifically the real-user-upload path
+(as opposed to MockProvider, which never calls save_upload) -- so every
+upload's `source_provenance` mechanism claim starts as
+OFFICIAL_USER_UPLOAD. That's an honest claim about HOW the bytes
+arrived, not a guarantee about WHAT they contain -- content realism
+(dfs/providers/source_realism.py) can still downgrade it to
+SYNTHETIC_VALIDATION once the file is parsed. `sha256` is recorded here,
+at upload time, over the exact original bytes, so provenance can always
+be traced back to one immutable, content-addressed original -- the CSV
+file on disk is never rewritten after this.
 """
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -44,6 +56,13 @@ class DraftKingsUpload:
     slate_label: str
     original_filename: str
     uploaded_at: str
+    sha256: str = ""
+    row_count: Optional[int] = None
+    # The upload MECHANISM's own provenance claim -- see this module's
+    # docstring and dfs/providers/source_provenance.py. Old uploads saved
+    # before this field existed deserialize as "OFFICIAL_USER_UPLOAD" too
+    # (this storage module has only ever been the real-upload path).
+    source_provenance: str = "OFFICIAL_USER_UPLOAD"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -57,6 +76,21 @@ def _no_overwrite(path: Path) -> None:
 def _safe_label(slate_label: str) -> str:
     cleaned = "".join(c if c.isalnum() else "_" for c in slate_label).strip("_")
     return cleaned or "slate"
+
+
+def _row_count(csv_bytes: bytes) -> Optional[int]:
+    """Best-effort raw data-row count (header excluded) -- never raises;
+    a file that isn't valid CSV at all just gets row_count=None here
+    (dfs/draftkings_parser.py is the real format validator, run later)."""
+    import csv
+    import io
+
+    try:
+        text = csv_bytes.decode("utf-8-sig")
+        rows = list(csv.reader(io.StringIO(text)))
+        return max(0, len(rows) - 1) if rows else 0
+    except (UnicodeDecodeError, csv.Error):
+        return None
 
 
 def save_upload(
@@ -84,6 +118,7 @@ def save_upload(
     upload = DraftKingsUpload(
         path=str(csv_path), meta_path=str(meta_path), slate_date=slate_date,
         slate_label=slate_label, original_filename=original_filename, uploaded_at=uploaded_at,
+        sha256=hashlib.sha256(csv_bytes).hexdigest(), row_count=_row_count(csv_bytes),
     )
     meta_path.write_text(json.dumps(upload.to_dict(), indent=2), encoding="utf-8")
     return upload

@@ -14,6 +14,7 @@ dfs/player_pool.py, which only ever attaches it as external metadata.
 """
 
 import csv
+import hashlib
 from pathlib import Path
 from typing import List, Optional
 
@@ -81,14 +82,23 @@ def parse_salary_csv(path) -> List[DKSalaryRow]:
     if not path.exists():
         raise FileNotFoundError(f"DraftKings salary CSV not found: {path}")
 
+    csv_bytes = path.read_bytes()
+    sha256 = hashlib.sha256(csv_bytes).hexdigest()
+
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         _validate_header(reader.fieldnames or [])
-        rows = [_parse_row(raw) for raw in reader]
+        # Milestone 27.4: row 1 is the header, so the first data row is
+        # line 2 on disk -- matches what a human opens the CSV and counts.
+        rows = [_parse_row(raw, source_row_number=i, source_filename=path.name, source_sha256=sha256)
+                for i, raw in enumerate(reader, start=2)]
     return rows
 
 
-def _parse_row(raw: dict) -> DKSalaryRow:
+def _parse_row(
+    raw: dict, source_row_number: Optional[int] = None,
+    source_filename: Optional[str] = None, source_sha256: Optional[str] = None,
+) -> DKSalaryRow:
     dk_id = (raw.get("ID") or "").strip()
     if not dk_id and raw.get("Name + ID"):
         dk_id = _extract_id_from_name_plus_id(raw["Name + ID"])
@@ -107,4 +117,5 @@ def _parse_row(raw: dict) -> DKSalaryRow:
         game_info=(raw.get("Game Info") or "").strip(),
         avg_points_per_game=_parse_avg_points(raw.get("AvgPointsPerGame")),
         roster_position_raw=raw.get("Roster Position"),
+        source_row_number=source_row_number, source_filename=source_filename, source_sha256=source_sha256,
     )

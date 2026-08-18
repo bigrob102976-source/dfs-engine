@@ -28,6 +28,8 @@ from dfs.draftkings_parser import DraftKingsCSVFormatError, parse_salary_csv
 from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.draftkings_csv_storage import DEFAULT_DFS_INPUT_ROOT, DraftKingsUpload, list_uploads
 from dfs.providers.models import ProviderPlayer, ProviderSlateInfo, ProviderSlateResult
+from dfs.providers.source_provenance import classify_source_provenance
+from dfs.providers.source_realism import check_source_realism
 from dfs.slate_validation import resolve_game_ids
 
 
@@ -95,9 +97,22 @@ class DraftKingsCsvProvider(DFSSalaryProvider):
             slate_id = f"dkcsv-{upload.slate_label.lower().replace(' ', '-')}-{date}"
             games = {row.game_info for row in dk_rows if row.game_info}
             game_ids = resolve_game_ids(list(games), research_games) if research_games else []
+
+            realism = check_source_realism(dk_rows, game_count=len(games))
+            provenance = classify_source_provenance(upload.source_provenance, realism)
+            if realism.blocked:
+                warnings.append(
+                    f"Upload {upload.original_filename!r} ({upload.slate_label}) failed source realism checks "
+                    f"and has been reclassified {provenance} -- see realism_findings for this slate."
+                )
+            for finding in realism.findings:
+                warnings.append(f"[{upload.slate_label}] [{finding.level}] {finding.message}")
+
             slates.append(ProviderSlateInfo(
                 slate_id=slate_id, slate_name=upload.slate_label, site=site, sport=sport,
                 start_time=None, game_count=len(games), game_ids=game_ids, player_count=len(dk_rows),
+                source_provenance=provenance, realism_blocked=realism.blocked,
+                realism_findings=[f.message for f in realism.findings],
             ))
             players_by_slate[slate_id] = [
                 ProviderPlayer(

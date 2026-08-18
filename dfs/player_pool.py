@@ -88,6 +88,8 @@ def build_dfs_players(
             mlb_player_id=match.mlb_player_id, opponent=opponent, game_id=game_id,
             match_status=match.match_status, match_confidence=match.match_confidence,
             lineup_status=lineup_status, avg_points_per_game_dk=dk_row.avg_points_per_game,
+            source_row_number=dk_row.source_row_number, source_filename=dk_row.source_filename,
+            source_sha256=dk_row.source_sha256,
         )
 
         if projection_record:

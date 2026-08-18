@@ -13,6 +13,26 @@ const STATUS_TONE: Record<SlateManagerRow["status"], string> = {
   MISSING: "bg-text-faint/15 text-text-faint",
 };
 
+/** Milestone 27.4 -- dfs/providers/source_provenance.py's classification,
+ * mirrored here purely for display. SYNTHETIC_VALIDATION gets a loud,
+ * unmissable badge -- this label must never be confused with genuine
+ * real-DraftKings validation. */
+const PROVENANCE_LABEL: Record<string, string> = {
+  OFFICIAL_USER_UPLOAD: "Official DK Upload",
+  AUTHORIZED_PROVIDER: "Authorized Provider",
+  DEVELOPMENT_MOCK: "Mock",
+  SYNTHETIC_VALIDATION: "TEST / SYNTHETIC DATA",
+  UNKNOWN: "Unknown Source",
+};
+
+const PROVENANCE_TONE: Record<string, string> = {
+  OFFICIAL_USER_UPLOAD: "bg-green/15 text-green",
+  AUTHORIZED_PROVIDER: "bg-green/15 text-green",
+  DEVELOPMENT_MOCK: "bg-yellow/15 text-yellow",
+  SYNTHETIC_VALIDATION: "bg-red text-white animate-pulse",
+  UNKNOWN: "bg-text-faint/15 text-text-faint",
+};
+
 function formatTime(iso: string | null): string {
   if (!iso) return "--";
   const d = new Date(iso);
@@ -135,6 +155,20 @@ export function SlateManagerClient({
                   <span className="text-sm font-semibold text-text">{r.slateName ?? r.slateId}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${STATUS_TONE[r.status]}`}>{r.status}</span>
                 </div>
+                {r.sourceProvenance && (
+                  <div className="mb-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PROVENANCE_TONE[r.sourceProvenance] ?? PROVENANCE_TONE.UNKNOWN}`}
+                      title={
+                        r.sourceProvenance === "SYNTHETIC_VALIDATION"
+                          ? "This slate's content failed source-realism checks (e.g. an implausible pitcher count) and cannot be trusted as a genuine DraftKings export -- see the Slate Data Integrity audit."
+                          : undefined
+                      }
+                    >
+                      {PROVENANCE_LABEL[r.sourceProvenance] ?? r.sourceProvenance}
+                    </span>
+                  </div>
+                )}
                 <div className="mb-3 grid grid-cols-3 gap-2 text-center text-[11px] text-text-muted">
                   <div>
                     <div className="text-text-faint">Games</div>

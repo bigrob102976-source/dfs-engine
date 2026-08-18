@@ -204,6 +204,18 @@ def test_game_id_comes_from_this_rows_own_resolved_matchup_not_the_matched_playe
     assert p.game_id == "g3"  # THIS row's own game, not "g2" (the canonical player's game)
 
 
+def test_source_trace_fields_flow_from_dk_row_to_dfs_player():
+    dk_rows = [_dk_row("d1", "Home Ace", "BOS", ["P"], 9000)]
+    dk_rows[0].source_row_number = 7
+    dk_rows[0].source_filename = "Main_20260818T191938.csv"
+    dk_rows[0].source_sha256 = "abc123"
+    players, _ = _build(dk_rows, _package(), _pitcher_snapshot(), _batter_snapshot())
+    p = players[0]
+    assert p.source_row_number == 7
+    assert p.source_filename == "Main_20260818T191938.csv"
+    assert p.source_sha256 == "abc123"
+
+
 def test_never_silently_drops_a_player():
     dk_rows = [
         _dk_row("d1", "Home Ace", "BOS", ["P"], 9000),

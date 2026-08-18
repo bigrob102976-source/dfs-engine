@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from dfs.models import DKSalaryRow
-from dfs.pool_builder import build_pool, print_pool_report, save_pool
+from dfs.pool_builder import UnsafeSourceProvenanceError, build_pool, print_pool_report, save_pool
 from dfs.providers.adapter import provider_players_to_dk_rows
 
 
@@ -113,6 +113,75 @@ def test_build_pool_reports_identity_integrity_summary(tmp_path):
     assert integrity["invalid"] == 0
     assert integrity["invalid_rows"] == []
     assert len(result.integrity_results) == 2
+
+
+def _blocked_realism_dk_rows():
+    # 20 pitcher-eligible TOR rows in one game -- well past
+    # MAX_PLAUSIBLE_PITCHERS_PER_TEAM_BLOCK (18), same shape as the real
+    # 2026-08-18 LAD case this milestone investigated.
+    rows = [DKSalaryRow(dk_player_id="d1", name="Away Ace", team_abbrev="TOR", dk_positions=["P"], salary=8000,
+                         game_info="TOR@BOS 7:05PM ET")]
+    for i in range(20):
+        rows.append(DKSalaryRow(dk_player_id=f"p{i}", name=f"Extra Pitcher {i}", team_abbrev="TOR",
+                                 dk_positions=["RP"], salary=4000, game_info="TOR@BOS 7:05PM ET"))
+    rows.append(DKSalaryRow(dk_player_id="d2", name="Leadoff Hitter", team_abbrev="BOS", dk_positions=["OF"],
+                             salary=4000, game_info="TOR@BOS 7:05PM ET"))
+    return rows
+
+
+def test_build_pool_without_a_provenance_claim_never_blocks(tmp_path):
+    # Backward compatibility: every caller that predates Milestone 27.4
+    # (including every other test in this file) doesn't pass
+    # source_provenance_claim, so the guard must never activate for them
+    # even when the content would otherwise fail realism checks.
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    result = build_pool(_blocked_realism_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+    assert result.report["source_provenance"] == "SYNTHETIC_VALIDATION"
+    assert result.report["source_realism"]["blocked"] is True
+
+
+def test_build_pool_rejects_synthetic_source_claimed_as_official_upload(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    with pytest.raises(UnsafeSourceProvenanceError):
+        build_pool(
+            _blocked_realism_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"),
+            source_provenance_claim="OFFICIAL_USER_UPLOAD",
+        )
+
+
+def test_build_pool_rejects_synthetic_source_claimed_as_mock(tmp_path):
+    # DEVELOPMENT_MOCK is equally not in TRUSTED_FOR_PRODUCTION, so a mock
+    # provider's claim doesn't grant an exemption from the realism guard.
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    with pytest.raises(UnsafeSourceProvenanceError):
+        build_pool(
+            _blocked_realism_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"),
+            source_provenance_claim="DEVELOPMENT_MOCK",
+        )
+
+
+def test_build_pool_permits_synthetic_source_in_dev_mode(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    result = build_pool(
+        _blocked_realism_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"),
+        source_provenance_claim="OFFICIAL_USER_UPLOAD", dev_mode=True,
+    )
+    assert result.report["source_provenance"] == "SYNTHETIC_VALIDATION"
+
+
+def test_build_pool_accepts_clean_official_upload_source(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    result = build_pool(
+        _dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"),
+        source_provenance_claim="OFFICIAL_USER_UPLOAD",
+    )
+    assert result.report["source_provenance"] == "OFFICIAL_USER_UPLOAD"
+    assert result.report["source_realism"]["blocked"] is False
 
 
 def test_provider_players_to_dk_rows_conversion():

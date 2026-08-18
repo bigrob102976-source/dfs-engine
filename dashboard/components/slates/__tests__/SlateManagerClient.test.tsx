@@ -16,7 +16,11 @@ function jsonResponse(body: unknown, ok = true) {
 }
 
 function row(overrides: Partial<SlateManagerRow> = {}): SlateManagerRow {
-  return { slateId: "main", slateName: "Main", gameCount: 9, playerCount: 142, startTime: null, status: "READY", ...overrides };
+  return {
+    slateId: "main", slateName: "Main", gameCount: 9, playerCount: 142, startTime: null, status: "READY",
+    sourceProvenance: "OFFICIAL_USER_UPLOAD", realismBlocked: false,
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -106,6 +110,47 @@ describe("SlateManagerClient", () => {
     await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
     const deleteCall = impl.mock.calls.find(([url]) => url === "/api/dfs-salaries/delete")!;
     expect(JSON.parse((deleteCall[1] as RequestInit).body as string)).toEqual({ path: "dfs_input/2026-08-17/uploaded_dk_slates/main_x.csv" });
+  });
+
+  it("shows a highly visible TEST / SYNTHETIC DATA badge when a slate's source_provenance is SYNTHETIC_VALIDATION", () => {
+    render(
+      <SlateManagerClient
+        date={DATE}
+        rows={[row({ sourceProvenance: "SYNTHETIC_VALIDATION", realismBlocked: true })]}
+        providerName="draftkings_csv"
+        isMock={false}
+        providerStatus="ready"
+      />,
+    );
+    expect(screen.getByText("TEST / SYNTHETIC DATA")).toBeInTheDocument();
+  });
+
+  it("labels an official DK upload's per-slate provenance distinctly from the synthetic badge", () => {
+    render(
+      <SlateManagerClient
+        date={DATE}
+        rows={[row({ sourceProvenance: "OFFICIAL_USER_UPLOAD" })]}
+        providerName="draftkings_csv"
+        isMock={false}
+        providerStatus="ready"
+      />,
+    );
+    expect(screen.getByText("Official DK Upload")).toBeInTheDocument();
+    expect(screen.queryByText("TEST / SYNTHETIC DATA")).not.toBeInTheDocument();
+  });
+
+  it("shows no provenance badge when a slate has no pool built yet", () => {
+    render(
+      <SlateManagerClient
+        date={DATE}
+        rows={[row({ sourceProvenance: null, status: "MISSING" })]}
+        providerName="draftkings_csv"
+        isMock={false}
+        providerStatus="ready"
+      />,
+    );
+    expect(screen.queryByText("TEST / SYNTHETIC DATA")).not.toBeInTheDocument();
+    expect(screen.queryByText("Official DK Upload")).not.toBeInTheDocument();
   });
 
   it("shows an error and does not revalidate when refresh fails", async () => {
