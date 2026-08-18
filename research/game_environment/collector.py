@@ -32,9 +32,17 @@ from research.game_environment import ballpark, bullpen, game_status as game_sta
 from research.game_environment.bullpen import BullpenProvider, MockBullpenProvider
 from research.game_environment.models import FutureAdjustmentPreview, GameEnvironmentReport
 from research.game_environment.providers.sportsgameodds import SportsGameOddsProvider
+from research.game_environment.providers.theoddsapi import TheOddsAPIProvider
 from research.game_environment.scoring import score_environment
 from research.game_environment.umpires import MockUmpireProvider, UmpireProvider, UnknownUmpireProvider
-from research.game_environment.vegas import MockVegasProvider, NotConfiguredVegasProvider, SportsGameOddsVegasProvider, VegasProvider
+from research.game_environment.vegas import (
+    MockVegasProvider,
+    MultiProviderVegasProvider,
+    NotConfiguredVegasProvider,
+    SportsGameOddsVegasProvider,
+    TheOddsAPIVegasProvider,
+    VegasProvider,
+)
 from research.game_environment.weather import MockWeatherProvider, WeatherProvider
 
 WEATHER_PROVIDER_FACTORIES: Dict[str, Callable[[], WeatherProvider]] = {"mock": MockWeatherProvider}
@@ -53,20 +61,41 @@ def get_configured_weather_provider() -> Tuple[WeatherProvider, str]:
 
 
 def get_configured_vegas_provider() -> Tuple[VegasProvider, str]:
-    """Resolution order (Milestone 24):
+    """Resolution order (Milestone 24, extended by Milestone 27):
 
-      1. SPORTSGAMEODDS_API_KEY set -> real SportsGameOddsVegasProvider,
-         source "sportsgameodds_configured". Always wins, regardless of
-         GAME_ENVIRONMENT_PROVIDER.
-      2. GAME_ENVIRONMENT_PROVIDER=mock explicitly set -> MockVegasProvider,
+      1. SPORTSGAMEODDS_API_KEY set -> real primary provider, ALWAYS
+         wrapped in MultiProviderVegasProvider even when THE_ODDS_API_KEY
+         is unset (secondary=None) -- this is what gives every "missing"
+         game an honest providers/coverage.py classification
+         (EVENT_NOT_MATCHED / PREGAME_NOT_AVAILABLE / etc.) instead of a
+         bare "missing" regardless of whether a secondary provider is
+         configured. Source is "multi_provider_configured" when THE_ODDS_
+         API_KEY is ALSO set (SportsGameOdds primary, The Odds API
+         secondary/fallback), else "sportsgameodds_configured" (single
+         real provider, but still coverage-classified). Always wins,
+         regardless of GAME_ENVIRONMENT_PROVIDER.
+      2. Only THE_ODDS_API_KEY set (no SportsGameOdds key) -> The Odds
+         API used ALONE as the sole real provider (source
+         "theoddsapi_only_configured") -- still never silently mock.
+      3. GAME_ENVIRONMENT_PROVIDER=mock explicitly set -> MockVegasProvider,
          source "explicit_mock".
-      3. Neither -> NotConfiguredVegasProvider (is_configured()=False,
-         so build_game_report() below never calls it), source
-         "not_configured".
+      4. None of the above -> NotConfiguredVegasProvider
+         (is_configured()=False, so build_game_report() below never
+         calls it), source "not_configured".
     """
-    api_key = os.environ.get("SPORTSGAMEODDS_API_KEY")
-    if api_key:
-        return SportsGameOddsVegasProvider(SportsGameOddsProvider(api_key=api_key)), "sportsgameodds_configured"
+    sgo_key = os.environ.get("SPORTSGAMEODDS_API_KEY")
+    odds_api_key = os.environ.get("THE_ODDS_API_KEY")
+
+    if sgo_key:
+        primary = SportsGameOddsVegasProvider(SportsGameOddsProvider(api_key=sgo_key))
+        if odds_api_key:
+            secondary = TheOddsAPIVegasProvider(TheOddsAPIProvider(api_key=odds_api_key))
+            return MultiProviderVegasProvider(primary, secondary), "multi_provider_configured"
+        return MultiProviderVegasProvider(primary, None), "sportsgameodds_configured"
+
+    if odds_api_key:
+        solo = TheOddsAPIVegasProvider(TheOddsAPIProvider(api_key=odds_api_key))
+        return MultiProviderVegasProvider(solo, None), "theoddsapi_only_configured"
 
     explicit = (os.environ.get("GAME_ENVIRONMENT_PROVIDER") or "").strip().lower()
     if explicit == "mock":

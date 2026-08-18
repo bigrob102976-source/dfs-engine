@@ -119,11 +119,10 @@ describe("PoolTable", () => {
 
   it("clicking a sortable header toggles direction", () => {
     renderTable();
-    // Anchored regex: Milestone 20 added an "AI Proj" column, which the
-    // old unanchored /Proj/ would also match (and "Proj" defaults to
-    // showing a sort-direction arrow, e.g. "Proj ↓", so an exact string
-    // match won't work either).
-    const header = screen.getByRole("columnheader", { name: /^Proj/ });
+    // Anchored regex: the "Legacy" (independent) projection column
+    // defaults to showing a sort-direction arrow, e.g. "Legacy ↓", so an
+    // exact string match won't work.
+    const header = screen.getByRole("columnheader", { name: /^Legacy/ });
     fireEvent.click(header); // ascending
     let rows = screen.getAllByRole("row").slice(1);
     expect(rows[0].textContent).toContain("Bravo Hitter"); // lowest projection (5) first
@@ -180,11 +179,11 @@ describe("PoolTable", () => {
 
   it("does not show projection comparison columns by default", () => {
     renderTable();
-    expect(screen.queryByRole("columnheader", { name: "Ext" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Δ" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "BlueCollar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "BC Δ" })).not.toBeInTheDocument();
   });
 
-  it("shows External/Adjusted/Δ columns when showProjectionComparison is true", () => {
+  it("shows BlueCollar/BC Adj/BC Δ columns when showProjectionComparison is true", () => {
     const comparisonPlayers = [
       player({ dkPlayerId: "d1", name: "Schwarber", projection: 11.9, externalProjection: 11.2, adjustedProjection: 12.1, adjustmentDelta: 0.9 }),
     ];
@@ -200,9 +199,9 @@ describe("PoolTable", () => {
         showProjectionComparison
       />,
     );
-    expect(screen.getByRole("columnheader", { name: "Ext" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Adj" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Δ" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "BlueCollar" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "BC Adj" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "BC Δ" })).toBeInTheDocument();
     const row = screen.getByText("Schwarber").closest("tr")!;
     expect(row.textContent).toContain("11.2");
     expect(row.textContent).toContain("12.1");
@@ -238,11 +237,11 @@ describe("PoolTable", () => {
   it("the detail modal shows a plain message when a player has no external projection data", () => {
     renderTable();
     fireEvent.click(screen.getByRole("button", { name: "Bravo Hitter" }));
-    expect(screen.getByText("No external projection data available for this player.")).toBeInTheDocument();
+    expect(screen.getByText("BlueCollar: NOT LOADED for this player.")).toBeInTheDocument();
   });
 
   // Milestone 20: AI Projection Engine columns + Player Detail section.
-  it("always shows AI Proj/AI Δ/AI Conf/AI Grade columns and renders each player's AI values", () => {
+  it("always shows BM AI/AI Δ/AI Conf/AI Grade columns and renders each player's AI values", () => {
     const aiPlayers = [
       player({
         dkPlayerId: "d1", name: "Judge", projection: 12, aiProjection: 14.02, aiDelta: 2.02, aiConfidence: 81.2, aiGrade: "A+",
@@ -251,7 +250,7 @@ describe("PoolTable", () => {
     render(
       <PoolTable players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
     );
-    expect(screen.getByRole("columnheader", { name: "AI Proj" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "BM AI" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "AI Conf" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "AI Grade" })).toBeInTheDocument();
@@ -260,6 +259,23 @@ describe("PoolTable", () => {
     expect(row.textContent).toContain("+2.02");
     expect(row.textContent).toContain("81");
     expect(row.textContent).toContain("A+");
+  });
+
+  // Milestone 27: Native Projection columns -- always shown (never
+  // gated behind showProjectionComparison, matching AI's own columns),
+  // labeled unambiguously "BM Native"/"Native Δ" per lib/projectionLabels.ts.
+  it("always shows BM Native/Native Δ columns and renders each player's Native values", () => {
+    const nativePlayers = [
+      player({ dkPlayerId: "d1", name: "Ohtani", projection: 15, nativeProjection: 16.4, nativeDelta: 1.4 }),
+    ];
+    render(
+      <PoolTable players={nativePlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+    );
+    expect(screen.getByRole("columnheader", { name: "BM Native" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Native Δ" })).toBeInTheDocument();
+    const row = screen.getByText("Ohtani").closest("tr")!;
+    expect(row.textContent).toContain("16.4");
+    expect(row.textContent).toContain("+1.4");
   });
 
   it("AI columns render '--' for a player with no AI Projection yet", () => {
@@ -285,7 +301,7 @@ describe("PoolTable", () => {
       <PoolTable players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Judge" }));
-    expect(screen.getByText("AI Projection Engine")).toBeInTheDocument();
+    expect(screen.getByText("Big Money AI")).toBeInTheDocument();
     expect(screen.getByText("Signal Breakdown")).toBeInTheDocument();
     expect(screen.getByText(/Wind Out 14 MPH/)).toBeInTheDocument();
     expect(screen.getByText(/projects to 14.0 AI points/)).toBeInTheDocument();

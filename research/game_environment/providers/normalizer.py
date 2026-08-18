@@ -41,7 +41,7 @@ scheme.
 
 from typing import Any, Dict, List, Optional
 
-from dfs.team_abbreviations import normalize_dk_team_abbr
+from dfs.team_abbreviations import normalize_dk_team_abbr, normalize_full_team_name
 from research.game_environment.providers.models import BookLine, NormalizedGameOdds
 
 _GAME_PERIOD = "game"
@@ -225,4 +225,143 @@ def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Option
         books=list(lines_by_book.values()),
         parse_warnings=parse_warnings,
         event_status=status or None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The Odds API (Milestone 27, SECONDARY/fallback provider)
+# ---------------------------------------------------------------------------
+# Official v4 /sports/{sport}/odds response shape (source of truth --
+# https://the-odds-api.com/liveapi/guides/v4/): each event has
+# `home_team`/`away_team` as FULL NAMES (not abbreviations -- see
+# dfs/team_abbreviations.py::normalize_full_team_name()), and
+# `bookmakers: [{key, title, last_update, markets: [{key, outcomes}]}]`.
+# Requested markets (theoddsapi.py) are exactly "h2h" (moneyline),
+# "spreads" (run line), "totals" (game total) -- the same three this
+# project's SportsGameOdds normalizer collects, so both providers feed
+# providers/consensus.py identically. The Odds API's odds endpoint does
+# not include a live start/in-play/final flag (that's a separate,
+# unrequested endpoint this project does not call) -- event_status is
+# therefore always None for this provider; game status classification
+# falls back to MLB Stats API alone (game_status.resolve_game_status
+# already handles a None secondary status correctly).
+
+
+def _theoddsapi_outcome_price(outcome: dict) -> Optional[int]:
+    return _safe_int(outcome.get("price"))
+
+
+def normalize_theoddsapi_event(raw_event: dict, retrieved_at: str) -> Optional[NormalizedGameOdds]:
+    """Returns None (never a partially-fabricated record) if the event
+    is missing the minimum identity fields, or if either team name
+    isn't a recognized MLB franchise (see normalize_full_team_name)."""
+    if not isinstance(raw_event, dict):
+        return None
+
+    parse_warnings: List[str] = []
+
+    event_id = raw_event.get("id")
+    if event_id is None:
+        return None
+    event_id = str(event_id)
+
+    home_team = normalize_full_team_name(str(raw_event.get("home_team") or ""))
+    away_team = normalize_full_team_name(str(raw_event.get("away_team") or ""))
+    if not home_team or not away_team:
+        return None
+
+    game_time_utc = raw_event.get("commence_time")
+    game_time_utc = str(game_time_utc) if game_time_utc is not None else None
+
+    league = str(raw_event.get("sport_key") or "baseball_mlb").upper()
+
+    bookmakers = raw_event.get("bookmakers")
+    if not isinstance(bookmakers, list):
+        bookmakers = []
+
+    lines_by_book: Dict[str, BookLine] = {}
+
+    def line_for(book: str) -> BookLine:
+        if book not in lines_by_book:
+            lines_by_book[book] = BookLine(book=book)
+        return lines_by_book[book]
+
+    for bookmaker in bookmakers:
+        if not isinstance(bookmaker, dict):
+            continue
+        book_key = str(bookmaker.get("key") or bookmaker.get("title") or "")
+        if not book_key:
+            continue
+        last_update = bookmaker.get("last_update")
+        markets = bookmaker.get("markets")
+        if not isinstance(markets, list):
+            continue
+
+        line = line_for(book_key)
+        if last_update is not None:
+            line.last_updated = str(last_update)
+
+        for market in markets:
+            if not isinstance(market, dict):
+                continue
+            market_key = market.get("key")
+            outcomes = market.get("outcomes")
+            if not isinstance(outcomes, list):
+                continue
+
+            if market_key == "h2h":
+                for outcome in outcomes:
+                    if not isinstance(outcome, dict):
+                        continue
+                    team = normalize_full_team_name(str(outcome.get("name") or ""))
+                    price = _theoddsapi_outcome_price(outcome)
+                    if team == home_team:
+                        line.home_moneyline = price
+                    elif team == away_team:
+                        line.away_moneyline = price
+                    else:
+                        parse_warnings.append(f"h2h outcome {outcome.get('name')!r} did not match either team.")
+
+            elif market_key == "spreads":
+                for outcome in outcomes:
+                    if not isinstance(outcome, dict):
+                        continue
+                    team = normalize_full_team_name(str(outcome.get("name") or ""))
+                    point = _safe_float(outcome.get("point"))
+                    price = _theoddsapi_outcome_price(outcome)
+                    if team == home_team:
+                        line.home_run_line = point
+                        line.home_run_line_odds = price
+                    elif team == away_team:
+                        line.away_run_line = point
+                        line.away_run_line_odds = price
+
+            elif market_key == "totals":
+                for outcome in outcomes:
+                    if not isinstance(outcome, dict):
+                        continue
+                    name = str(outcome.get("name") or "").strip().lower()
+                    point = _safe_float(outcome.get("point"))
+                    price = _theoddsapi_outcome_price(outcome)
+                    if point is not None:
+                        line.total = point
+                    if name == "over":
+                        line.total_over_odds = price
+                    elif name == "under":
+                        line.total_under_odds = price
+
+    if not lines_by_book:
+        parse_warnings.append(f"Event {event_id} had bookmakers but no recognized h2h/spreads/totals entries.")
+
+    return NormalizedGameOdds(
+        provider="theoddsapi",
+        event_id=event_id,
+        league=league,
+        home_team=home_team,
+        away_team=away_team,
+        game_time_utc=game_time_utc,
+        retrieved_at=retrieved_at,
+        books=list(lines_by_book.values()),
+        parse_warnings=parse_warnings,
+        event_status=None,
     )

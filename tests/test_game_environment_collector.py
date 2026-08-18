@@ -2,7 +2,13 @@ from research.game_environment import collector
 from research.game_environment.bullpen import BullpenProvider, MockBullpenProvider
 from research.game_environment.models import BullpenProfile, UmpireProfile, VegasSnapshot, WeatherSnapshot
 from research.game_environment.umpires import MockUmpireProvider, UmpireProvider, UnknownUmpireProvider
-from research.game_environment.vegas import MockVegasProvider, NotConfiguredVegasProvider, SportsGameOddsVegasProvider, VegasProvider
+from research.game_environment.vegas import (
+    MockVegasProvider,
+    MultiProviderVegasProvider,
+    NotConfiguredVegasProvider,
+    SportsGameOddsVegasProvider,
+    VegasProvider,
+)
 from research.game_environment.weather import MockWeatherProvider, WeatherProvider
 
 
@@ -81,9 +87,18 @@ def test_vegas_provider_uses_mock_only_when_explicitly_requested(monkeypatch):
 
 
 def test_vegas_provider_uses_real_provider_when_api_key_configured(monkeypatch):
+    """Milestone 27: always wrapped in MultiProviderVegasProvider (with
+    no secondary configured) even with only SPORTSGAMEODDS_API_KEY set --
+    this is what gives every "missing" game an honest
+    providers/coverage.py classification regardless of whether a
+    secondary provider exists. provider_name() still reads
+    "SportsGameOdds" (no secondary configured), so this is invisible to
+    anything that only cares about the display name."""
     monkeypatch.setenv("SPORTSGAMEODDS_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
     provider, source = collector.get_configured_vegas_provider()
-    assert isinstance(provider, SportsGameOddsVegasProvider)
+    assert isinstance(provider, MultiProviderVegasProvider)
+    assert provider.provider_name() == "SportsGameOdds"
     assert source == "sportsgameodds_configured"
 
 
@@ -92,10 +107,32 @@ def test_vegas_provider_prefers_real_key_over_explicit_mock(monkeypatch):
     happens to also be set to 'mock' -- a real key configured for
     production should never be silently shadowed by a leftover dev flag."""
     monkeypatch.setenv("SPORTSGAMEODDS_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
     monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     provider, source = collector.get_configured_vegas_provider()
-    assert isinstance(provider, SportsGameOddsVegasProvider)
+    assert isinstance(provider, MultiProviderVegasProvider)
+    assert provider.provider_name() == "SportsGameOdds"
     assert source == "sportsgameodds_configured"
+
+
+def test_vegas_provider_multi_provider_configured_when_both_keys_set(monkeypatch):
+    monkeypatch.setenv("SPORTSGAMEODDS_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("THE_ODDS_API_KEY", "test-key-not-real-2")
+    provider, source = collector.get_configured_vegas_provider()
+    assert isinstance(provider, MultiProviderVegasProvider)
+    assert "The Odds API" in provider.provider_name()
+    assert source == "multi_provider_configured"
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
+
+
+def test_vegas_provider_theoddsapi_only_configured(monkeypatch):
+    monkeypatch.delenv("SPORTSGAMEODDS_API_KEY", raising=False)
+    monkeypatch.setenv("THE_ODDS_API_KEY", "test-key-not-real")
+    provider, source = collector.get_configured_vegas_provider()
+    assert isinstance(provider, MultiProviderVegasProvider)
+    assert provider.provider_name() == "The Odds API"
+    assert source == "theoddsapi_only_configured"
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
 
 
 def test_bullpen_provider_defaults_to_automatic_mock_fallback(monkeypatch):

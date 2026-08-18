@@ -37,6 +37,26 @@ def test_document_includes_contest_and_match_counts():
     assert doc["match_rate"] == 0.5
 
 
+def test_document_carries_slate_id_when_provided():
+    doc = build_actual_ownership_document("2026-08-11", _contest(), "direct_ownership_table", [], _records(), slate_id="dkcsv-main-2026-08-11")
+    assert doc["slate_id"] == "dkcsv-main-2026-08-11"
+
+
+def test_document_slate_id_defaults_to_none_for_backward_compatibility():
+    doc = build_actual_ownership_document("2026-08-11", _contest(), "direct_ownership_table", [], _records())
+    assert doc["slate_id"] is None
+
+
+def test_two_slates_sharing_a_date_get_distinct_contest_ids_and_never_collide(tmp_path):
+    main_doc = build_actual_ownership_document("2026-08-11", _contest(contest_id="main-contest"), "direct_ownership_table", [], _records(), slate_id="dkcsv-main-2026-08-11")
+    turbo_doc = build_actual_ownership_document("2026-08-11", _contest(contest_id="turbo-contest"), "direct_ownership_table", [], _records(), slate_id="dkcsv-turbo-2026-08-11")
+    main_path = save_actual_ownership_document(main_doc, "2026-08-11", "20260811T200000", output_root=tmp_path)
+    turbo_path = save_actual_ownership_document(turbo_doc, "2026-08-11", "20260811T200001", output_root=tmp_path)
+    assert main_path != turbo_path
+    assert json.loads(main_path.read_text())["slate_id"] == "dkcsv-main-2026-08-11"
+    assert json.loads(turbo_path.read_text())["slate_id"] == "dkcsv-turbo-2026-08-11"
+
+
 def test_save_and_no_overwrite(tmp_path):
     doc = build_actual_ownership_document("2026-08-11", _contest(), "direct_ownership_table", [], _records())
     path = save_actual_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)

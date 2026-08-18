@@ -155,6 +155,26 @@ class VegasSnapshot:
     is_frozen_pregame: bool = False
     vegas_projection_status: str = "MISSING"
 
+    # --- Milestone 27: multi-provider (SportsGameOdds primary, The Odds
+    # API secondary) provenance. `selected_provider` is the human-
+    # readable provider name (matches `provider_name`) whose data this
+    # snapshot's current_home/current_away/implied runs actually came
+    # from -- None when neither provider produced valid data.
+    # `fallback_used` is True only when the PRIMARY provider did not
+    # produce valid pregame data and the SECONDARY provider's did.
+    # `primary_provider_status`/`secondary_provider_status` are one of
+    # providers/coverage.py's VALID / NOT_CONFIGURED / ALL_MISSING_REASONS
+    # values, always recorded (never left ambiguous) so a "missing" game
+    # can always be explained rather than just reported. `missing_reason`
+    # is set (from providers/coverage.py's categories) only when NEITHER
+    # provider produced valid data -- this project's final, single
+    # explanation for why Vegas contribution is zero for this game.
+    selected_provider: Optional[str] = None
+    fallback_used: bool = False
+    primary_provider_status: Optional[str] = None
+    secondary_provider_status: Optional[str] = None
+    missing_reason: Optional[str] = None
+
     def to_dict(self) -> dict:
         d = asdict(self)
         return d

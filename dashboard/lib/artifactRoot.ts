@@ -30,6 +30,11 @@ export const ARTIFACT_DIRS = {
   gameEnvironmentSnapshots: "game_environment_snapshots",
   aiProjectionSnapshots: "ai_projection_snapshots",
   nativeProjectionSnapshots: "native_projection_snapshots",
+  // Milestone 27: postgame actual DK fantasy points (results/<date>/
+  // {pitcher,hitter}_results.json) -- date-scoped only, by design (a
+  // player's real stat line doesn't depend on which DK slate you view
+  // it through; see evaluation/results_collector.py).
+  results: "results",
 } as const;
 
 export function artifactPath(...segments: string[]): string {

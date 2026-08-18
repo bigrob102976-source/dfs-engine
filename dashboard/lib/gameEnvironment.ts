@@ -103,6 +103,22 @@ export interface VegasSnapshot {
   game_status: "PREGAME" | "IN_PLAY" | "FINAL" | "UNKNOWN";
   is_frozen_pregame: boolean;
   vegas_projection_status: "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID" | "IN_PLAY_ONLY";
+
+  // Milestone 27: multi-provider (SportsGameOdds primary, The Odds API
+  // secondary) provenance. `selected_provider` is which provider's data
+  // this snapshot's numbers actually came from (null when neither
+  // produced valid data). `primary_provider_status`/
+  // `secondary_provider_status`/`missing_reason` are
+  // research/game_environment/providers/coverage.py's classification
+  // strings ("VALID" | "NOT_CONFIGURED" | "EVENT_NOT_MATCHED" |
+  // "EVENT_MATCHED_NO_TOTAL" | "EVENT_MATCHED_NO_MONEYLINE" |
+  // "PLAN_RESTRICTED" | "PREGAME_NOT_AVAILABLE" | "PROVIDER_ERROR" |
+  // "UNKNOWN") -- always present so a missing game is always explained.
+  selected_provider: string | null;
+  fallback_used: boolean;
+  primary_provider_status: string | null;
+  secondary_provider_status: string | null;
+  missing_reason: string | null;
 }
 
 export interface VegasSlateAnalysis {

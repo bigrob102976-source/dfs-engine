@@ -20,6 +20,60 @@ export const LINE_MOVEMENT_SHARP_RUNS = 1.0;
  * is also a "sharp" game). */
 export const LINE_MOVEMENT_STEAM_RUNS = 1.5;
 
+// Milestone 27 -- CONFIRMED BUG FIX. `SlateEnvironmentReport.vegas_slate_analysis`
+// is computed ONCE, in Python, across the FULL DAY's games (research/
+// game_environment/engine.py -> vegas.py::analyze_vegas_slate(), before
+// any DK-slate filtering exists). Once Milestone 26 started filtering
+// `report.games` down to the SELECTED slate (e.g. LAD @ COL might be the
+// day's highest total but sit in a different slate than the one being
+// viewed), every page kept passing that STALE full-day-computed analysis
+// straight through -- so "Highest Total" could point at a game that was
+// filtered OUT of view, or simply not reflect this slate's own leader.
+// This is a pure re-implementation of analyze_vegas_slate()'s exact
+// logic (same tie-break order, same thresholds) over whatever `games`
+// array is ACTUALLY being shown -- callers must use this instead of
+// `report.vegas_slate_analysis` any time `report.games` might be a
+// filtered subset (which, after Milestone 26, is effectively always).
+export function recomputeVegasSlateAnalysis(games: GameEnvironmentReport[]): VegasSlateAnalysis {
+  const withVegas = games.filter((g): g is GameEnvironmentReport & { vegas: VegasSnapshot } => g.vegas !== null);
+  if (withVegas.length === 0) {
+    return { highest_total_game_id: null, lowest_total_game_id: null, largest_movement_game_id: null, biggest_favorite_game_id: null, biggest_underdog_game_id: null, sharp_movement_game_ids: [] };
+  }
+
+  const totalOf = (g: GameEnvironmentReport & { vegas: VegasSnapshot }) => g.vegas.current_home.total ?? -1;
+  const absMoveOf = (g: GameEnvironmentReport & { vegas: VegasSnapshot }) => Math.abs(g.vegas.total_movement ?? 0);
+  const favoriteMagnitude = (g: GameEnvironmentReport & { vegas: VegasSnapshot }) => {
+    const homeMl = g.vegas.current_home.moneyline;
+    const awayMl = g.vegas.current_away.moneyline;
+    const homeFav = homeMl !== null && homeMl < 0 ? -homeMl : -10_000;
+    const awayFav = awayMl !== null && awayMl < 0 ? -awayMl : -10_000;
+    return Math.max(homeFav, awayFav);
+  };
+  const underdogMagnitude = (g: GameEnvironmentReport & { vegas: VegasSnapshot }) => {
+    const homeMl = g.vegas.current_home.moneyline;
+    const awayMl = g.vegas.current_away.moneyline;
+    const homeDog = homeMl !== null && homeMl > 0 ? homeMl : -10_000;
+    const awayDog = awayMl !== null && awayMl > 0 ? awayMl : -10_000;
+    return Math.max(homeDog, awayDog);
+  };
+
+  const highest = withVegas.reduce((best, g) => (totalOf(g) > totalOf(best) ? g : best));
+  const lowest = withVegas.reduce((best, g) => (totalOf(g) < totalOf(best) ? g : best));
+  const largestMove = withVegas.reduce((best, g) => (absMoveOf(g) > absMoveOf(best) ? g : best));
+  const biggestFavorite = withVegas.reduce((best, g) => (favoriteMagnitude(g) > favoriteMagnitude(best) ? g : best));
+  const biggestUnderdog = withVegas.reduce((best, g) => (underdogMagnitude(g) > underdogMagnitude(best) ? g : best));
+  const sharp = withVegas.filter((g) => absMoveOf(g) >= LINE_MOVEMENT_SHARP_RUNS).map((g) => g.game_id);
+
+  return {
+    highest_total_game_id: highest.game_id,
+    lowest_total_game_id: lowest.game_id,
+    largest_movement_game_id: absMoveOf(largestMove) > 0 ? largestMove.game_id : null,
+    biggest_favorite_game_id: biggestFavorite.game_id,
+    biggest_underdog_game_id: biggestUnderdog.game_id,
+    sharp_movement_game_ids: sharp,
+  };
+}
+
 export type TotalTier = "high" | "low" | "medium";
 
 /** Mirrors research/game_environment/vegas.py::total_tier() exactly. */

@@ -12,8 +12,9 @@ for how real per-book data becomes one VegasSnapshot.
 
 import hashlib
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from config.game_environment_config import (
     LINE_MOVEMENT_SHARP_RUNS,
@@ -22,6 +23,7 @@ from config.game_environment_config import (
 )
 from research.game_environment import game_status as game_status_module
 from research.game_environment.models import BookLineSnapshot, VegasLine, VegasSlateAnalysis, VegasSnapshot
+from research.game_environment.providers import coverage as coverage_module
 from research.game_environment.providers.base import (
     OddsProvider,
     OddsProviderAuthenticationError,
@@ -318,6 +320,11 @@ def _vegas_snapshot_from_dict(vegas: dict) -> VegasSnapshot:
         game_status=vegas.get("game_status", game_status_module.UNKNOWN),
         is_frozen_pregame=bool(vegas.get("is_frozen_pregame", False)),
         vegas_projection_status=vegas.get("vegas_projection_status", "MISSING"),
+        selected_provider=vegas.get("selected_provider"),
+        fallback_used=bool(vegas.get("fallback_used", False)),
+        primary_provider_status=vegas.get("primary_provider_status"),
+        secondary_provider_status=vegas.get("secondary_provider_status"),
+        missing_reason=vegas.get("missing_reason"),
     )
 
 
@@ -430,7 +437,7 @@ class SportsGameOddsVegasProvider(VegasProvider):
 
         if matched is None:
             raise VegasProviderUnavailableError(
-                f"No SportsGameOdds MLB event matched {away_team_abbr}@{home_team_abbr} for {resolved_date}."
+                f"No {self.provider_name()} MLB event matched {away_team_abbr}@{home_team_abbr} for {resolved_date}."
             )
 
         consensus: ConsensusMarket = build_consensus(matched.books)
@@ -503,6 +510,10 @@ class SportsGameOddsVegasProvider(VegasProvider):
             game_status=resolved_status,
             is_frozen_pregame=False,
             vegas_projection_status=projection_status,
+            selected_provider=self.provider_name() if projection_status == "LIVE_PREGAME" else None,
+            fallback_used=False,
+            primary_provider_status=(coverage_module.VALID if projection_status == "LIVE_PREGAME" else None),
+            secondary_provider_status=None,
         )
 
     def get_vegas_line(
@@ -569,6 +580,241 @@ class SportsGameOddsVegasProvider(VegasProvider):
         NotConfiguredVegasProvider don't define it, so callers check
         `hasattr`/`getattr` defensively (see collector.py)."""
         return self._fetch_and_build_current(game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+
+
+class TheOddsAPIVegasProvider(SportsGameOddsVegasProvider):
+    """Milestone 27 -- SECONDARY/fallback Vegas provider. Deliberately a
+    thin subclass rather than a parallel implementation: the entire
+    fetch/match/consensus/implied-runs/pregame-lock pipeline in
+    SportsGameOddsVegasProvider is already provider-agnostic (it only
+    ever calls the injected `odds_provider`'s get_odds(), never
+    anything SportsGameOdds-specific) -- swapping in a
+    providers/theoddsapi.py::TheOddsAPIProvider instance and overriding
+    the display name is the whole difference. This guarantees the two
+    providers can never silently drift apart in how they build a
+    VegasSnapshot from normalized odds."""
+
+    name = "theoddsapi"
+
+    def provider_name(self) -> str:
+        return "The Odds API"
+
+
+@dataclass
+class _ProviderAttempt:
+    snapshot: Optional[VegasSnapshot]
+    status: str  # coverage_module.VALID | NOT_CONFIGURED | one of ALL_MISSING_REASONS
+
+
+class MultiProviderVegasProvider(VegasProvider):
+    """Milestone 27 -- tries PRIMARY (SportsGameOdds) first; only when
+    the primary does not produce a valid PREGAME market for a specific
+    game does it attempt SECONDARY (The Odds API), if configured. Never
+    blends one provider's moneyline with another's total -- each
+    provider independently produces a complete consensus (see
+    providers/consensus.py), and this class picks the single
+    highest-priority VALID one whole. If neither is valid, Vegas
+    contribution is ZERO for that game, with the exact reason recorded
+    (providers/coverage.py) rather than a bare "missing"."""
+
+    name = "multi_provider"
+
+    def __init__(
+        self,
+        primary: SportsGameOddsVegasProvider,
+        secondary: Optional[TheOddsAPIVegasProvider] = None,
+        snapshot_root=None,
+    ):
+        self._primary = primary
+        self._secondary = secondary
+        self._snapshot_root = snapshot_root
+
+    def provider_name(self) -> str:
+        if self._secondary is not None and self._secondary.is_configured():
+            return f"{self._primary.provider_name()} + {self._secondary.provider_name()} (fallback)"
+        return self._primary.provider_name()
+
+    def is_configured(self) -> bool:
+        return self._primary.is_configured() or (self._secondary is not None and self._secondary.is_configured())
+
+    def _attempt(
+        self,
+        provider: Optional[SportsGameOddsVegasProvider],
+        game_id: str,
+        home_team_abbr: str,
+        away_team_abbr: str,
+        slate_date: Optional[str],
+        mlb_game_status: Optional[str],
+    ) -> _ProviderAttempt:
+        """Reaches into SportsGameOddsVegasProvider's own
+        _fetch_and_build_current() -- an intentional same-module
+        "friend" call (see TheOddsAPIVegasProvider's docstring for why
+        that method is already fully provider-agnostic), so this class
+        never re-implements consensus/implied-runs logic a second time.
+        The provider-level exception message is pattern-matched (rather
+        than a richer exception type) only to distinguish "no event
+        matched" and "rate limited" from a generic provider error --
+        documented here as a known, pragmatic limitation rather than a
+        silent guess."""
+        if provider is None or not provider.is_configured():
+            return _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
+
+        try:
+            snapshot = provider._fetch_and_build_current(  # noqa: SLF001 -- same-module friend call, see docstring
+                game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status
+            )
+        except VegasProviderNotConfiguredError:
+            return _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
+        except VegasProviderUnavailableError as exc:
+            message = str(exc).lower()
+            if "event matched" in message:
+                return _ProviderAttempt(None, coverage_module.EVENT_NOT_MATCHED)
+            if "rate limit" in message or "quota" in message:
+                return _ProviderAttempt(None, coverage_module.PLAN_RESTRICTED)
+            return _ProviderAttempt(None, coverage_module.PROVIDER_ERROR)
+
+        if snapshot.game_status != game_status_module.PREGAME:
+            return _ProviderAttempt(snapshot, coverage_module.PREGAME_NOT_AVAILABLE)
+
+        has_total = snapshot.current_home.total is not None
+        has_moneyline = snapshot.current_home.moneyline is not None and snapshot.current_away.moneyline is not None
+        status = coverage_module.classify_missing_reason(
+            is_configured=True,
+            event_matched=True,
+            has_total=has_total,
+            has_moneyline=has_moneyline,
+            is_pregame=True,
+            provider_errored=False,
+            rate_limited=False,
+        )
+        if status == coverage_module.UNKNOWN and not snapshot.implied_runs_is_valid:
+            # Total + moneyline both present, but implied runs still
+            # couldn't be computed -- no run line was returned. Not one
+            # of the milestone's 7 named categories, so UNKNOWN is the
+            # honest classification (see coverage.py's own docstring).
+            return _ProviderAttempt(snapshot, coverage_module.UNKNOWN)
+        if status != coverage_module.UNKNOWN:
+            return _ProviderAttempt(snapshot, status)
+        return _ProviderAttempt(snapshot, coverage_module.VALID)
+
+    def get_vegas_line(
+        self,
+        game_id: str,
+        home_team_abbr: str,
+        away_team_abbr: str,
+        slate_date: Optional[str] = None,
+        mlb_game_status: Optional[str] = None,
+    ) -> VegasSnapshot:
+        resolved_date = slate_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        secondary = _ProviderAttempt(None, coverage_module.NOT_CONFIGURED)
+
+        selected_snapshot: Optional[VegasSnapshot] = None
+        selected_provider_name: Optional[str] = None
+        fallback_used = False
+
+        if primary.status == coverage_module.VALID:
+            selected_snapshot = primary.snapshot
+            selected_provider_name = self._primary.provider_name()
+        elif self._secondary is not None:
+            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+            if secondary.status == coverage_module.VALID:
+                selected_snapshot = secondary.snapshot
+                selected_provider_name = self._secondary.provider_name()
+                fallback_used = True
+
+        if selected_snapshot is not None:
+            selected_snapshot.selected_provider = selected_provider_name
+            selected_snapshot.fallback_used = fallback_used
+            selected_snapshot.primary_provider_status = primary.status
+            selected_snapshot.secondary_provider_status = secondary.status
+            selected_snapshot.missing_reason = None
+            return selected_snapshot
+
+        # Neither provider produced a valid PREGAME market right now --
+        # fall back to the last valid pregame snapshot EITHER provider
+        # already captured and saved today (same freeze mechanism as
+        # the single-provider path).
+        frozen = _resolve_last_valid_pregame(resolved_date, game_id, snapshot_root=self._snapshot_root)
+        if frozen is not None:
+            frozen.is_frozen_pregame = True
+            frozen.vegas_projection_status = "PREGAME_FROZEN"
+            frozen.primary_provider_status = primary.status
+            frozen.secondary_provider_status = secondary.status
+            return frozen
+
+        best_available = primary.snapshot or secondary.snapshot
+        resolved_game_status = best_available.game_status if best_available is not None else game_status_module.classify_mlb_game_status(mlb_game_status)
+        missing_reason = (
+            primary.status
+            if primary.status in coverage_module.ALL_MISSING_REASONS
+            else (secondary.status if secondary.status in coverage_module.ALL_MISSING_REASONS else coverage_module.UNKNOWN)
+        )
+
+        return VegasSnapshot(
+            game_id=game_id, home_team=home_team_abbr, away_team=away_team_abbr,
+            provider_name=self.provider_name(), is_mock=False, retrieved_at=_now(),
+            opening_home=VegasLine(), opening_away=VegasLine(), current_home=VegasLine(), current_away=VegasLine(),
+            home_implied_runs=None, away_implied_runs=None, total_movement=None, moneyline_movement_home=None,
+            event_id=best_available.event_id if best_available is not None else None,
+            implied_runs_is_valid=False,
+            validation_warnings=[
+                f"No valid pregame Vegas data from any configured provider "
+                f"(primary={primary.status}, secondary={secondary.status})."
+            ],
+            is_first_pull_of_day=False,
+            game_status=resolved_game_status,
+            is_frozen_pregame=False,
+            vegas_projection_status=("IN_PLAY_ONLY" if resolved_game_status == game_status_module.IN_PLAY else "MISSING"),
+            selected_provider=None,
+            fallback_used=False,
+            primary_provider_status=primary.status,
+            secondary_provider_status=secondary.status,
+            missing_reason=missing_reason,
+        )
+
+    def get_live_vegas_line(
+        self,
+        game_id: str,
+        home_team_abbr: str,
+        away_team_abbr: str,
+        slate_date: Optional[str] = None,
+        mlb_game_status: Optional[str] = None,
+    ) -> VegasSnapshot:
+        """Research/history display only (see SportsGameOddsVegasProvider's
+        own get_live_vegas_line docstring) -- ALWAYS returns the current
+        market snapshot regardless of pregame/in-play/final status.
+        Prefers the primary provider's raw current fetch whenever it
+        produced ANY event match; only falls back to the secondary's raw
+        fetch when the primary didn't even match the event."""
+        primary = self._attempt(self._primary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+        if primary.snapshot is not None:
+            primary.snapshot.selected_provider = self._primary.provider_name()
+            primary.snapshot.primary_provider_status = primary.status
+            return primary.snapshot
+
+        if self._secondary is not None:
+            secondary = self._attempt(self._secondary, game_id, home_team_abbr, away_team_abbr, slate_date, mlb_game_status)
+            if secondary.snapshot is not None:
+                secondary.snapshot.selected_provider = self._secondary.provider_name()
+                secondary.snapshot.fallback_used = True
+                secondary.snapshot.secondary_provider_status = secondary.status
+                return secondary.snapshot
+
+        return VegasSnapshot(
+            game_id=game_id, home_team=home_team_abbr, away_team=away_team_abbr,
+            provider_name=self.provider_name(), is_mock=False, retrieved_at=_now(),
+            opening_home=VegasLine(), opening_away=VegasLine(), current_home=VegasLine(), current_away=VegasLine(),
+            home_implied_runs=None, away_implied_runs=None, total_movement=None, moneyline_movement_home=None,
+            implied_runs_is_valid=False,
+            validation_warnings=[f"No event matched by any configured provider (primary={primary.status})."],
+            is_first_pull_of_day=False,
+            game_status=game_status_module.classify_mlb_game_status(mlb_game_status),
+            is_frozen_pregame=False,
+            vegas_projection_status="MISSING",
+            primary_provider_status=primary.status,
+        )
 
 
 def analyze_vegas_slate(snapshots: List[VegasSnapshot]) -> VegasSlateAnalysis:

@@ -25,8 +25,21 @@ export function VegasCoverageCard({ coverage }: { coverage: DkSlateVegasCoverage
           ? "No DK slate selected"
           : allCovered
             ? "ALL DK GAMES COVERED"
-            : `${coverage.coveragePercent.toFixed(0)}% -- ${coverage.dkGames - coverage.pregameCovered} GAME${coverage.dkGames - coverage.pregameCovered === 1 ? "" : "S"} MISSING`}
+            : `${coverage.coveragePercent.toFixed(0)}%`}
       </div>
+      {coverage.dkGames > 0 && (
+        <div className="mt-2 flex gap-3 text-[10px] text-text-faint">
+          <span>
+            Primary: <span className="text-text-muted">{coverage.primaryCovered}</span>
+          </span>
+          <span>
+            Fallback: <span className={coverage.fallbackCovered > 0 ? "text-accent" : "text-text-muted"}>{coverage.fallbackCovered}</span>
+          </span>
+          <span>
+            Missing: <span className={coverage.missing > 0 ? "text-red" : "text-text-muted"}>{coverage.missing}</span>
+          </span>
+        </div>
+      )}
     </Link>
   );
 }

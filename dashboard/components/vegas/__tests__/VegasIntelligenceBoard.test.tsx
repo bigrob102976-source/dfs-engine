@@ -67,7 +67,7 @@ function buildReport(): SlateEnvironmentReport {
 function renderBoard() {
   const report = buildReport();
   const rows = buildVegasGameRows(report.games, []);
-  const coverage = { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, games: [] };
+  const coverage = { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, primaryCovered: 0, fallbackCovered: 0, games: [] };
   return render(<VegasIntelligenceBoard report={report} rows={rows} history={[report]} coverage={coverage} />);
 }
 

@@ -6,10 +6,15 @@ each other on disk, mirroring the milestone's explicit separation rule.
     actual_ownership/
       YYYY-MM-DD/
         contest_<contest_id>_<timestamp>.json
-"""
+
+Milestone 27: `slate_id` is recorded on the document (never inferred --
+the caller must know which slate a contest export belongs to) so Main
+and Turbo actual-ownership imports are unambiguous even though the
+existing per-contest-id filename already keeps them physically separate
+on disk (a real DK contest ID is unique per contest/slate)."""
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from evaluation.actual_ownership_models import ActualOwnershipRecord, ContestMetadata
 from research.storage import save_json
@@ -24,11 +29,12 @@ def _no_overwrite(path: Path) -> None:
 
 def build_actual_ownership_document(
     slate_date: str, contest: ContestMetadata, format_used: str, warnings: List[str],
-    records: List[ActualOwnershipRecord],
+    records: List[ActualOwnershipRecord], slate_id: Optional[str] = None,
 ) -> dict:
     matched = sum(1 for r in records if r.match_status == "matched")
     return {
         "slate_date": slate_date,
+        "slate_id": slate_id,
         "contest": contest.to_dict(),
         "format_used": format_used,
         "import_warnings": warnings,

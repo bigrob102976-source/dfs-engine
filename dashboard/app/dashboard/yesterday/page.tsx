@@ -1,11 +1,21 @@
 import { MetricCard } from "@/components/ui/Card";
 import { PageHeader, SectionHeader } from "@/components/ui/Header";
+import { ImportContestResultsCard } from "@/components/results/ImportContestResultsCard";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
 import { buildYesterdaySummary } from "@/lib/yesterday";
 
 function fmt(v: number | null, digits = 2): string {
   return v === null ? "n/a" : v.toFixed(digits);
 }
+
+// Milestone 27: canonical source labels -- never a bare source key.
+const SOURCE_LABEL: Record<string, string> = {
+  independent: "Legacy",
+  external: "BlueCollar",
+  adjusted: "BlueCollar (Adjusted)",
+  native: "Big Money Native",
+  ai: "Big Money AI",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +87,10 @@ export default function YesterdayPage() {
         <MissCard title="Worst Chalk Miss" record={s.worstChalkMiss} />
       </div>
 
+      <div className="mt-4">
+        <ImportContestResultsCard date={s.date} slateId={null} />
+      </div>
+
       {projectionComparison && projectionComparison.metrics.length > 0 && (
         <div className="mt-6">
           <SectionHeader title="Projection Source Performance" />
@@ -97,7 +111,7 @@ export default function YesterdayPage() {
               <tbody>
                 {projectionComparison.metrics.map((m) => (
                   <tr key={m.source} className="border-t border-border-subtle">
-                    <td className={`py-1.5 capitalize ${m.source === "ai" ? "font-semibold text-purple" : "text-text"}`}>{m.source}</td>
+                    <td className={`py-1.5 ${m.source === "ai" ? "font-semibold text-purple" : "text-text"}`}>{SOURCE_LABEL[m.source] ?? m.source}</td>
                     <td className="py-1.5 text-right text-text-muted">{m.n}</td>
                     <td className={`py-1.5 text-right font-semibold ${m.source === "ai" ? "text-purple" : "text-text"}`}>{fmt(m.mae)}</td>
                     <td className="py-1.5 text-right text-text-muted">{fmt(m.rmse)}</td>

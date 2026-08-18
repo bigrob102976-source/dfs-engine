@@ -4,7 +4,7 @@ import { getAiProjectionByPlayerId } from "../aiProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { buildDkSlateVegasCoverage } from "../dkVegasCoverage";
 import { safeReadJson } from "../discovery";
-import { getProjectionComparisonByPlayerId } from "../externalProjections";
+import { getProjectionComparisonByPlayerId, loadLatestBaselineSnapshot } from "../externalProjections";
 import { loadLatestEnvironmentReport } from "../gameEnvironment";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
@@ -186,6 +186,12 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     slateGames: typeof matchReport?.dk_games_total === "number" ? (matchReport.dk_games_total as number) : 0,
     rosterFeasibilityPass: pool?.roster_feasibility_pass ?? false,
     hasExternalProjections: comparisonByPlayerId.size > 0,
+    // Milestone 27: the active external baseline's OWN provider_name
+    // (e.g. "BlueCollar DFS", "MOCK EXTERNAL PROJECTIONS") -- so the
+    // dashboard can label this slot honestly ("BlueCollar" vs "External
+    // Other") instead of a bare, ambiguous "External." null whenever no
+    // baseline is loaded at all (hasExternalProjections is also false then).
+    externalProviderName: loadLatestBaselineSnapshot(entry.date)?.provider_name ?? null,
     hasAiProjections: aiByPlayerId.size > 0,
     hasNativeProjections: nativeByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,

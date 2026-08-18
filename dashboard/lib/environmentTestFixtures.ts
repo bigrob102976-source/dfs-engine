@@ -74,6 +74,11 @@ export function buildGameEnvironmentReport(overrides: Partial<GameEnvironmentRep
       game_status: "PREGAME",
       is_frozen_pregame: false,
       vegas_projection_status: "LIVE_PREGAME",
+      selected_provider: "MOCK VEGAS",
+      fallback_used: false,
+      primary_provider_status: "VALID",
+      secondary_provider_status: null,
+      missing_reason: null,
     },
     ballpark: {
       team_abbr: "DET",

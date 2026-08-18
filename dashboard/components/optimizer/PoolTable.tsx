@@ -24,10 +24,12 @@ const COLUMNS: Column[] = [
   { key: "opponent", label: "Opp", sortKey: "opponent" },
   { key: "battingOrder", label: "Ord", sortKey: "battingOrder", align: "right" },
   { key: "salary", label: "Salary", sortKey: "salary", align: "right" },
-  { key: "projection", label: "Proj", sortKey: "projection", align: "right" },
+  { key: "projection", label: "Legacy", sortKey: "projection", align: "right" },
   { key: "ceiling", label: "Ceil", sortKey: "ceiling", align: "right" },
   { key: "value", label: "Value", sortKey: "value", align: "right" },
-  { key: "aiProjection", label: "AI Proj", sortKey: "aiProjection", align: "right" },
+  { key: "nativeProjection", label: "BM Native", sortKey: "nativeProjection", align: "right" },
+  { key: "nativeDelta", label: "Native Δ", sortKey: "nativeDelta", align: "right" },
+  { key: "aiProjection", label: "BM AI", sortKey: "aiProjection", align: "right" },
   { key: "aiDelta", label: "AI Δ", sortKey: "aiDelta", align: "right" },
   { key: "aiConfidence", label: "AI Conf", sortKey: "aiConfidence", align: "right" },
   { key: "aiGrade", label: "AI Grade", sortKey: "aiGrade", align: "right" },
@@ -42,9 +44,9 @@ const COLUMNS: Column[] = [
 // right after "Proj" only when the caller (OptimizerWorkspace) has
 // "Show comparison columns" checked.
 const COMPARISON_COLUMNS: Column[] = [
-  { key: "externalProjection", label: "Ext", sortKey: "externalProjection", align: "right" },
-  { key: "adjustedProjection", label: "Adj", sortKey: "adjustedProjection", align: "right" },
-  { key: "adjustmentDelta", label: "Δ", sortKey: "adjustmentDelta", align: "right" },
+  { key: "externalProjection", label: "BlueCollar", sortKey: "externalProjection", align: "right" },
+  { key: "adjustedProjection", label: "BC Adj", sortKey: "adjustedProjection", align: "right" },
+  { key: "adjustmentDelta", label: "BC Δ", sortKey: "adjustmentDelta", align: "right" },
 ];
 
 function fmt(v: number | null, digits = 1): string {
@@ -213,6 +215,10 @@ export function PoolTable({
                   )}
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.ceiling)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.value, 2)}</td>
+                  <td className="px-2 py-1 text-right text-purple">{fmt(p.nativeProjection)}</td>
+                  <td className={`px-2 py-1 text-right ${p.nativeDelta !== null && p.nativeDelta >= 0 ? "text-green" : p.nativeDelta !== null ? "text-red" : "text-text-muted"}`}>
+                    {p.nativeDelta !== null ? `${p.nativeDelta >= 0 ? "+" : ""}${fmt(p.nativeDelta, 2)}` : "--"}
+                  </td>
                   <td className="px-2 py-1 text-right text-purple">{fmt(p.aiProjection)}</td>
                   <td className={`px-2 py-1 text-right ${p.aiDelta !== null && p.aiDelta >= 0 ? "text-green" : p.aiDelta !== null ? "text-red" : "text-text-muted"}`}>
                     {p.aiDelta !== null ? `${p.aiDelta >= 0 ? "+" : ""}${fmt(p.aiDelta, 2)}` : "--"}

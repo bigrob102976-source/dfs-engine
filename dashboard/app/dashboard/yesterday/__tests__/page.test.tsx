@@ -73,11 +73,11 @@ describe("YesterdayPage (Milestone: Projection Source Performance table)", () =>
 
     expect(screen.getByText("Projection Source Performance")).toBeInTheDocument();
     const table = screen.getByText("Projection Source Performance").closest("div")!.parentElement!;
-    expect(table.textContent).toContain("independent");
+    expect(table.textContent).toContain("Legacy");
     expect(table.textContent).toContain("7.54");
-    expect(table.textContent).toContain("external");
+    expect(table.textContent).toContain("BlueCollar");
     expect(table.textContent).toContain("7.01");
-    expect(table.textContent).toContain("ai");
+    expect(table.textContent).toContain("Big Money AI");
     expect(table.textContent).toContain("6.82");
     expect(screen.getByText("+9.5%")).toBeInTheDocument();
   });

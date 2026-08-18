@@ -9,7 +9,7 @@ import { loadEnvironmentReportHistory, loadLatestEnvironmentReport } from "@/lib
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { loadLatestDkMatchReport, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { effectiveGameIds, filterByGameIdField, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
-import { buildVegasGameRows } from "@/lib/vegasIntelligence";
+import { buildVegasGameRows, recomputeVegasSlateAnalysis } from "@/lib/vegasIntelligence";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,12 @@ export default async function VegasPage(props: PageProps<"/dashboard/vegas">) {
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
   const fullDayReport = loadLatestEnvironmentReport(date);
-  const report = fullDayReport ? { ...fullDayReport, games: filterByGameIdField(fullDayReport.games, gameIds) } : null;
+  const report = fullDayReport
+    ? (() => {
+        const games = filterByGameIdField(fullDayReport.games, gameIds);
+        return { ...fullDayReport, games, vegas_slate_analysis: recomputeVegasSlateAnalysis(games) };
+      })()
+    : null;
   const status = await getGameEnvironmentStatus(date);
 
   if ("error" in status) {

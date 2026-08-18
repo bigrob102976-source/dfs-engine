@@ -429,43 +429,44 @@ describe("OptimizerWorkspace", () => {
     const POOL_WITH_COMPARISON = {
       ...POOL_RESULT,
       hasExternalProjections: true,
+      externalProviderName: "BlueCollar DFS",
       players: [
         { ...POOL_RESULT.players[0], externalProjection: 9.2, adjustedProjection: 10.6, adjustmentDelta: 0.6, adjustmentPercent: 6.0, adjustmentReasons: ["positive recent hard-hit trend"] },
         { ...POOL_RESULT.players[1], externalProjection: 18.5, adjustedProjection: 20.3, adjustmentDelta: 0.3, adjustmentPercent: 1.5, adjustmentReasons: [] },
       ],
     };
 
-    it("External and Adjusted External are disabled when the pool has no external projection data", async () => {
+    it("BlueCollar and BlueCollar (Adjusted) are disabled when the pool has no external projection data", async () => {
       installFetchMock();
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "External" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Adjusted External" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Independent / Legacy" })).toBeEnabled();
-      expect(screen.getByText("External projection provider not connected.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "BlueCollar" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "BlueCollar (Adjusted)" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Legacy" })).toBeEnabled();
+      expect(screen.getByText(/BlueCollar not loaded/)).toBeInTheDocument();
     });
 
-    it("falls back to Independent / Legacy when the slate has no native data (native is the default, but this fixture has none)", async () => {
+    it("falls back to Legacy when the slate has no native data (native is the default, but this fixture has none)", async () => {
       installFetchMock();
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Independent / Legacy" })).toHaveAttribute("aria-pressed", "true"),
+        expect(screen.getByRole("button", { name: "Legacy" })).toHaveAttribute("aria-pressed", "true"),
       );
     });
 
-    it("enables External / Adjusted External when the pool has comparison data, and switching sources is reflected in the build request", async () => {
+    it("enables BlueCollar / BlueCollar (Adjusted) when the pool has comparison data, and switching sources is reflected in the build request", async () => {
       const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_COMPARISON }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "External" })).toBeEnabled();
-      expect(screen.getByRole("button", { name: "Adjusted External" })).toBeEnabled();
-      expect(screen.queryByText("External projection provider not connected.")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "BlueCollar" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "BlueCollar (Adjusted)" })).toBeEnabled();
+      expect(screen.queryByText(/BlueCollar not loaded/)).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Adjusted External" }));
-      expect(screen.getByRole("button", { name: "Adjusted External" })).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(screen.getByRole("button", { name: "BlueCollar (Adjusted)" }));
+      expect(screen.getByRole("button", { name: "BlueCollar (Adjusted)" })).toHaveAttribute("aria-pressed", "true");
 
       await waitFor(() => {
         const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
@@ -480,9 +481,9 @@ describe("OptimizerWorkspace", () => {
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.queryByRole("columnheader", { name: "Ext" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "BlueCollar" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByLabelText("Show comparison columns"));
-      expect(screen.getByRole("columnheader", { name: "Ext" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "BlueCollar" })).toBeInTheDocument();
     });
   });
 
@@ -501,8 +502,8 @@ describe("OptimizerWorkspace", () => {
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "AI Big Money DFS" })).toBeDisabled();
-      expect(screen.getByText(/AI Big Money DFS not generated yet/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Big Money AI" })).toBeDisabled();
+      expect(screen.getByText(/Big Money AI not generated yet/)).toBeInTheDocument();
     });
 
     it("enables AI Projection when the pool has AI data, and selecting it is reflected in the build request", async () => {
@@ -510,9 +511,9 @@ describe("OptimizerWorkspace", () => {
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "AI Big Money DFS" })).toBeEnabled();
-      fireEvent.click(screen.getByRole("button", { name: "AI Big Money DFS" }));
-      expect(screen.getByRole("button", { name: "AI Big Money DFS" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Big Money AI" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Big Money AI" }));
+      expect(screen.getByRole("button", { name: "Big Money AI" })).toHaveAttribute("aria-pressed", "true");
 
       await waitFor(() => {
         const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
@@ -522,21 +523,21 @@ describe("OptimizerWorkspace", () => {
       });
     });
 
-    it("falls back to Independent / Legacy if the selected slate has no AI data", async () => {
+    it("falls back to Legacy if the selected slate has no AI data", async () => {
       installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
-      fireEvent.click(screen.getByRole("button", { name: "AI Big Money DFS" }));
-      expect(screen.getByRole("button", { name: "AI Big Money DFS" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "Independent / Legacy" })).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(screen.getByRole("button", { name: "Big Money AI" }));
+      expect(screen.getByRole("button", { name: "Big Money AI" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Legacy" })).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("the player table always shows AI Proj/AI Δ/AI Conf/AI Grade columns", async () => {
+    it("the player table always shows BM AI/AI Δ/AI Conf/AI Grade columns", async () => {
       installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("columnheader", { name: "AI Proj" })).toBeInTheDocument();
+      expect(screen.getByRole("columnheader", { name: "BM AI" })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: "AI Conf" })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: "AI Grade" })).toBeInTheDocument();
@@ -553,30 +554,30 @@ describe("OptimizerWorkspace", () => {
       ],
     };
 
-    it("Native Big Money DFS is the default selection when the pool has native data (Milestone 23)", async () => {
+    it("Big Money Native is the default selection when the pool has native data (Milestone 23)", async () => {
       installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_NATIVE }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
-      expect(screen.getByRole("button", { name: "Native Big Money DFS" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Big Money Native" })).toHaveAttribute("aria-pressed", "true");
     });
 
-    it("Native Big Money DFS is disabled and shows a not-generated message when the pool has no native data", async () => {
+    it("Big Money Native is disabled and shows a not-generated message when the pool has no native data", async () => {
       installFetchMock();
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "Native Big Money DFS" })).toBeDisabled();
-      expect(screen.getByText(/Native Big Money DFS not generated yet/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Big Money Native" })).toBeDisabled();
+      expect(screen.getByText(/Big Money Native not generated yet/)).toBeInTheDocument();
     });
 
-    it("enables Native Big Money DFS when the pool has native data, and selecting it is reflected in the build request", async () => {
+    it("enables Big Money Native when the pool has native data, and selecting it is reflected in the build request", async () => {
       const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_NATIVE }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
 
-      expect(screen.getByRole("button", { name: "Native Big Money DFS" })).toBeEnabled();
-      fireEvent.click(screen.getByRole("button", { name: "Native Big Money DFS" }));
-      expect(screen.getByRole("button", { name: "Native Big Money DFS" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Big Money Native" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Big Money Native" }));
+      expect(screen.getByRole("button", { name: "Big Money Native" })).toHaveAttribute("aria-pressed", "true");
 
       await waitFor(() => {
         const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
@@ -586,13 +587,13 @@ describe("OptimizerWorkspace", () => {
       });
     });
 
-    it("falls back to Independent / Legacy if the selected slate has no native data", async () => {
+    it("falls back to Legacy if the selected slate has no native data", async () => {
       installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_NATIVE }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
-      fireEvent.click(screen.getByRole("button", { name: "Native Big Money DFS" }));
-      expect(screen.getByRole("button", { name: "Native Big Money DFS" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "Independent / Legacy" })).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(screen.getByRole("button", { name: "Big Money Native" }));
+      expect(screen.getByRole("button", { name: "Big Money Native" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Legacy" })).toHaveAttribute("aria-pressed", "false");
     });
   });
 });

@@ -111,6 +111,11 @@ export interface OptimizerPoolResult {
   salaryCap: number;
   hasOwnership: boolean;
   hasExternalProjections: boolean;
+  // Milestone 27: the active external baseline's real provider_name
+  // (e.g. "BlueCollar DFS"), or null when none is loaded -- lets the UI
+  // label this slot honestly (BLUECOLLAR vs a generic external source)
+  // instead of a bare "External."
+  externalProviderName: string | null;
   hasAiProjections: boolean;
   hasNativeProjections: boolean;
   vegasCoverage: DkSlateVegasCoverage;

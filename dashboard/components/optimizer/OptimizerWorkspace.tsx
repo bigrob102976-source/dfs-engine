@@ -7,6 +7,7 @@ import { MissingDataState } from "@/components/MissingDataState";
 import { PrimaryButton } from "@/components/ui/Button";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
+import { resolveExternalSourceLabel } from "@/lib/projectionLabels";
 import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
 import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
 
@@ -365,6 +366,7 @@ export function OptimizerWorkspace() {
   }
 
   const selectedSlate = slates.find((s) => s.slateId === selectedSlateId) ?? null;
+  const externalSourceLabel = resolveExternalSourceLabel(pool?.externalProviderName ?? null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -440,20 +442,25 @@ export function OptimizerWorkspace() {
         </div>
       </div>
 
-      {/* Milestone 17/23: PROJECTION SOURCE SELECTOR. Reordered/relabeled
-          per Milestone 23: Native and AI (Big Money's own model-driven
-          sources) lead, External/Adjusted External follow, Independent /
-          Legacy (the original Milestone 2-era scoring baseline) is last. */}
+      {/* Milestone 17/23/27: PROJECTION SOURCE SELECTOR. Native and AI
+          (Big Money's own model-driven sources) lead, BlueCollar/BlueCollar
+          (Adjusted) follow, Legacy (the original Milestone 2-era scoring
+          baseline) is last. Milestone 27: every label is now unambiguous
+          (see lib/projectionLabels.ts) -- "external"/"adjusted" no longer
+          show a bare "External," they show "BlueCollar" when the loaded
+          baseline really is BlueCollar, or the honest "External Other"
+          when it's some other (e.g. mock) provider -- never presenting
+          one provider's data as if it were another's. */}
       <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border border-border bg-bg-panel p-3 shadow-[var(--shadow-card)]">
         <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Projection Source</span>
         <div className="flex gap-1" role="group" aria-label="Projection Source">
           {(
             [
-              { value: "native" as ProjectionSource, label: "Native Big Money DFS" },
-              { value: "ai" as ProjectionSource, label: "AI Big Money DFS" },
-              { value: "external" as ProjectionSource, label: "External" },
-              { value: "adjusted" as ProjectionSource, label: "Adjusted External" },
-              { value: "independent" as ProjectionSource, label: "Independent / Legacy" },
+              { value: "native" as ProjectionSource, label: "Big Money Native" },
+              { value: "ai" as ProjectionSource, label: "Big Money AI" },
+              { value: "external" as ProjectionSource, label: externalSourceLabel },
+              { value: "adjusted" as ProjectionSource, label: `${externalSourceLabel} (Adjusted)` },
+              { value: "independent" as ProjectionSource, label: "Legacy" },
             ]
           ).map((opt) => {
             const disabled =
@@ -480,12 +487,12 @@ export function OptimizerWorkspace() {
             );
           })}
         </div>
-        {!pool?.hasExternalProjections && <span className="text-[11px] text-text-faint">External projection provider not connected.</span>}
+        {!pool?.hasExternalProjections && <span className="text-[11px] text-text-faint">{externalSourceLabel} not loaded -- import via Results / Projection Import Center.</span>}
         {!pool?.hasAiProjections && (
-          <span className="text-[11px] text-text-faint">AI Big Money DFS not generated yet -- run scripts/run_ai_projection_engine.py.</span>
+          <span className="text-[11px] text-text-faint">Big Money AI not generated yet -- run scripts/run_ai_projection_engine.py.</span>
         )}
         {!pool?.hasNativeProjections && (
-          <span className="text-[11px] text-text-faint">Native Big Money DFS not generated yet -- run scripts/run_native_projection_engine.py.</span>
+          <span className="text-[11px] text-text-faint">Big Money Native not generated yet -- run scripts/run_native_projection_engine.py.</span>
         )}
 
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">

@@ -24,6 +24,12 @@ export interface DkSlateGameCoverage {
   consensusTotal: number | null;
   awayImplied: number | null;
   homeImplied: number | null;
+  // Milestone 27: multi-provider provenance, straight from VegasSnapshot.
+  selectedProvider: string | null;
+  fallbackUsed: boolean;
+  primaryProviderStatus: string | null;
+  secondaryProviderStatus: string | null;
+  missingReason: string | null;
 }
 
 export interface DkSlateVegasCoverage {
@@ -35,6 +41,12 @@ export interface DkSlateVegasCoverage {
   invalid: number;
   notMatched: number;
   coveragePercent: number;
+  // Milestone 27: split of `pregameCovered` by which provider actually
+  // supplied it -- "Primary Covered" (SportsGameOdds, never a fallback)
+  // vs "Fallback Covered" (The Odds API stepped in). primaryCovered +
+  // fallbackCovered === pregameCovered always.
+  primaryCovered: number;
+  fallbackCovered: number;
   games: DkSlateGameCoverage[];
 }
 
@@ -46,7 +58,7 @@ interface RawDkGameMatch {
 }
 
 function emptyCoverage(): DkSlateVegasCoverage {
-  return { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, games: [] };
+  return { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, primaryCovered: 0, fallbackCovered: 0, games: [] };
 }
 
 function findGame(report: SlateEnvironmentReport | null, gameId: string): GameEnvironmentReport | null {
@@ -91,6 +103,11 @@ export function buildDkSlateVegasCoverage(
         consensusTotal: null,
         awayImplied: null,
         homeImplied: null,
+        selectedProvider: null,
+        fallbackUsed: false,
+        primaryProviderStatus: null,
+        secondaryProviderStatus: null,
+        missingReason: null,
       };
     }
 
@@ -113,6 +130,11 @@ export function buildDkSlateVegasCoverage(
       consensusTotal: vegas?.current_home.total ?? null,
       awayImplied: vegas?.away_implied_runs ?? null,
       homeImplied: vegas?.home_implied_runs ?? null,
+      selectedProvider: vegas?.selected_provider ?? null,
+      fallbackUsed: vegas?.fallback_used ?? false,
+      primaryProviderStatus: vegas?.primary_provider_status ?? null,
+      secondaryProviderStatus: vegas?.secondary_provider_status ?? null,
+      missingReason: vegas?.missing_reason ?? null,
     };
   });
 
@@ -126,6 +148,9 @@ export function buildDkSlateVegasCoverage(
   const notMatched = games.filter((g) => g.vegasStatus === "NOT_MATCHED").length;
   const missing = games.filter((g) => g.vegasStatus === "MISSING").length;
   const pregameCovered = livePregame + frozen;
+  const coveredGames = games.filter((g) => g.vegasStatus === "LIVE_PREGAME" || g.vegasStatus === "PREGAME_FROZEN");
+  const fallbackCovered = coveredGames.filter((g) => g.fallbackUsed).length;
+  const primaryCovered = coveredGames.length - fallbackCovered;
 
   return {
     dkGames,
@@ -136,6 +161,8 @@ export function buildDkSlateVegasCoverage(
     invalid,
     notMatched,
     coveragePercent: dkGames > 0 ? Math.round((pregameCovered / dkGames) * 1000) / 10 : 0,
+    primaryCovered,
+    fallbackCovered,
     games,
   };
 }

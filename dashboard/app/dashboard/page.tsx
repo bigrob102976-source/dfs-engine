@@ -51,6 +51,7 @@ import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
 import { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildStackSummaries } from "@/lib/stacks";
+import { recomputeVegasSlateAnalysis } from "@/lib/vegasIntelligence";
 import { buildYesterdaySummary, findLatestEvaluatedDate } from "@/lib/yesterday";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,10 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const ownership = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
   const fullDayEnvironmentReport = loadLatestEnvironmentReport(date);
   const environmentReport = fullDayEnvironmentReport
-    ? { ...fullDayEnvironmentReport, games: filterByGameIdField(fullDayEnvironmentReport.games, gameIds) }
+    ? (() => {
+        const games = filterByGameIdField(fullDayEnvironmentReport.games, gameIds);
+        return { ...fullDayEnvironmentReport, games, vegas_slate_analysis: recomputeVegasSlateAnalysis(games) };
+      })()
     : null;
   const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
   const providerSlate = loadLatestProviderSlate(date).data;

@@ -73,15 +73,15 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
       <h3 className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Projection Comparison</h3>
 
       <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
-        <dt className="text-text-faint">External Baseline</dt>
-        <dd className="text-right text-text">{fmt(player.externalProjection)}</dd>
-        <dt className="text-text-faint">Big Money Independent</dt>
+        <dt className="text-text-faint">BlueCollar</dt>
+        <dd className="text-right text-text">{player.externalProjection === null ? "NOT LOADED" : fmt(player.externalProjection)}</dd>
+        <dt className="text-text-faint">Legacy</dt>
         <dd className="text-right text-text">{fmt(player.projection)}</dd>
-        <dt className="text-text-faint">Big Money Adjusted</dt>
-        <dd className="text-right text-text">{fmt(player.adjustedProjection)}</dd>
+        <dt className="text-text-faint">BlueCollar (Adjusted)</dt>
+        <dd className="text-right text-text">{player.adjustedProjection === null ? "NOT LOADED" : fmt(player.adjustedProjection)}</dd>
       </dl>
 
-      {!hasComparison && <p className="mt-3 text-xs text-text-faint">No external projection data available for this player.</p>}
+      {!hasComparison && <p className="mt-3 text-xs text-text-faint">BlueCollar: NOT LOADED for this player.</p>}
 
       {player.adjustedProjection !== null && player.adjustmentDelta !== null && (
         <div className="mt-4 border-t border-border-subtle pt-3">
@@ -111,7 +111,7 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
           component so it's clear WHY the projection is what it is. */}
       {hasNative && (
         <div className="mt-4 border-t border-border-subtle pt-3">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">Big Money DFS Projection</h3>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">Big Money Native</h3>
 
           <div className="mt-1 grid grid-cols-4 gap-2 text-center">
             <div className="rounded border border-border-subtle p-1.5">
@@ -189,7 +189,7 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
       )}
       {!hasNative && (
         <div className="mt-4 border-t border-border-subtle pt-3">
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">Big Money DFS Projection</h3>
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">Big Money Native</h3>
           <p className="text-xs text-text-faint">No Native Projection generated yet for this player -- run scripts/run_native_projection_engine.py.</p>
         </div>
       )}
@@ -200,17 +200,21 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
           with every signal contribution and reason shown here. */}
       {hasAi && (
         <div className="mt-4 border-t border-border-subtle pt-3">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">AI Projection Engine</h3>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-purple">Big Money AI</h3>
 
+          {/* Legacy/BlueCollar/BlueCollar (Adjusted) already shown above
+              in "Projection Comparison" -- this section adds only its
+              OWN unique value (Big Money AI's delta from Native) rather
+              than re-listing the same three baseline numbers twice. */}
           <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
-            <dt className="text-text-faint">Independent Projection</dt>
-            <dd className="text-right text-text">{fmt(player.projection)}</dd>
-            <dt className="text-text-faint">External Projection</dt>
-            <dd className="text-right text-text">{fmt(player.externalProjection)}</dd>
-            <dt className="text-text-faint">Adjusted Projection</dt>
-            <dd className="text-right text-text">{fmt(player.adjustedProjection)}</dd>
-            <dt className="font-semibold text-purple">AI Projection</dt>
+            <dt className="font-semibold text-purple">Big Money AI (Final)</dt>
             <dd className="text-right font-semibold text-purple">{fmt(player.aiProjection)}</dd>
+            <dt className="text-text-faint">Delta from Native</dt>
+            <dd className={`text-right font-semibold ${player.nativeProjection !== null && player.aiProjection !== null ? ((player.aiProjection - player.nativeProjection) >= 0 ? "text-green" : "text-red") : "text-text-muted"}`}>
+              {player.nativeProjection !== null && player.aiProjection !== null
+                ? `${player.aiProjection - player.nativeProjection >= 0 ? "+" : ""}${(player.aiProjection - player.nativeProjection).toFixed(1)}`
+                : "--"}
+            </dd>
           </dl>
 
           <div className="mt-3 grid grid-cols-4 gap-2 text-center">
@@ -275,7 +279,7 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
       )}
       {!hasAi && (
         <div className="mt-4 border-t border-border-subtle pt-3">
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">AI Projection Engine</h3>
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">Big Money AI</h3>
           <p className="text-xs text-text-faint">No AI Projection generated yet for this player -- run scripts/run_ai_projection_engine.py.</p>
         </div>
       )}

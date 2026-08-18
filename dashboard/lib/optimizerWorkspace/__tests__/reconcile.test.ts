@@ -68,6 +68,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     pitcherCount: 0,
     hitterCount: 0,
     hasExternalProjections: false,
+    externalProviderName: null,
     hasAiProjections: false,
     hasNativeProjections: false,
     confirmedLineupGames: 0,
@@ -77,7 +78,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     rosterFeasibilityPass: true,
     salaryCap: 50000,
     hasOwnership: false,
-    vegasCoverage: { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, games: [] },
+    vegasCoverage: { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, primaryCovered: 0, fallbackCovered: 0, games: [] },
   };
 }
 
