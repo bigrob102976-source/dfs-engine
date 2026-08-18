@@ -104,6 +104,17 @@ def test_print_pool_report_does_not_crash(tmp_path, capsys):
     assert "Roster feasibility" in captured.out
 
 
+def test_build_pool_reports_identity_integrity_summary(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    result = build_pool(_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+    integrity = result.report["identity_integrity"]
+    assert integrity["total"] == 2
+    assert integrity["invalid"] == 0
+    assert integrity["invalid_rows"] == []
+    assert len(result.integrity_results) == 2
+
+
 def test_provider_players_to_dk_rows_conversion():
     provider_players = [
         {"external_player_id": "mock-1", "name": "X", "team": "AAA", "salary": 5000,

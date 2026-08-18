@@ -61,11 +61,20 @@ def build_dfs_players(
         team, opponent = _team_and_opponent(dk_row, dk_game_match)
         player_type = match.player_type or "hitter"
 
+        # Milestone 27.3: game_id must come from THIS row's own resolved
+        # slate matchup (team+opponent, from DK's own Game Info string),
+        # never from the matched MLB player's canonical record. Those can
+        # disagree -- e.g. a name-only match (Tier 4 in player_resolver.py)
+        # attaching the wrong real player's identity to this row would
+        # otherwise also silently borrow that player's own game_id/team
+        # pairing, even though the DK row itself says a different game
+        # (confirmed real: a "Max Muncy" DK row on LAD inheriting the
+        # canonical Max Muncy's ATH@KC game_id instead of LAD@COL's).
         game_id = None
-        if match.match_status == "matched" and match.mlb_player_id in canonical_by_id:
-            game_id = canonical_by_id[match.mlb_player_id].game_id
-        elif dk_game_match and dk_game_match.status == "matched":
+        if dk_game_match and dk_game_match.status == "matched":
             game_id = dk_game_match.research_game_id
+        elif match.match_status == "matched" and match.mlb_player_id in canonical_by_id:
+            game_id = canonical_by_id[match.mlb_player_id].game_id
 
         projection_record = None
         if match.match_status == "matched":

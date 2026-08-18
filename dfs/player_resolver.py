@@ -70,10 +70,34 @@ def build_canonical_by_id(index: CanonicalIndex) -> Dict[str, CanonicalPlayer]:
     return by_id
 
 
+PITCHER_DK_POSITIONS = frozenset({"P", "SP", "RP"})
+
+
 def _infer_player_type_from_dk_positions(dk_positions: List[str]) -> Optional[str]:
+    """DraftKings position eligibility is authoritative for DFS player
+    type (see dfs/player_pool.py's module docstring / Milestone 27.3).
+    The 'Position' column DraftKings actually exports uses SP/RP, not a
+    bare 'P' (that only ever appears in 'Roster Position') -- checking
+    for literal 'P' membership here mis-classified every SP/RP row as a
+    hitter whenever the row had no canonical research match to inherit
+    player_type from instead (the bug M27.3 fixes)."""
     if not dk_positions:
         return None
-    return "pitcher" if "P" in dk_positions else "hitter"
+    return "pitcher" if PITCHER_DK_POSITIONS.intersection(dk_positions) else "hitter"
+
+
+def _dk_cross_team_names(dk_rows: List[DKSalaryRow]) -> set:
+    """Normalized names that appear on more than one DISTINCT DK team
+    within this same slate. When a name collides across teams (e.g. two
+    different DraftKings rows both named "Max Muncy", one on each of two
+    different teams -- confirmed real in M27.3's live slate), Tier 4's
+    name-only fallback below cannot safely tell them apart and must not
+    guess; a genuine team-abbreviation-alias case (the one Tier 4 exists
+    for) only ever has ONE DK team for that name in the raw slate."""
+    teams_by_name: Dict[str, set] = {}
+    for row in dk_rows:
+        teams_by_name.setdefault(normalize_name(row.name), set()).add(normalize_dk_team_abbr(row.team_abbrev))
+    return {name for name, teams in teams_by_name.items() if len(teams) > 1}
 
 
 def resolve_player(
@@ -82,12 +106,26 @@ def resolve_player(
     name_only_index: Dict[str, List[CanonicalPlayer]],
     crosswalk: Optional[Dict[str, str]] = None,
     canonical_by_id: Optional[Dict[str, CanonicalPlayer]] = None,
+    dk_cross_team_names: Optional[set] = None,
 ) -> PlayerMatch:
     crosswalk = crosswalk or {}
     canonical_by_id = canonical_by_id or {}
+    dk_cross_team_names = dk_cross_team_names or set()
     normalized = normalize_name(dk_row.name)
     research_team = normalize_dk_team_abbr(dk_row.team_abbrev)
-    fallback_player_type = _infer_player_type_from_dk_positions(dk_row.dk_positions)
+
+    # Milestone 27.3: DK position eligibility is THE authority for
+    # player_type, full stop -- never the matched research record's own
+    # classification (which reflects MLB defensive position / which
+    # board the player happened to appear on, not DK roster eligibility).
+    # A matched canonical record only fills in player_type on the rare
+    # row where DK supplied no position data at all.
+    dk_player_type = _infer_player_type_from_dk_positions(dk_row.dk_positions)
+
+    def _effective_player_type(canonical: Optional[CanonicalPlayer]) -> Optional[str]:
+        if dk_player_type is not None:
+            return dk_player_type
+        return canonical.player_type if canonical else None
 
     base = dict(dk_player_id=dk_row.dk_player_id, dk_name=dk_row.name, dk_team=dk_row.team_abbrev)
 
@@ -97,7 +135,7 @@ def resolve_player(
         canonical = canonical_by_id.get(mlb_id)
         return PlayerMatch(
             **base, match_status="matched", mlb_player_id=mlb_id, match_confidence="explicit_crosswalk",
-            player_type=canonical.player_type if canonical else fallback_player_type,
+            player_type=_effective_player_type(canonical),
         )
 
     # Tiers 2/3: exact normalized name + team.
@@ -105,24 +143,28 @@ def resolve_player(
     if len(candidates) == 1:
         c = candidates[0]
         return PlayerMatch(**base, match_status="matched", mlb_player_id=c.mlb_player_id,
-                            match_confidence="name_team_exact", player_type=c.player_type)
+                            match_confidence="name_team_exact", player_type=_effective_player_type(c))
     if len(candidates) > 1:
-        return PlayerMatch(**base, match_status="ambiguous", player_type=fallback_player_type,
+        return PlayerMatch(**base, match_status="ambiguous", player_type=dk_player_type,
                             candidate_mlb_ids=[c.mlb_player_id for c in candidates],
                             candidate_names=[c.name for c in candidates])
 
-    # Tier 4: conservative fallback -- name-only, but must be unique slate-wide.
-    name_candidates = name_only_index.get(normalized, [])
-    if len(name_candidates) == 1:
-        c = name_candidates[0]
-        return PlayerMatch(**base, match_status="matched", mlb_player_id=c.mlb_player_id,
-                            match_confidence="name_only_slate_unique", player_type=c.player_type)
-    if len(name_candidates) > 1:
-        return PlayerMatch(**base, match_status="ambiguous", player_type=fallback_player_type,
-                            candidate_mlb_ids=[c.mlb_player_id for c in name_candidates],
-                            candidate_names=[c.name for c in name_candidates])
+    # Tier 4: conservative fallback -- name-only, but must be unique
+    # slate-wide AND the name must not collide across two different DK
+    # teams in this slate (that's not an abbreviation-alias situation,
+    # it's two different players -- see _dk_cross_team_names).
+    if normalized not in dk_cross_team_names:
+        name_candidates = name_only_index.get(normalized, [])
+        if len(name_candidates) == 1:
+            c = name_candidates[0]
+            return PlayerMatch(**base, match_status="matched", mlb_player_id=c.mlb_player_id,
+                                match_confidence="name_only_slate_unique", player_type=_effective_player_type(c))
+        if len(name_candidates) > 1:
+            return PlayerMatch(**base, match_status="ambiguous", player_type=dk_player_type,
+                                candidate_mlb_ids=[c.mlb_player_id for c in name_candidates],
+                                candidate_names=[c.name for c in name_candidates])
 
-    return PlayerMatch(**base, match_status="unmatched", player_type=fallback_player_type)
+    return PlayerMatch(**base, match_status="unmatched", player_type=dk_player_type)
 
 
 def resolve_all(
@@ -131,4 +173,8 @@ def resolve_all(
     index = build_canonical_index(package)
     name_only_index = build_name_only_index(index)
     canonical_by_id = build_canonical_by_id(index)
-    return [resolve_player(row, index, name_only_index, crosswalk, canonical_by_id) for row in dk_rows]
+    cross_team_names = _dk_cross_team_names(dk_rows)
+    return [
+        resolve_player(row, index, name_only_index, crosswalk, canonical_by_id, cross_team_names)
+        for row in dk_rows
+    ]

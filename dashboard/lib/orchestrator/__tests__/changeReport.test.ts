@@ -35,6 +35,7 @@ function stubRun(overrides: {
   poolPath?: string | null;
   ownershipPath?: string | null;
   projectionLineupsPath?: string | null;
+  selectedSlateId?: string | null;
 }): RunState {
   return {
     runId: overrides.runId,
@@ -78,7 +79,7 @@ function stubRun(overrides: {
             providerName: "mock_dev_provider",
             isMock: true,
             providerSource: "mock_explicit",
-            selectedSlateId: "mock-main",
+            selectedSlateId: overrides.selectedSlateId ?? "mock-main",
             externalProjectionStatus: "not_attempted",
             externalProjectionRecordCount: null,
           }
@@ -139,6 +140,31 @@ describe("buildChangeReport", () => {
     expect(report.scratches).toEqual(["Scratched Hitter"]);
     expect(report.starterChanges).toEqual(["Leadoff Hitter: batting order 1 -> 2"]);
     expect(report.newPostedLineupGames).toBe(1); // g2 is new, g1 was already posted
+  });
+
+  it("returns an explanatory empty report when the previous run was for a different slate on the same date (M27.3 DK-ID collision guard)", async () => {
+    // DraftKings numeric player IDs are only unique within one slate's own
+    // CSV export (confirmed in M26). Comparing pools/ownership across two
+    // DIFFERENT slates on the SAME date via the dk_player_id fallback key
+    // could silently attribute a change to the wrong unmatched player, so
+    // this must bail out exactly like the different-date guard does.
+    const prevPath = path.join(tmpDir, "pool_prev.json");
+    const currPath = path.join(tmpDir, "pool_curr.json");
+    writeJson(prevPath, { players: [{ dk_player_id: "d1", mlb_player_id: null, salary: 4000, projection: 9 }] });
+    writeJson(currPath, { players: [{ dk_player_id: "d1", mlb_player_id: null, salary: 9000, projection: 30 }] });
+
+    const { buildChangeReport } = await import("../changeReport");
+    const previous = stubRun({
+      runId: "run-1", slateDate: "2026-08-12", status: "completed", poolPath: prevPath, selectedSlateId: "dkcsv-main",
+    });
+    const current = stubRun({
+      runId: "run-2", slateDate: "2026-08-12", status: "completed", poolPath: currPath, selectedSlateId: "dkcsv-turbo",
+    });
+    const report = buildChangeReport(previous, current);
+
+    expect(report.previousRunId).toBeNull();
+    expect(report.salaryChangedCount).toBeNull();
+    expect(report.notes[0]).toMatch(/different slate/i);
   });
 
   it("counts salary and projection changes from two player pools", async () => {

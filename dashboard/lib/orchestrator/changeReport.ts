@@ -53,6 +53,23 @@ export function buildChangeReport(previous: RunState | null, current: RunState):
     return report;
   }
 
+  // Milestone 27.3: DraftKings player IDs are only unique within a single
+  // slate's own CSV export (confirmed in M26) -- the per-player diffs
+  // below fall back to raw dk_player_id as a join key for any player
+  // without an mlb_player_id yet, so comparing across two DIFFERENT
+  // slates on the same date (e.g. the user switched from "Main" to a
+  // "Turbo" slate between refreshes) could silently attribute a salary/
+  // projection/ownership change to the wrong unmatched player. Bail out
+  // exactly like the slateDate guard above rather than risk that.
+  const previousSlateId = previous.summary?.selectedSlateId ?? null;
+  const currentSlateId = current.summary?.selectedSlateId ?? null;
+  if (previousSlateId !== currentSlateId) {
+    report.notes.push(
+      `Previous completed refresh was for a different slate (${previousSlateId ?? "unknown"} vs ${currentSlateId ?? "unknown"}) -- nothing to compare.`,
+    );
+    return report;
+  }
+
   report.previousRunId = previous.runId;
   report.previousFinishedAt = previous.finishedAt;
 

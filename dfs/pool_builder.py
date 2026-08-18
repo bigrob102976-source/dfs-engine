@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 from dfs.lineup_smoke_test import find_one_legal_lineup
 from dfs.models import DFSPlayer, DKSalaryRow
 from dfs.persistence import save_match_report, save_player_pool
+from dfs.player_integrity import PlayerIntegrityResult, summarize as summarize_integrity, validate_pool
 from dfs.player_pool import build_dfs_players, build_match_report
 from dfs.player_resolver import build_canonical_by_id, build_canonical_index, build_name_only_index, resolve_all
 from dfs.roster_feasibility import check_roster_feasibility
@@ -59,7 +60,8 @@ class PoolBuildResult:
 
     def __init__(self, players: List[DFSPlayer], report: dict, active_pool: List[DFSPlayer],
                  feasibility, legal_lineup, roster_feasibility_pass: bool,
-                 pitcher_snapshot_path: Optional[str], batter_snapshot_path: Optional[str]):
+                 pitcher_snapshot_path: Optional[str], batter_snapshot_path: Optional[str],
+                 integrity_results: Optional[List[PlayerIntegrityResult]] = None):
         self.players = players
         self.report = report
         self.active_pool = active_pool
@@ -68,6 +70,7 @@ class PoolBuildResult:
         self.roster_feasibility_pass = roster_feasibility_pass
         self.pitcher_snapshot_path = pitcher_snapshot_path
         self.batter_snapshot_path = batter_snapshot_path
+        self.integrity_results = integrity_results or []
 
 
 def build_pool(
@@ -98,6 +101,9 @@ def build_pool(
     )
     report = build_match_report(dk_rows, matches, players, slate_validation)
 
+    integrity_results = validate_pool(players, package["games"], canonical_by_id)
+    report["identity_integrity"] = summarize_integrity(integrity_results)
+
     active_pool = [p for p in players if p.lineup_status == "active"]
     feasibility = check_roster_feasibility(active_pool)
     legal_lineup = find_one_legal_lineup(active_pool) if feasibility.passed else None
@@ -107,6 +113,7 @@ def build_pool(
         players=players, report=report, active_pool=active_pool, feasibility=feasibility,
         legal_lineup=legal_lineup, roster_feasibility_pass=roster_feasibility_pass,
         pitcher_snapshot_path=pitcher_snapshot_path, batter_snapshot_path=batter_snapshot_path,
+        integrity_results=integrity_results,
     )
 
 
@@ -154,6 +161,16 @@ def print_pool_report(result: PoolBuildResult) -> None:
     print(f"Games matched to research:\n{report['dk_games_matched_to_research']} / {report['dk_games_total']}\n")
     print(f"Salary coverage:\n{report['salary_coverage_percent']}%\n")
     print(f"Position coverage:\n{report['position_coverage_percent']}%\n")
+
+    integrity = report.get("identity_integrity")
+    if integrity:
+        print(f"Identity integrity: {integrity['valid']} VALID / {integrity['warning']} WARNING / "
+              f"{integrity['invalid']} INVALID (of {integrity['total']})\n")
+        if integrity["invalid_rows"]:
+            print(f"INVALID IDENTITY ROWS ({len(integrity['invalid_rows'])}):")
+            for r in integrity["invalid_rows"]:
+                print(f"  - DK #{r['dk_player_id']} {r['name']} ({r['team']}): {'; '.join(r['reasons'])}")
+            print()
 
     if report["research_games_not_on_dk_slate"]:
         print(f"Research games EXCLUDED from this DK slate ({len(report['research_games_not_on_dk_slate'])}):")

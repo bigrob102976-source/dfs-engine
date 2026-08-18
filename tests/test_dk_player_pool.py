@@ -178,6 +178,32 @@ def test_dk_position_eligibility_is_authoritative_not_inferred_from_mlb():
     assert players[0].dk_positions == ["1B", "OF"]
 
 
+def test_game_id_comes_from_this_rows_own_resolved_matchup_not_the_matched_players_canonical_game():
+    # Milestone 27.3 regression, modeled on the real Max Muncy case: a DK
+    # row matched (via the conservative Tier 4 name-only fallback) to a
+    # canonical player whose OWN team/game disagrees with this row's own
+    # DK team must still get ITS OWN resolved game_id, never the matched
+    # player's canonical game_id.
+    package = _package()
+    package["games"].append({"game_id": "g2", "home_team_abbr": "KC", "away_team_abbr": "ATH"})
+    package["batters"].append(
+        {"player_id": "9001", "name": "Max Muncy", "team_abbr": "ATH", "opponent_abbr": "KC", "game_id": "g2"}
+    )
+    dk_rows = [_dk_row("d9", "Max Muncy", "LAD", ["3B"], 5700, game_info="LAD@COL 08:40PM ET")]
+    # LAD@COL isn't in the research package's games list, so slate_validation
+    # won't resolve it -- add it so the DK row's own matchup DOES resolve,
+    # proving the row's own game_id wins even though it disagrees with the
+    # (wrongly) matched canonical player's game.
+    package["games"].append({"game_id": "g3", "home_team_abbr": "COL", "away_team_abbr": "LAD"})
+    players, _ = _build(dk_rows, package, _pitcher_snapshot(), _batter_snapshot())
+    p = players[0]
+    assert p.match_status == "matched"
+    assert p.mlb_player_id == "9001"  # the (mismatched) Tier 4 match still happened
+    assert p.team == "LAD"
+    assert p.opponent == "COL"
+    assert p.game_id == "g3"  # THIS row's own game, not "g2" (the canonical player's game)
+
+
 def test_never_silently_drops_a_player():
     dk_rows = [
         _dk_row("d1", "Home Ace", "BOS", ["P"], 9000),

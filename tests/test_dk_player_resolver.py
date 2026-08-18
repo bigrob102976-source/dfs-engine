@@ -119,6 +119,87 @@ def test_never_fuzzy_matches_unrelated_names():
     assert matches[0].match_status == "unmatched"
 
 
+def test_unmatched_sp_infers_pitcher_type_from_dk_position():
+    # Milestone 27.3 regression: DraftKings' real "Position" column uses
+    # SP/RP, never a bare "P" -- the fallback classifier used to check
+    # for literal "P" membership and mis-classified every unmatched SP/RP
+    # row as a hitter.
+    package = _package()
+    row = _dk_row("d11", "Some Ace", "BOS", positions=("SP",))
+    matches = resolve_all([row], package)
+    assert matches[0].match_status == "unmatched"
+    assert matches[0].player_type == "pitcher"
+
+
+def test_unmatched_rp_infers_pitcher_type_from_dk_position():
+    package = _package()
+    row = _dk_row("d12", "Some Reliever", "BOS", positions=("RP",))
+    matches = resolve_all([row], package)
+    assert matches[0].player_type == "pitcher"
+
+
+def test_unmatched_of_infers_hitter_type_from_dk_position():
+    package = _package()
+    row = _dk_row("d13", "Some Outfielder", "NYY", positions=("OF",))
+    matches = resolve_all([row], package)
+    assert matches[0].player_type == "hitter"
+
+
+def test_multi_position_hitter_remains_hitter():
+    package = _package()
+    row = _dk_row("d14", "Some Utility Guy", "NYY", positions=("2B", "SS", "OF"))
+    matches = resolve_all([row], package)
+    assert matches[0].player_type == "hitter"
+
+
+def test_dk_position_is_authoritative_even_for_a_matched_player():
+    # DK position eligibility wins even over the matched canonical
+    # record's own player_type -- never inferred from which research
+    # board matched or from MLB defensive position.
+    package = _package()
+    row = _dk_row("d15", "Aaron Judge", "NYY", positions=("SP",))
+    matches = resolve_all([row], package)
+    assert matches[0].match_status == "matched"
+    assert matches[0].mlb_player_id == "2001"
+    assert matches[0].player_type == "pitcher"
+
+
+def test_cross_team_name_collision_does_not_silently_match_the_wrong_team():
+    # Milestone 27.3 regression, modeled on the real Max Muncy case: two
+    # DIFFERENT DK rows share a name but belong to two different teams,
+    # and only ONE of those teams has a canonical (research-confirmed)
+    # record. Tier 4's name-only fallback must not guess which is which.
+    package = _package()
+    package["batters"].append(
+        {"player_id": "9001", "name": "Max Muncy", "team_abbr": "ATH", "opponent_abbr": "KC", "game_id": "999"}
+    )
+    package["games"].append({"game_id": "999", "home_team_abbr": "KC", "away_team_abbr": "ATH"})
+    lad_row = _dk_row("d16", "Max Muncy", "LAD", positions=("3B",))
+    ath_row = _dk_row("d17", "Max Muncy", "ATH", positions=("3B",))
+    matches = resolve_all([lad_row, ath_row], package)
+    lad_match, ath_match = matches
+
+    # The genuinely canonical ATH row still resolves normally.
+    assert ath_match.match_status == "matched"
+    assert ath_match.mlb_player_id == "9001"
+
+    # The LAD row must NOT borrow the ATH player's identity.
+    assert lad_match.mlb_player_id != "9001"
+    assert lad_match.match_status == "unmatched"
+    assert lad_match.player_type == "hitter"  # still correct via DK position, just not MLB-matched
+
+
+def test_team_abbreviation_alias_case_still_matches_via_tier4():
+    # The legitimate case Tier 4 exists for (a single DK row whose team
+    # abbreviation the index doesn't recognize, name unique slate-wide)
+    # must keep working after the cross-team-collision guard was added.
+    package = _package()
+    row = _dk_row("d18", "Aaron Judge", "ZZZ")
+    matches = resolve_all([row], package)
+    assert matches[0].match_status == "matched"
+    assert matches[0].mlb_player_id == "2001"
+
+
 def test_build_canonical_index_and_helpers_are_consistent():
     package = _package()
     index = build_canonical_index(package)
