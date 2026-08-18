@@ -163,6 +163,31 @@ def test_real_vegas_contributes_nonzero_points():
     assert real_result.points != 0.0
 
 
+def test_real_vegas_reason_surfaces_provenance_for_player_detail():
+    # Milestone 24: Player Detail renders `reasons` verbatim, so the real
+    # Vegas branch's reason string is what satisfies "Player Detail should
+    # be able to explain" Game Total / Provider / Books Used -- without a
+    # new UI section.
+    result = environment_adjustment(
+        "hitter",
+        team_implied_runs=6.3,
+        vegas_is_mock=False,
+        vegas_game_total=11.5,
+        vegas_provider_name="SportsGameOdds",
+        vegas_books_used=["draftkings", "fanduel", "betmgm", "caesars"],
+    )
+    reason = result.reasons[0]
+    assert "6.30" in reason
+    assert "game total 11.5" in reason
+    assert "SportsGameOdds" in reason
+    assert "4 books" in reason
+
+
+def test_real_vegas_reason_omits_provenance_when_not_supplied():
+    result = environment_adjustment("hitter", team_implied_runs=5.5, vegas_is_mock=False)
+    assert "(" not in result.reasons[0]
+
+
 def test_weather_favoring_hitter_gives_positive_points():
     result = environment_adjustment("hitter", weather_favors=["hitter", "hitter", "neutral"])
     assert result.points > 0

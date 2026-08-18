@@ -1,16 +1,35 @@
 """Normalizes ONE raw SportsGameOdds v2 `/events` event object into a
 provider-agnostic NormalizedGameOdds (providers/models.py).
 
-This module makes a best-effort, defensively-coded parse of the v2
-event/odds JSON shape, since this milestone's source of truth (the
-instructions it was built from) documents the endpoint, filters, and
-auth method precisely but does not hand over a full field-by-field
-schema reference. Every extraction below tries a short list of
-plausible, real SportsGameOdds v2 key names (verified against a live
-response before this milestone shipped -- see the milestone's final
-report for confirmation) rather than assuming a single guessed shape,
-and anything that doesn't match gets recorded in `parse_warnings`
-instead of silently dropped or crashing the whole event.
+Market classification is confirmed against a REAL live SportsGameOdds
+v2 response (Milestone 24 live validation, 2026-08-17) rather than
+guessed. Each entry in an event's `odds` dict is a "betting outcome"
+object with (among others) these fields, which is what this module
+actually keys off of:
+
+    statID          "points" for the game/team run markets this module
+                     collects -- also covers unrelated per-player prop
+                     markets ("batting_hits", "batting_homeRuns", ...)
+                     that must be excluded.
+    betTypeID        "ml" (moneyline), "sp" (spread/run line), "ou"
+                     (over/under) -- but also "ml3way", "yn", "eo" for
+                     unrelated markets that must be excluded.
+    periodID         "game" for the full-game line this module wants --
+                     also covers inning-level and first-half props
+                     ("1i", "5i", "1h", ...) that must be excluded.
+    statEntityID     "all" for the game total, "home"/"away" for
+                     moneyline, spread, and TEAM run totals -- also
+                     covers "firstToScore"/"lastToScore" (statID
+                     differs, so already excluded by the statID check)
+                     and individual player IDs for player props.
+
+A naive oddID substring match (e.g. "contains -ou-") is NOT sufficient
+on its own: it also matches team-level run totals
+("points-away-game-ou-over", marketName "<Team> Runs Over/Under") and
+player prop totals, which would silently corrupt the game total with
+whichever one iterates last. This module instead requires the full
+(statID, betTypeID, periodID, statEntityID) combination below, which is
+exact rather than fuzzy.
 
 Team abbreviations are mapped through dfs/team_abbreviations.py's
 existing DK<->research crosswalk so a SportsGameOdds abbreviation lines
@@ -25,15 +44,8 @@ from typing import Any, Dict, List, Optional
 from dfs.team_abbreviations import normalize_dk_team_abbr
 from research.game_environment.providers.models import BookLine, NormalizedGameOdds
 
-# Recognized SportsGameOdds oddID betType segments for the three markets
-# this milestone collects. An oddID is a hyphen-joined string, e.g.
-# "points-home-game-ml-home" (moneyline), "points-home-game-sp-home"
-# (run line / spread), "points-all-game-ou-over" (total). Matched by
-# substring rather than exact position so a minor key-shape difference
-# (e.g. an extra segment) doesn't silently drop a whole market.
-_MONEYLINE_MARKERS = ("-ml-",)
-_SPREAD_MARKERS = ("-sp-",)
-_TOTAL_MARKERS = ("-ou-",)
+_GAME_PERIOD = "game"
+_POINTS_STAT = "points"
 
 
 def _safe_int(value: Any) -> Optional[int]:
@@ -75,37 +87,47 @@ def _team_abbreviation(team_obj: Optional[dict]) -> Optional[str]:
 
 
 def _iter_book_entries(odd_obj: dict) -> List[Dict[str, Any]]:
-    """Each odd object carries a per-bookmaker breakdown under one of a
-    few plausible key names; each entry is {book_name: {...fields...}}."""
+    """Each odd object carries a per-bookmaker breakdown under
+    `byBookmaker` (confirmed live) -- a couple of other plausible key
+    names are tried defensively in case the shape ever differs. Entries
+    explicitly marked `available: false` by the provider itself (a
+    stale/inactive quote) are skipped rather than fed into consensus."""
     per_book = _first_present(odd_obj, ["byBookmaker", "bookOdds", "books", "bookmakers"])
     if not isinstance(per_book, dict):
         return []
     entries = []
     for book_name, book_data in per_book.items():
-        if isinstance(book_data, dict):
-            entries.append({"book": str(book_name), **book_data})
+        if not isinstance(book_data, dict):
+            continue
+        if book_data.get("available") is False:
+            continue
+        entries.append({"book": str(book_name), **book_data})
     return entries
 
 
-def _odd_id_matches(odd_id: str, markers: tuple) -> bool:
-    lowered = odd_id.lower()
-    return any(marker in lowered for marker in markers)
-
-
-def _side_of(odd_id: str, odd_obj: dict) -> Optional[str]:
-    side = odd_obj.get("sideID") or odd_obj.get("side")
-    if side:
-        return str(side).lower()
-    lowered = odd_id.lower()
-    if lowered.endswith("-home") or "-home-" in lowered:
-        return "home"
-    if lowered.endswith("-away") or "-away-" in lowered:
-        return "away"
-    if lowered.endswith("-over"):
-        return "over"
-    if lowered.endswith("-under"):
-        return "under"
+def _classify_market(odd_obj: dict) -> Optional[str]:
+    """Returns "ml" / "sp" / "ou" for the full-game moneyline / run line
+    / total market this module collects, or None for anything else
+    (inning props, player props, 3-way lines, first/last-to-score,
+    yes/no markets, etc.) -- see this module's docstring for exactly
+    which real SportsGameOdds fields this checks and why a bare oddID
+    substring match isn't reliable."""
+    if odd_obj.get("statID") != _POINTS_STAT or odd_obj.get("periodID") != _GAME_PERIOD:
+        return None
+    bet_type = odd_obj.get("betTypeID")
+    entity = odd_obj.get("statEntityID")
+    if bet_type == "ml" and entity in ("home", "away"):
+        return "ml"
+    if bet_type == "sp" and entity in ("home", "away"):
+        return "sp"
+    if bet_type == "ou" and entity == "all":
+        return "ou"
     return None
+
+
+def _side_of(odd_obj: dict) -> Optional[str]:
+    side = odd_obj.get("sideID") or odd_obj.get("side")
+    return str(side).lower() if side else None
 
 
 def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Optional[NormalizedGameOdds]:
@@ -145,15 +167,14 @@ def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Option
     for odd_id, odd_obj in odds_obj.items():
         if not isinstance(odd_obj, dict):
             continue
-        side = _side_of(str(odd_id), odd_obj)
-        book_entries = _iter_book_entries(odd_obj)
-        if not book_entries:
+
+        market = _classify_market(odd_obj)
+        if market is None:
             continue
 
-        is_ml = _odd_id_matches(str(odd_id), _MONEYLINE_MARKERS)
-        is_sp = _odd_id_matches(str(odd_id), _SPREAD_MARKERS)
-        is_ou = _odd_id_matches(str(odd_id), _TOTAL_MARKERS)
-        if not (is_ml or is_sp or is_ou):
+        side = _side_of(odd_obj)
+        book_entries = _iter_book_entries(odd_obj)
+        if not book_entries:
             continue
 
         for entry in book_entries:
@@ -164,14 +185,14 @@ def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Option
             if updated_at is not None:
                 line.last_updated = str(updated_at)
 
-            if is_ml:
+            if market == "ml":
                 if side == "home":
                     line.home_moneyline = american_odds
                 elif side == "away":
                     line.away_moneyline = american_odds
                 else:
                     parse_warnings.append(f"Moneyline odd {odd_id!r} had no recognizable home/away side.")
-            elif is_sp:
+            elif market == "sp":
                 spread_value = _safe_float(_first_present(entry, ["spread", "line", "handicap"]))
                 if side == "home":
                     line.home_run_line = spread_value
@@ -181,7 +202,7 @@ def normalize_sportsgameodds_event(raw_event: dict, retrieved_at: str) -> Option
                     line.away_run_line_odds = american_odds
                 else:
                     parse_warnings.append(f"Run line odd {odd_id!r} had no recognizable home/away side.")
-            elif is_ou:
+            elif market == "ou":
                 total_value = _safe_float(_first_present(entry, ["overUnder", "total", "line"]))
                 if total_value is not None:
                     line.total = total_value

@@ -4,6 +4,11 @@ RETRIEVED_AT = "2026-08-17T18:00:00+00:00"
 
 
 def sample_event(**overrides):
+    # Shape confirmed against a REAL live SportsGameOdds v2 response
+    # (Milestone 24 live validation, 2026-08-17) -- statID/betTypeID/
+    # periodID/statEntityID are the authoritative classification fields;
+    # see normalizer.py's module docstring for why oddID text alone
+    # (e.g. "contains -ou-") is not sufficient.
     event = {
         "eventID": "evt_123",
         "leagueID": "MLB",
@@ -14,43 +19,67 @@ def sample_event(**overrides):
         "status": {"startsAt": "2026-08-17T23:10:00Z"},
         "odds": {
             "points-home-game-ml-home": {
+                "statID": "points",
+                "betTypeID": "ml",
+                "periodID": "game",
+                "statEntityID": "home",
                 "sideID": "home",
                 "byBookmaker": {
-                    "draftkings": {"odds": "-165", "lastUpdatedAt": "2026-08-17T17:00:00Z"},
-                    "fanduel": {"odds": "-160"},
+                    "draftkings": {"odds": "-165", "lastUpdatedAt": "2026-08-17T17:00:00Z", "available": True},
+                    "fanduel": {"odds": "-160", "available": True},
                 },
             },
             "points-away-game-ml-away": {
+                "statID": "points",
+                "betTypeID": "ml",
+                "periodID": "game",
+                "statEntityID": "away",
                 "sideID": "away",
                 "byBookmaker": {
-                    "draftkings": {"odds": "140"},
-                    "fanduel": {"odds": "135"},
+                    "draftkings": {"odds": "140", "available": True},
+                    "fanduel": {"odds": "135", "available": True},
                 },
             },
             "points-all-game-ou-over": {
+                "statID": "points",
+                "betTypeID": "ou",
+                "periodID": "game",
+                "statEntityID": "all",
                 "sideID": "over",
                 "byBookmaker": {
-                    "draftkings": {"odds": "-110", "overUnder": "8.5"},
-                    "fanduel": {"odds": "-105", "overUnder": "8.5"},
+                    "draftkings": {"odds": "-110", "overUnder": "8.5", "available": True},
+                    "fanduel": {"odds": "-105", "overUnder": "8.5", "available": True},
                 },
             },
             "points-all-game-ou-under": {
+                "statID": "points",
+                "betTypeID": "ou",
+                "periodID": "game",
+                "statEntityID": "all",
                 "sideID": "under",
                 "byBookmaker": {
-                    "draftkings": {"odds": "-110", "overUnder": "8.5"},
-                    "fanduel": {"odds": "-115", "overUnder": "8.5"},
+                    "draftkings": {"odds": "-110", "overUnder": "8.5", "available": True},
+                    "fanduel": {"odds": "-115", "overUnder": "8.5", "available": True},
                 },
             },
             "points-home-game-sp-home": {
+                "statID": "points",
+                "betTypeID": "sp",
+                "periodID": "game",
+                "statEntityID": "home",
                 "sideID": "home",
                 "byBookmaker": {
-                    "draftkings": {"odds": "-110", "spread": "-1.5"},
+                    "draftkings": {"odds": "-110", "spread": "-1.5", "available": True},
                 },
             },
             "points-away-game-sp-away": {
+                "statID": "points",
+                "betTypeID": "sp",
+                "periodID": "game",
+                "statEntityID": "away",
                 "sideID": "away",
                 "byBookmaker": {
-                    "draftkings": {"odds": "-110", "spread": "1.5"},
+                    "draftkings": {"odds": "-110", "spread": "1.5", "available": True},
                 },
             },
         },
@@ -134,8 +163,12 @@ def test_alternate_bookmaker_key_name_bookOdds():
     event = sample_event(
         odds={
             "points-home-game-ml-home": {
+                "statID": "points",
+                "betTypeID": "ml",
+                "periodID": "game",
+                "statEntityID": "home",
                 "sideID": "home",
-                "bookOdds": {"betmgm": {"odds": "-155"}},
+                "bookOdds": {"betmgm": {"odds": "-155", "available": True}},
             },
         }
     )
@@ -163,11 +196,75 @@ def test_unrecognized_market_type_is_skipped_not_crashed():
     event = sample_event(
         odds={
             "points-home-game-xyz-home": {
+                "statID": "points",
+                "betTypeID": "xyz",
+                "periodID": "game",
+                "statEntityID": "home",
                 "sideID": "home",
-                "byBookmaker": {"draftkings": {"odds": "-110"}},
+                "byBookmaker": {"draftkings": {"odds": "-110", "available": True}},
             },
         }
     )
     result = normalize_sportsgameodds_event(event, RETRIEVED_AT)
     assert result is not None
     assert result.books == []
+
+
+def test_team_run_total_does_not_contaminate_the_game_total():
+    # Confirmed real-world bug (Milestone 24 live validation): a team-level
+    # run total ("<Team> Runs Over/Under") has betTypeID "ou" and an oddID
+    # containing "-ou-" too, but statEntityID is "home"/"away", not "all" --
+    # it must never be mistaken for the game total.
+    event = sample_event()
+    event["odds"]["points-away-game-ou-over"] = {
+        "statID": "points",
+        "betTypeID": "ou",
+        "periodID": "game",
+        "statEntityID": "away",  # team total, NOT the game total
+        "sideID": "over",
+        "byBookmaker": {"draftkings": {"odds": "+225", "overUnder": "4.5", "available": True}},
+    }
+    result = normalize_sportsgameodds_event(event, RETRIEVED_AT)
+    dk = next(b for b in result.books if b.book == "draftkings")
+    assert dk.total == 8.5  # unchanged by the team total's 4.5
+
+
+def test_inning_level_moneyline_prop_does_not_contaminate_the_game_moneyline():
+    # betTypeID "ml" with periodID "1i" (1st inning) must not overwrite the
+    # full-game moneyline captured from periodID "game".
+    event = sample_event()
+    event["odds"]["points-home-1i-ml-home"] = {
+        "statID": "points",
+        "betTypeID": "ml",
+        "periodID": "1i",
+        "statEntityID": "home",
+        "sideID": "home",
+        "byBookmaker": {"draftkings": {"odds": "-500", "available": True}},
+    }
+    result = normalize_sportsgameodds_event(event, RETRIEVED_AT)
+    dk = next(b for b in result.books if b.book == "draftkings")
+    assert dk.home_moneyline == -165  # unchanged by the 1st-inning prop's -500
+
+
+def test_first_to_score_prop_does_not_contaminate_the_game_moneyline():
+    # firstToScore has betTypeID "ml" and home/away sides too, but statID
+    # is "firstToScore", not "points" -- must be excluded.
+    event = sample_event()
+    event["odds"]["firstToScore-home-game-ml-home"] = {
+        "statID": "firstToScore",
+        "betTypeID": "ml",
+        "periodID": "game",
+        "statEntityID": "home",
+        "sideID": "home",
+        "byBookmaker": {"draftkings": {"odds": "+120", "available": True}},
+    }
+    result = normalize_sportsgameodds_event(event, RETRIEVED_AT)
+    dk = next(b for b in result.books if b.book == "draftkings")
+    assert dk.home_moneyline == -165  # unchanged by the firstToScore prop's +120
+
+
+def test_book_entry_marked_unavailable_is_excluded():
+    event = sample_event()
+    event["odds"]["points-home-game-ml-home"]["byBookmaker"]["betmgm"] = {"odds": "-999", "available": False}
+    result = normalize_sportsgameodds_event(event, RETRIEVED_AT)
+    assert all(b.book != "betmgm" for b in result.books)

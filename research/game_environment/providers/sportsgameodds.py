@@ -43,6 +43,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from config.env_loader import load_dashboard_env
 from research import cache
 from research.game_environment.providers.base import (
     OddsProvider,
@@ -54,9 +55,27 @@ from research.game_environment.providers.base import (
 from research.game_environment.providers.models import NormalizedGameOdds, ProviderUsageStatus
 from research.game_environment.providers.normalizer import normalize_sportsgameodds_event
 
+# Module-import-time side effect, deliberately: guarantees
+# SPORTSGAMEODDS_API_KEY (and any other dashboard/.env.local secret) is
+# already in os.environ before this module -- or research.game_environment.
+# collector, which imports this module -- ever calls os.environ.get() for
+# it. See config/env_loader.py's module docstring for why this exists.
+load_dashboard_env()
+
 API_BASE_URL = "https://api.sportsgameodds.com/v2"
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_PAGES = 10  # hard ceiling so a misbehaving cursor can never loop forever / burn quota unbounded
+
+# Confirmed via live validation (Milestone 24): SportsGameOdds sits behind
+# Cloudflare bot-management, which rejects Python's default urllib User-Agent
+# with an HTTP 403 "browser_signature_banned" error BEFORE the request ever
+# reaches SportsGameOdds' own auth check -- a valid API key still gets a 403
+# with the default header. A standard browser-shaped User-Agent clears it.
+# This has nothing to do with x-api-key/auth; it's a transport-layer
+# requirement of the CDN in front of the documented API.
+REQUEST_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 DEFAULT_CACHE_ROOT = cache.DEFAULT_CACHE_ROOT.parent / "sportsgameodds"
 
@@ -110,7 +129,10 @@ class SportsGameOddsProvider(OddsProvider):
         if cursor:
             params += f"&cursor={cursor}"
         url = f"{API_BASE_URL}/events?{params}"
-        request = urllib.request.Request(url, headers={"x-api-key": self._api_key, "Accept": "application/json"})
+        request = urllib.request.Request(
+            url,
+            headers={"x-api-key": self._api_key, "Accept": "application/json", "User-Agent": REQUEST_USER_AGENT},
+        )
         try:
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
                 body = resp.read().decode("utf-8")

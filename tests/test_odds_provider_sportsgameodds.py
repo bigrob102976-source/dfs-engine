@@ -45,6 +45,15 @@ def make_provider(tmp_path, api_key="test-key-123"):
     return SportsGameOddsProvider(api_key=api_key, cache_root=tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_api_key(monkeypatch):
+    # Milestone 24's config/env_loader.py auto-loads SPORTSGAMEODDS_API_KEY
+    # from dashboard/.env.local at import time in a real dev environment,
+    # so "without key" tests must not rely on the ambient environment
+    # actually being unconfigured -- explicitly clear it here instead.
+    monkeypatch.delenv("SPORTSGAMEODDS_API_KEY", raising=False)
+
+
 # ----------------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------------

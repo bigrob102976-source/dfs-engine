@@ -231,6 +231,9 @@ def environment_adjustment(
     park_factor: Optional[float] = None,
     team_implied_runs: Optional[float] = None,
     vegas_is_mock: Optional[bool] = None,
+    vegas_game_total: Optional[float] = None,
+    vegas_provider_name: Optional[str] = None,
+    vegas_books_used: Optional[List[str]] = None,
     weather_favors: Optional[List[str]] = None,
     weather_is_mock: Optional[bool] = None,
     opposing_bullpen_strength: Optional[float] = None,
@@ -272,7 +275,20 @@ def environment_adjustment(
             favorability = _normalize(team_implied_runs, runs_range["low"], runs_range["high"], invert)
             vegas_points = _points_from_favorability(favorability, cfg.REAL_VEGAS_MAX_POINTS)
             points += vegas_points
-            reasons.append(f"Vegas implied runs {team_implied_runs:.2f} (real market data) -> {vegas_points:+.3f} points")
+            # Milestone 24: surfaces the same provenance the Vegas board
+            # shows for this game (provider, game total, books used) --
+            # Player Detail already renders `reasons` verbatim, so this is
+            # the one line that satisfies "Player Detail should be able to
+            # explain" without adding a new UI section.
+            provenance_bits = []
+            if vegas_game_total is not None:
+                provenance_bits.append(f"game total {vegas_game_total:.1f}")
+            if vegas_provider_name:
+                provenance_bits.append(vegas_provider_name)
+            if vegas_books_used:
+                provenance_bits.append(f"{len(vegas_books_used)} books")
+            provenance = f" ({', '.join(provenance_bits)})" if provenance_bits else ""
+            reasons.append(f"Vegas implied runs {team_implied_runs:.2f}{provenance} -> {vegas_points:+.3f} points")
 
     if weather_favors:
         other_type = "pitcher" if player_type == "hitter" else "hitter"

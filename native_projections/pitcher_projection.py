@@ -45,6 +45,9 @@ def _resolve_pitcher_environment(p: PitcherInput, game_report: Optional[dict]) -
         # implied runs are what matter (a tougher run environment against him).
         team_implied_runs=vegas.get("away_implied_runs") if is_home else vegas.get("home_implied_runs"),
         vegas_is_mock=vegas.get("is_mock"),
+        vegas_game_total=(vegas.get("current_home") or {}).get("total"),
+        vegas_provider_name=vegas.get("provider_name"),
+        vegas_books_used=vegas.get("books_used"),
         weather_favors=weather_favors,
         weather_is_mock=weather.get("is_mock"),
     )
