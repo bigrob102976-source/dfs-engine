@@ -8,6 +8,11 @@ export interface StackSummary {
   averagePower: number | null;
   averageConfidence: number | null;
   confirmedHitterCount: number;
+  // Milestone 27.2: `confirmedHitterCount` is exactly what its name
+  // says (lineupStatus === "active") -- separate from this, since a
+  // team's real DK hitters are now always preserved even before their
+  // lineup posts (see lib/normalize.ts's own Milestone 27.2 docstring).
+  totalHitterCount: number;
   top5: PlayerRow[];
 }
 
@@ -36,9 +41,17 @@ export function buildStackSummaries(
     const ownerships = rows.map((r) => r.ownership).filter((v): v is number => v !== null);
     const powers = rows.map((r) => r.power).filter((v): v is number => v !== null);
     const confidences = rows.map((r) => r.confidence).filter((v): v is number => v !== null);
+    // Milestone 27.2: ranked by projection first (existing behavior,
+    // unchanged for any row that HAS one), falling back to salary as the
+    // tiebreak -- so a team with no projections yet (e.g. lineup not
+    // posted) still shows its real, highest-salaried DK players instead
+    // of an empty card, never a fabricated projection.
     const top5 = [...rows]
-      .filter((r) => r.projection !== null)
-      .sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0))
+      .sort((a, b) => {
+        const proj = (b.projection ?? -1) - (a.projection ?? -1);
+        if (proj !== 0) return proj;
+        return (b.salary ?? -1) - (a.salary ?? -1);
+      })
       .slice(0, 5);
 
     summaries.push({
@@ -48,7 +61,8 @@ export function buildStackSummaries(
       teamPopularityScore: teamPopularity[team]?.team_popularity_score ?? null,
       averagePower: avg(powers),
       averageConfidence: avg(confidences),
-      confirmedHitterCount: rows.length,
+      confirmedHitterCount: rows.filter((r) => r.lineupStatus === "active").length,
+      totalHitterCount: rows.length,
       top5,
     });
   }

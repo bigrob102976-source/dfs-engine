@@ -161,3 +161,144 @@ describe("buildHitterRows", () => {
     expect(rows[0].battingOrder).toBe(2);
   });
 });
+
+// ----------------------------------------------------------------------------
+// Milestone 27.2 -- CONFIRMED real bug: a DK-salaried player whose team's
+// lineup hasn't posted yet (live example, 2026-08-18: all 52 real LAD @
+// COL DraftKings rows) never got a row at all, because these functions
+// used to iterate ONLY the research board (confirmed-lineup-only data).
+// A real MLB team could silently vanish from every page built on
+// buildPitcherRows/buildHitterRows (Command Center, Pitchers, Hitters,
+// Stacks, Projection Lab) even though the DK pool had them the whole
+// time. Regression fixture modeled on the exact real shape.
+// ----------------------------------------------------------------------------
+
+function unconfirmedPoolHitter(overrides: Partial<import("../types").DFSPlayer> = {}): import("../types").DFSPlayer {
+  return {
+    dk_player_id: "d-lad-1",
+    name: "Shohei Ohtani",
+    team: "LAD",
+    player_type: "hitter",
+    dk_positions: ["1B", "OF"],
+    salary: 7100,
+    mlb_player_id: null,
+    opponent: "COL",
+    game_id: "824319",
+    batting_order: null,
+    projection: null,
+    ceiling: null,
+    floor: null,
+    overall_score: null,
+    risk_score: null,
+    confidence: null,
+    tags: [],
+    reasons: [],
+    season_sample_size: null,
+    lineup_status: "lineup_not_confirmed",
+    match_status: "unmatched",
+    ...overrides,
+  };
+}
+
+describe("Milestone 27.2: DK-pool player preservation", () => {
+  it("preserves a DK pool hitter with no board match instead of dropping the row (LAD @ COL regression)", () => {
+    const poolWithLad = pool();
+    poolWithLad.players = [unconfirmedPoolHitter()];
+    const rows = buildHitterRows([], null, poolWithLad);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("Shohei Ohtani");
+    expect(rows[0].team).toBe("LAD");
+    expect(rows[0].salary).toBe(7100);
+  });
+
+  it("never invents a projection for a preserved unconfirmed-lineup player", () => {
+    const poolWithLad = pool();
+    poolWithLad.players = [unconfirmedPoolHitter()];
+    const rows = buildHitterRows([], null, poolWithLad);
+
+    expect(rows[0].projection).toBeNull();
+    expect(rows[0].ceiling).toBeNull();
+    expect(rows[0].floor).toBeNull();
+  });
+
+  it("carries lineupStatus/matchStatus through so a page can label the row honestly", () => {
+    const poolWithLad = pool();
+    poolWithLad.players = [unconfirmedPoolHitter()];
+    const rows = buildHitterRows([], null, poolWithLad);
+
+    expect(rows[0].lineupStatus).toBe("lineup_not_confirmed");
+    expect(rows[0].matchStatus).toBe("unmatched");
+  });
+
+  it("preserves a scratched player with an explicit scratched status", () => {
+    const poolWithScratch = pool();
+    poolWithScratch.players = [unconfirmedPoolHitter({ dk_player_id: "d-lad-2", name: "Scratched Player", lineup_status: "scratched" })];
+    const rows = buildHitterRows([], null, poolWithScratch);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lineupStatus).toBe("scratched");
+  });
+
+  it("does NOT duplicate a player already matched from the board", () => {
+    const matchedHitter = hitterFixture();
+    const poolWithMatch = pool();
+    poolWithMatch.players = [
+      { ...unconfirmedPoolHitter(), dk_player_id: "d-2001", mlb_player_id: "2001", lineup_status: "active", match_status: "matched" },
+    ];
+    const rows = buildHitterRows([matchedHitter], null, poolWithMatch);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("Dodgers full-team regression: every real DK row for a team with no posted lineup is preserved, none fabricated", () => {
+    const ladPlayers = ["Shohei Ohtani", "Freddie Freeman", "Mookie Betts", "Will Smith", "Tyler Glasnow"].map((name, i) =>
+      unconfirmedPoolHitter({ dk_player_id: `d-lad-${i}`, name }),
+    );
+    const poolWithFullLad = pool();
+    poolWithFullLad.players = ladPlayers;
+    const rows = buildHitterRows([], null, poolWithFullLad);
+
+    expect(rows).toHaveLength(5);
+    expect(rows.every((r) => r.team === "LAD")).toBe(true);
+    expect(rows.every((r) => r.projection === null)).toBe(true);
+    expect(rows.map((r) => r.name)).toEqual(expect.arrayContaining(["Shohei Ohtani", "Freddie Freeman", "Mookie Betts"]));
+  });
+
+  it("pitcher-side: preserves an unmatched DK pitcher row the same way", () => {
+    const poolWithPitcher = pool();
+    poolWithPitcher.players = [
+      { ...unconfirmedPoolHitter(), dk_player_id: "d-lad-p1", name: "Tyler Glasnow", player_type: "pitcher", dk_positions: ["P"] },
+    ];
+    const rows = buildPitcherRows([], null, poolWithPitcher);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("Tyler Glasnow");
+    expect(rows[0].playerType).toBe("pitcher");
+    expect(rows[0].projection).toBeNull();
+  });
+
+  it("assigns a stable, mlb-id-free identity to an unmatched player (never a raw DK id collision risk across slates)", () => {
+    const poolWithLad = pool();
+    poolWithLad.players = [unconfirmedPoolHitter({ dk_player_id: "1006" })];
+    const rows = buildHitterRows([], null, poolWithLad);
+    expect(rows[0].id).toBe("dk:1006");
+    expect(rows[0].id).not.toBe("1006");
+  });
+});
+
+function hitterFixture(): BatterRecord {
+  return {
+    player_id: "2001",
+    name: "Test Hitter",
+    team: "PHI",
+    opponent: "STL",
+    batting_order: 3,
+    position: "OF",
+    projection: 8.0,
+    ceiling: 15.0,
+    overall_score: 65.0,
+    risk_score: 25.0,
+    confidence: 95.0,
+    tags: [],
+    reasons: [],
+  };
+}

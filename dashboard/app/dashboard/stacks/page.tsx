@@ -1,7 +1,7 @@
 import { MissingDataState } from "@/components/MissingDataState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
-import { loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
+import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { buildHitterRows } from "@/lib/normalize";
 import { effectiveGameIds, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildStackSummaries } from "@/lib/stacks";
@@ -20,8 +20,13 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
   const slateCtx = await resolveSlateContext(date, slateId);
   const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
   const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
+  // Milestone 27.2: without the real DK pool, a team whose lineup hasn't
+  // posted yet is invisible here even though its Stack Environment
+  // Score (a game-level, Vegas/park/weather-driven signal) can still
+  // rank #1 -- exactly the reported inconsistency. See lib/normalize.ts.
+  const dkPool = date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data : null;
 
-  const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
+  const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool);
   const rows = filterByGameIds(allRows, effectiveGameIds(slateCtx));
   const stacks = buildStackSummaries(rows, ownership?.team_popularity ?? {});
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
@@ -46,7 +51,10 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
             <div key={s.team} className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold text-text">{s.team}</span>
-                <span className="text-[11px] text-text-faint">{s.confirmedHitterCount} confirmed hitters</span>
+                <span className="text-[11px] text-text-faint">
+                  {s.confirmedHitterCount} / {s.totalHitterCount} confirmed
+                  {s.confirmedHitterCount < s.totalHitterCount && <span className="ml-1 text-yellow">(lineup not yet confirmed)</span>}
+                </span>
               </div>
               <div className="mb-3 grid grid-cols-3 gap-2 text-center">
                 <div>
@@ -71,12 +79,17 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
                 </div>
               </div>
               <div className="border-t border-border-subtle pt-2">
-                <div className="mb-1 text-[10px] uppercase text-text-faint">Top 5 Projected</div>
+                <div className="mb-1 text-[10px] uppercase text-text-faint">Top 5 (by Projection, then Salary)</div>
                 <ul className="text-xs text-text-muted">
                   {s.top5.map((h) => (
                     <li key={h.id} className="flex justify-between py-0.5">
-                      <span className="text-text">{h.name}</span>
-                      <span>{fmt(h.projection)}</span>
+                      <span className="text-text">
+                        {h.name}
+                        {h.lineupStatus && h.lineupStatus !== "active" && (
+                          <span className="ml-1.5 text-[10px] uppercase text-yellow">{h.lineupStatus.replace(/_/g, " ")}</span>
+                        )}
+                      </span>
+                      <span>{h.projection !== null ? fmt(h.projection) : `$${h.salary?.toLocaleString() ?? "--"}`}</span>
                     </li>
                   ))}
                 </ul>

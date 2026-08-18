@@ -40,6 +40,7 @@ import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
   loadLatestBatterSnapshot,
+  loadLatestDKPlayerPool,
   loadLatestDkMatchReport,
   loadLatestOwnershipSnapshot,
   loadLatestPitcherSnapshot,
@@ -91,9 +92,14 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
     : null;
   const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
   const providerSlate = loadLatestProviderSlate(date).data;
+  // Milestone 27.2: without the real DK pool here, a whole real MLB team
+  // whose lineup hasn't posted yet (confirmed live: LAD @ COL) never got
+  // a row anywhere on Command Center -- see lib/normalize.ts's own
+  // Milestone 27.2 docstring for the full root cause.
+  const dkPool = loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data;
 
-  const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null), gameIds);
-  const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null), gameIds);
+  const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
+  const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
   const stacks = buildStackSummaries(hitterRows, ownership?.team_popularity ?? {});
 
   // Milestone 20: AI Projection Engine -- joined onto the same rows

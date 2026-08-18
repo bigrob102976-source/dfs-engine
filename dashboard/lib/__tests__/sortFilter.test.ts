@@ -29,6 +29,7 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     leverage: 5.0,
     tags: [],
     reasons: [],
+    lineupStatus: null, matchStatus: null,
     raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };

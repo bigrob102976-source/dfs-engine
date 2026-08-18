@@ -370,6 +370,16 @@ export interface PlayerRow {
   leverage: number | null;
   tags: string[];
   reasons: string[];
+  // Milestone 27.2: every DK-salaried player is preserved as a row even
+  // when their research-board record doesn't exist yet (e.g. their
+  // team's starting lineup hasn't posted) -- these two fields are how a
+  // page tells "confirmed and scored" apart from "real DK player,
+  // awaiting lineup confirmation" instead of the player silently
+  // vanishing. Mirrors dfs/pool_builder.py's own lineup_status/
+  // match_status vocabulary exactly (see DFSPlayer). null only when no
+  // DK pool was loaded at all (pool-free callers/tests).
+  lineupStatus: string | null;
+  matchStatus: string | null;
   raw: {
     snapshot: JsonRecord;
     ownership: OwnershipPlayer | null;

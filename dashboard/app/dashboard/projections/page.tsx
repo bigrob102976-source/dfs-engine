@@ -6,7 +6,7 @@ import { loadActualDkPointsByPlayerId } from "@/lib/actualResults";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getProjectionComparisonByPlayerId } from "@/lib/externalProjections";
-import { loadLatestBatterSnapshot, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
+import { loadLatestBatterSnapshot, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
 import { buildProjectionLabRows, buildProjectionLabSummary } from "@/lib/projectionLab";
@@ -49,8 +49,11 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
     );
   }
 
-  const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null), gameIds);
-  const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null), gameIds);
+  // Milestone 27.2: without the real DK pool, a real DK-salaried player
+  // whose team's lineup hasn't posted yet never gets a row here either.
+  const dkPool = loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data;
+  const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
+  const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
 
   const externalByPlayerId = getProjectionComparisonByPlayerId(date);
   const nativeByPlayerId = getNativeProjectionByPlayerId(date);

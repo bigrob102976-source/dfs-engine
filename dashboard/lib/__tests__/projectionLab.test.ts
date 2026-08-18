@@ -8,7 +8,7 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     id: "p1", playerType: "hitter", name: "Test Player", team: "NYY", opponent: "BOS", gameId: "g1",
     position: "OF", positions: ["OF"], battingOrder: 3, salary: 5000, projection: 10, ceiling: 15, floor: 5,
     overall: null, power: null, matchup: null, risk: null, confidence: null, ownership: 20, ownershipTier: null,
-    chalkScore: null, leverage: 3, tags: [], reasons: [], raw: {} as PlayerRow["raw"],
+    chalkScore: null, leverage: 3, tags: [], reasons: [], lineupStatus: null, matchStatus: null, raw: {} as PlayerRow["raw"],
     ...overrides,
   };
 }
