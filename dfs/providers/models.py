@@ -35,7 +35,17 @@ class ProviderPlayer:
 @dataclass
 class ProviderSlateInfo:
     """One DFS slate the provider knows about for a given date (DK's
-    "Main" / "Turbo" / "Late" concept, provider-agnostic)."""
+    "Main" / "Turbo" / "Late" concept, provider-agnostic).
+
+    Milestone 26: `game_ids` is the field the rest of the dashboard
+    filters every page by (Pitchers/Hitters/Vegas/Ownership/Native/AI/
+    Optimizer) -- it resolves each of the provider's own raw
+    "AWAY@HOME ..." game strings against the MLB Research Package via
+    dfs/slate_validation.py::resolve_game_ids(). Populated only when a
+    caller passes `research_games` into get_slate() (see
+    dfs/providers/base.py); empty when no Research Package was available
+    to resolve against, so callers must treat an empty list as "unknown",
+    never "zero games on this slate"."""
 
     slate_id: str
     slate_name: Optional[str]
@@ -43,6 +53,8 @@ class ProviderSlateInfo:
     sport: str
     start_time: Optional[str]
     game_count: Optional[int]
+    game_ids: List[str] = field(default_factory=list)
+    player_count: Optional[int] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

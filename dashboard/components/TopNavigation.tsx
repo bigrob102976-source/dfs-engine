@@ -132,18 +132,22 @@ function ProfileMenu({ email, isAdmin }: { email: string; isAdmin: boolean }) {
   );
 }
 
-/** Sticky top bar: current slate indicator, optional page-specific
- * controls (e.g. the Optimizer's Projection Source selector, passed via
- * `rightSlot`), global search, refresh, theme toggle, notifications, and
- * profile. Every dashboard route renders this once via
- * app/dashboard/layout.tsx. */
+/** Sticky top bar: current date indicator, Milestone 26's global slate
+ * selector (`slateSelector`, always rendered -- distinct from
+ * `rightSlot` below, which is page-specific and opted into per page),
+ * optional page-specific controls (e.g. the Optimizer's Projection
+ * Source selector, passed via `rightSlot`), global search, refresh,
+ * theme toggle, notifications, and profile. Every dashboard route
+ * renders this once via app/dashboard/layout.tsx. */
 export function TopNavigation({
   slateLabel,
+  slateSelector,
   search,
   rightSlot,
   user,
 }: {
   slateLabel: string;
+  slateSelector?: ReactNode;
   search?: ReactNode;
   rightSlot?: ReactNode;
   user: { email: string; isAdmin: boolean };
@@ -154,6 +158,8 @@ export function TopNavigation({
         <span aria-hidden="true">📅</span>
         <span>{slateLabel}</span>
       </div>
+
+      {slateSelector}
 
       {rightSlot}
 

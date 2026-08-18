@@ -100,12 +100,16 @@ def _disambiguate_by_time(candidates: List[dict], time_text: Optional[str]) -> O
     return matches[0] if len(matches) == 1 else None
 
 
-def match_dk_games(dk_rows: List[DKSalaryRow], games: List[dict]) -> Dict[str, DKGameMatch]:
-    """One DKGameMatch per DISTINCT Game Info string appearing in the CSV."""
+def match_game_infos(game_infos: List[str], games: List[dict]) -> Dict[str, DKGameMatch]:
+    """One DKGameMatch per DISTINCT Game Info string -- the core matcher
+    both match_dk_games() (DKSalaryRow-based, used by the pool builder)
+    and Milestone 26's slate-listing game_ids resolution (provider-layer,
+    which only has raw "AWAY@HOME ..." strings per ProviderPlayer.game,
+    not full DKSalaryRow objects) share."""
     team_pair_index = _team_pair_index(games)
     results: Dict[str, DKGameMatch] = {}
 
-    for game_info in sorted({r.game_info for r in dk_rows}):
+    for game_info in sorted(set(game_infos)):
         parsed = parse_game_info(game_info)
         if not parsed.away_abbrev or not parsed.home_abbrev:
             results[game_info] = DKGameMatch(game_info, parsed.away_abbrev, parsed.home_abbrev, None, "unparseable")
@@ -127,6 +131,23 @@ def match_dk_games(dk_rows: List[DKSalaryRow], games: List[dict]) -> Dict[str, D
                 results[game_info] = DKGameMatch(game_info, parsed.away_abbrev, parsed.home_abbrev, None, "ambiguous_doubleheader")
 
     return results
+
+
+def match_dk_games(dk_rows: List[DKSalaryRow], games: List[dict]) -> Dict[str, DKGameMatch]:
+    """One DKGameMatch per DISTINCT Game Info string appearing in the CSV."""
+    return match_game_infos([r.game_info for r in dk_rows], games)
+
+
+def resolve_game_ids(game_infos: List[str], games: List[dict]) -> List[str]:
+    """Milestone 26: the sorted, deduplicated list of research game_ids a
+    set of raw DK "Game Info" strings resolves to -- used to populate
+    ProviderSlateInfo.game_ids so the rest of the dashboard can filter
+    every page to exactly the games on one slate. Silently drops
+    unmatched/ambiguous entries (already visible as warnings elsewhere,
+    e.g. dfs/player_pool.py::build_match_report) rather than raising --
+    slate LISTING must stay resilient to a handful of unresolved games."""
+    matches = match_game_infos(game_infos, games)
+    return sorted({m.research_game_id for m in matches.values() if m.research_game_id})
 
 
 def validate_slate(dk_rows: List[DKSalaryRow], package: dict) -> SlateValidation:

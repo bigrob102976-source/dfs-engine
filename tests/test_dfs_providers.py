@@ -254,6 +254,19 @@ def test_mock_provider_builds_real_identities_from_research_package(tmp_path):
     assert names == {"Away Ace", "Home Ace", "Leadoff Hitter", "Cleanup Hitter", "DH Hitter"}
 
 
+def test_mock_provider_populates_game_ids_and_player_count(tmp_path):
+    # Milestone 26: MockProvider already has full research data loaded,
+    # so it populates game_ids/player_count directly rather than needing
+    # the research_games passthrough param.
+    _write_research_package(tmp_path / "research_output", "2026-08-11")
+    provider = MockProvider(research_output_root=str(tmp_path / "research_output"), predictions_root=str(tmp_path / "predictions"))
+    result = provider.get_slate("2026-08-11")
+
+    slate = result.slates[0]
+    assert slate.game_ids == ["g1"]
+    assert slate.player_count == 5  # 2 pitchers + 3 hitters
+
+
 def test_mock_provider_raises_unavailable_without_research_package(tmp_path):
     provider = MockProvider(research_output_root=str(tmp_path / "research_output"), predictions_root=str(tmp_path / "predictions"))
     with pytest.raises(ProviderUnavailableError):

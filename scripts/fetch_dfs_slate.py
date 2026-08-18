@@ -28,10 +28,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dfs.providers.base import ProviderAuthenticationError, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.config import get_configured_provider
+from research.adapters.pitcher_input import ResearchPackageNotFoundError, load_research_package
 from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
 DEFAULT_OUTPUT_ROOT = "dfs_input"
+
+
+def _load_research_games(date: str) -> list:
+    """See scripts/list_dfs_slates.py's identical helper -- best-effort,
+    never fails this script."""
+    try:
+        package = load_research_package("research_output", date)
+    except ResearchPackageNotFoundError:
+        return []
+    return package.get("games", [])
 
 
 def _no_overwrite(path: Path) -> None:
@@ -93,8 +104,9 @@ def main() -> None:
         return
 
     print(f"\nProvider: {provider.name} (source: {source})")
+    research_games = _load_research_games(args.date)
     try:
-        result = provider.get_slate(args.date, sport=args.sport, site=args.site)
+        result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=research_games)
     except ProviderAuthenticationError as e:
         print(f"\nDFS SALARIES: AUTHENTICATION FAILED\n{e}")
         path = _save_document(args, status="auth_failed", reason=str(e), provider_name=provider.name, source=source)

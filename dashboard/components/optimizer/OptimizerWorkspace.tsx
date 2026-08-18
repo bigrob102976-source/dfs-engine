@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { MissingDataState } from "@/components/MissingDataState";
@@ -40,6 +41,7 @@ function formatTime(iso: string | null): string {
  * goes through /api/optimizer/* -- nothing here talks to Python
  * directly or invents projections/salaries/ownership. */
 export function OptimizerWorkspace() {
+  const searchParams = useSearchParams();
   const [hydrated, setHydrated] = useState(false);
 
   const [slates, setSlates] = useState<SlateOption[]>([]);
@@ -104,6 +106,30 @@ export function OptimizerWorkspace() {
       setHydrated(true);
     });
   }, []);
+
+  // 1b. Milestone 26: the global slate selector (top nav) drives every
+  // slate-aware page via a `?slate=` URL param -- if the Optimizer was
+  // navigated to (or is already open) with that param set, it takes
+  // priority over whatever slate was persisted from a previous session,
+  // so switching the global dropdown always updates the Optimizer too.
+  // Runs after hydration so it overrides rather than races the restore
+  // above; a page load with no `?slate=` param leaves the persisted
+  // selection untouched (direct navigation keeps working as before).
+  useEffect(() => {
+    if (!hydrated) return;
+    const urlSlateId = searchParams?.get("slate");
+    // Deferred one microtask, same rationale as the hydration effect
+    // above: keeps the setState call out of the effect body itself.
+    Promise.resolve().then(() => {
+      if (urlSlateId && urlSlateId !== selectedSlateId) {
+        setSelectedSlateId(urlSlateId);
+      }
+    });
+    // Only ever reacts to the URL param changing (or hydration completing)
+    // -- intentionally excludes selectedSlateId so a user manually picking
+    // a different slate in the dropdown isn't immediately overridden back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, searchParams]);
 
   // 2. Persist on every relevant change, once hydrated (never before --
   // that would clobber a saved session with fresh-mount defaults).
@@ -188,13 +214,29 @@ export function OptimizerWorkspace() {
           return;
         }
         const newPool: OptimizerPoolResult = data.pool;
+
+        // Milestone 26 live validation (real DK Main/Turbo CSVs, 2026-08-12)
+        // uncovered a real ID-collision hazard: DraftKings' numeric `ID`
+        // column is only unique WITHIN a single slate export, not across
+        // different slates sharing a date -- e.g. id 1006 was Merrill
+        // Kelly in that day's Main export but Trevor Larnach in Turbo's.
+        // Reconciling locks/exclusions/exposures by raw dkPlayerId across
+        // an actual slate CHANGE can therefore silently re-target a lock
+        // at a completely different person. Reconciling by id is still
+        // correct (and desired, to drop scratches) for a same-slate pool
+        // refresh, since id collisions can't happen within one slate's own
+        // export -- so only a genuine slate switch resets instead.
+        const isSlateSwitch = pool !== null && pool.slateId !== newPool.slateId;
         setPool(newPool);
 
-        // Reads the CURRENT (not necessarily latest-latest, but close
-        // enough for a user-driven, infrequent slate change) locks/
-        // exclusions/exposures via this callback's closure -- deliberately
-        // a dependency below rather than re-fetched on every toggle.
-        const reconciled = reconcileConstraintsWithPool(newPool, { locks, exclusions, maxExposure });
+        const reconciled = isSlateSwitch
+          ? {
+              state: { locks: [], exclusions: [], maxExposure: {} },
+              warnings: [
+                `Switched slates (${pool!.slateName ?? pool!.slateId} → ${newPool.slateName ?? newPool.slateId}) -- locks, exclusions, and exposure targets were reset. DraftKings player IDs are only unique within one slate export, so constraints can't be safely carried across different slates.`,
+              ],
+            }
+          : reconcileConstraintsWithPool(newPool, { locks, exclusions, maxExposure });
         setLocks(reconciled.state.locks);
         setExclusions(reconciled.state.exclusions);
         setMaxExposure(reconciled.state.maxExposure);
@@ -207,7 +249,7 @@ export function OptimizerWorkspace() {
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
-  }, [locks, exclusions, maxExposure]);
+  }, [locks, exclusions, maxExposure, pool]);
 
   useEffect(() => {
     if (!hydrated || !selectedSlateId) return;

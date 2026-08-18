@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/weather", label: "Weather", icon: "☁" },
   { href: "/dashboard/vegas", label: "Vegas", icon: "💰" },
   { href: "/dashboard/ownership", label: "Ownership", icon: "🧠" },
+  { href: "/dashboard/slates", label: "Slate Manager", icon: "🗂" },
   { href: "/dashboard/optimizer", label: "Optimizer", icon: "⚙" },
   { href: "/dashboard/portfolio", label: "Portfolio", icon: "📈" },
   { href: "/dashboard/yesterday", label: "Results", icon: "📉" },

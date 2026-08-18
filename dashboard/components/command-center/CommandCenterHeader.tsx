@@ -22,6 +22,7 @@ export function CommandCenterHeader({
   isMock,
   selectedSlateId,
   lastUpdated,
+  viewingSlateLabel,
 }: {
   date: string;
   gameCount: number;
@@ -29,6 +30,11 @@ export function CommandCenterHeader({
   isMock: boolean;
   selectedSlateId: string | null;
   lastUpdated: string | null;
+  /** Milestone 26: the label of the slate the global selector currently
+   * has active (null = Full Day / All Games) -- distinct from
+   * `selectedSlateId`, which reflects whichever slate the last one-click
+   * refresh resolved date-scoped artifacts against. */
+  viewingSlateLabel?: string | null;
 }) {
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-4 rounded-[var(--radius-card)] border border-border bg-bg-panel/80 p-5 shadow-[var(--shadow-card)] backdrop-blur">
@@ -37,6 +43,7 @@ export function CommandCenterHeader({
         <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-text">Today&apos;s Slate</h1>
         <p className="mt-0.5 text-xs text-text-faint">
           America/Chicago · {date} · {gameCount} game{gameCount === 1 ? "" : "s"}
+          {viewingSlateLabel ? <> · Viewing <span className="text-text-muted">{viewingSlateLabel}</span></> : ""}
         </p>
       </div>
 

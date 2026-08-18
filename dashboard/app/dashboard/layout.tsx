@@ -1,4 +1,5 @@
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { GlobalSlateSelector } from "@/components/layout/GlobalSlateSelector";
 import { Sidebar } from "@/components/Sidebar";
 import { TopNavigation } from "@/components/TopNavigation";
 import { requireAuth } from "@/lib/auth/guards";
@@ -14,6 +15,7 @@ import {
 import { getMockModeEnabled } from "@/lib/mockMode";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildSearchIndex } from "@/lib/search";
+import { resolveSlateContext } from "@/lib/slateContext";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,7 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
   const today = getTodayChicagoDate();
   const searchDate = latestKnownSlateDate();
   const mockModeEnabled = await getMockModeEnabled();
+  const slateCtx = await resolveSlateContext(today);
 
   let searchIndex: ReturnType<typeof buildSearchIndex> = [];
   if (searchDate) {
@@ -64,6 +67,7 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
         )}
         <TopNavigation
           slateLabel={slateLabel}
+          slateSelector={<GlobalSlateSelector slates={slateCtx.slates} />}
           search={<GlobalSearch index={searchIndex} />}
           user={{ email: user.email, isAdmin: user.role === "ADMIN" }}
         />

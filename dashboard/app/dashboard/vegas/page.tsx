@@ -8,6 +8,7 @@ import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import { loadEnvironmentReportHistory, loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { loadLatestDkMatchReport, loadLatestPitcherSnapshot } from "@/lib/loaders";
+import { effectiveGameIds, filterByGameIdField, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildVegasGameRows } from "@/lib/vegasIntelligence";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +19,22 @@ export const dynamic = "force-dynamic";
  * /dashboard/environment terminal reads (Milestone DS2) -- Vegas data
  * has always lived inside that report, this page is just its dedicated,
  * premium home. Never computes odds, never touches Projections,
- * Ownership, or the Optimizer. */
-export default async function VegasPage() {
+ * Ownership, or the Optimizer.
+ *
+ * Milestone 26: when a slate is selected via the global dropdown, every
+ * section on this page (coverage table, game rows, line-movement
+ * history) is filtered to exactly that slate's game_ids -- Full Day
+ * (the default) shows every MLB game, matching pre-Milestone-26
+ * behavior unchanged. */
+export default async function VegasPage(props: PageProps<"/dashboard/vegas">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
+
   const date = getTodayChicagoDate();
-  const report = loadLatestEnvironmentReport(date);
+  const slateCtx = await resolveSlateContext(date, slateId);
+  const gameIds = effectiveGameIds(slateCtx);
+  const fullDayReport = loadLatestEnvironmentReport(date);
+  const report = fullDayReport ? { ...fullDayReport, games: filterByGameIdField(fullDayReport.games, gameIds) } : null;
   const status = await getGameEnvironmentStatus(date);
 
   if ("error" in status) {
@@ -65,15 +78,17 @@ export default async function VegasPage() {
   const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
   const rows = buildVegasGameRows(report.games, pitcherSnapshot?.pitchers ?? []);
   const sampleVegas = gamesWithVegas[0]?.vegas ?? null;
-  const history = loadEnvironmentReportHistory(date);
-  const matchReport = loadLatestDkMatchReport(date).data;
+  const fullDayHistory = loadEnvironmentReportHistory(date);
+  const history = fullDayHistory.map((h) => ({ ...h, games: filterByGameIdField(h.games, gameIds) }));
+  const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
   const coverage = buildDkSlateVegasCoverage(matchReport, report);
+  const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 
   return (
     <div>
       <PageHeader
         title="Vegas Intelligence"
-        description="Track line movement, implied totals, betting trends, and AI market analysis."
+        description={`Track line movement, implied totals, betting trends, and AI market analysis.${slateDescription}`}
         actions={<VegasHeaderActions generatedAt={report.generated_at} providerName={sampleVegas?.provider_name ?? null} isMock={sampleVegas?.is_mock ?? false} />}
       />
       <VegasIntelligenceBoard report={report} rows={rows} history={history} coverage={coverage} />

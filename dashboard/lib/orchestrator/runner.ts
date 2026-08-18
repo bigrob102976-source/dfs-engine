@@ -580,6 +580,8 @@ async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<Pi
         slateName: (s.slate_name as string | null) ?? null,
         gameCount: (s.game_count as number | null) ?? null,
         startTime: (s.start_time as string | null) ?? null,
+        gameIds: Array.isArray(s.game_ids) ? (s.game_ids as string[]) : [],
+        playerCount: (s.player_count as number | null) ?? null,
       }));
       state.slateOptions = options;
       state.status = "needs_selection";

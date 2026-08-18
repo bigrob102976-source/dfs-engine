@@ -55,6 +55,21 @@ export interface SlateOption {
   slateName: string | null;
   gameCount: number | null;
   startTime: string | null;
+  // Milestone 26: the research game_ids this slate resolves to (empty
+  // when no Research Package was available to resolve against -- see
+  // dfs/providers/models.py::ProviderSlateInfo's own docstring) and the
+  // player count the provider reported, so every dashboard page can
+  // filter to exactly this slate without a second round trip.
+  gameIds: string[];
+  playerCount: number | null;
+}
+
+/** Minimal shape lib/slateFilters.ts's pure helpers need -- just the
+ * `selected` slate, not the full SlateContext (status/isMock/etc. from
+ * lib/slateContext.ts) -- so those pure, client-safe helpers don't need
+ * to import a server-only module's type. */
+export interface SlateContextLike {
+  selected: SlateOption | null;
 }
 
 export interface RunSummary {

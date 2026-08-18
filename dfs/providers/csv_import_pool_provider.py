@@ -15,7 +15,7 @@ baseline, must never be used as a salary source here.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.models import ProviderPlayer, ProviderSlateInfo, ProviderSlateResult
@@ -33,7 +33,9 @@ class CsvImportPoolProvider(DFSSalaryProvider):
     def __init__(self, external_snapshot_root: Path = DEFAULT_EXTERNAL_SNAPSHOT_ROOT):
         self.external_snapshot_root = external_snapshot_root
 
-    def get_slate(self, date: str, sport: str = "MLB", site: str = "draftkings") -> ProviderSlateResult:
+    def get_slate(
+        self, date: str, sport: str = "MLB", site: str = "draftkings", research_games: Optional[List[dict]] = None
+    ) -> ProviderSlateResult:
         if sport.upper() != "MLB":
             raise ProviderNoSlateError(f"CsvImportPoolProvider only supports MLB, got sport={sport!r}.")
 
@@ -67,7 +69,10 @@ class CsvImportPoolProvider(DFSSalaryProvider):
             )
             for p in usable
         ]
-        slate_info = ProviderSlateInfo(slate_id=slate_id, slate_name=slate_name, site=site, sport=sport, start_time=None, game_count=None)
+        slate_info = ProviderSlateInfo(
+            slate_id=slate_id, slate_name=slate_name, site=site, sport=sport, start_time=None,
+            game_count=None, game_ids=[], player_count=len(players),
+        )
 
         warnings = [
             f"Using {provider_name} CSV-imported projections as the player pool source -- "

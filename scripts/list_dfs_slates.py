@@ -23,6 +23,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dfs.providers.base import ProviderAuthenticationError, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.config import get_configured_provider
+from research.adapters.pitcher_input import ResearchPackageNotFoundError, load_research_package
+
+
+def _load_research_games(date: str) -> list:
+    """Best-effort: game_ids resolution is a nice-to-have for slate
+    listing, never a hard requirement -- a missing/not-yet-built
+    Research Package just means every slate's game_ids stays empty
+    (still perfectly safe/read-only), not a failure of this script."""
+    try:
+        package = load_research_package("research_output", date)
+    except ResearchPackageNotFoundError:
+        return []
+    return package.get("games", [])
 
 
 def _status_doc(status, reason, provider, source, slates=None, warnings=None):
@@ -54,8 +67,9 @@ def main() -> None:
         print(json.dumps(_status_doc("not_connected", reason, None, source)))
         return
 
+    research_games = _load_research_games(args.date)
     try:
-        result = provider.get_slate(args.date, sport=args.sport, site=args.site)
+        result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=research_games)
     except ProviderAuthenticationError as e:
         print(json.dumps(_status_doc("auth_failed", str(e), provider, source)))
         return

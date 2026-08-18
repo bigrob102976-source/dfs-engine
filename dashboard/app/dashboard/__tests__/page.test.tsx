@@ -18,7 +18,7 @@ function jsonResponse(body: unknown) {
 let tmpDir: string;
 let originalRoot: string | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-command-center-page-"));
   originalRoot = process.env.MLB_DFS_ROOT;
   process.env.MLB_DFS_ROOT = tmpDir;
@@ -35,14 +35,29 @@ beforeEach(() => {
       removeEventListener: vi.fn(),
     })),
   );
+  // Milestone 26: TodaysSlatePage now calls resolveSlateContext(), which
+  // shells out to scripts/list_dfs_slates.py -- stub the runner so tests
+  // never spawn a real Python process.
+  const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
+  __setPythonRunnerForTests(async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      status: "not_connected", reason: null, provider_name: null, provider_type: null,
+      is_mock: false, is_connected: false, source: "unconfigured", slates: [], slates_available: 0,
+    }),
+    stderr: "",
+    command: [],
+  }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (originalRoot === undefined) delete process.env.MLB_DFS_ROOT;
   else process.env.MLB_DFS_ROOT = originalRoot;
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  const { __resetPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
+  __resetPythonRunnerForTests();
 });
 
 function writeJson(relPath: string, data: unknown) {
@@ -150,7 +165,7 @@ function seedProjectionSourceComparison() {
 describe("TodaysSlatePage (AI Slate Command Center)", () => {
   it("shows a clean empty-data state with no raw script path leaking, when nothing exists yet", async () => {
     const TodaysSlatePage = (await import("../page")).default;
-    const jsx = await TodaysSlatePage();
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     expect(screen.getByText("Today's Slate")).toBeInTheDocument();
@@ -164,7 +179,7 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
     seedPitcherSnapshot();
 
     const TodaysSlatePage = (await import("../page")).default;
-    const jsx = await TodaysSlatePage();
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     // KPI cards animate in via AnimatedCounter (deferred state update on a
@@ -201,7 +216,7 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
     seedAiProjectionSnapshot();
 
     const TodaysSlatePage = (await import("../page")).default;
-    const jsx = await TodaysSlatePage();
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     // Bottom "AI Projection Engine" section -- Tarik Skubal is the only
@@ -222,7 +237,7 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
     seedProjectionSourceComparison();
 
     const TodaysSlatePage = (await import("../page")).default;
-    const jsx = await TodaysSlatePage();
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     expect(screen.getByText("AI Projection Performance")).toBeInTheDocument();
@@ -233,7 +248,7 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
 
   it("shows a not-generated message for AI Projection Performance when nothing has been evaluated", async () => {
     const TodaysSlatePage = (await import("../page")).default;
-    const jsx = await TodaysSlatePage();
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     // "Recent Accuracy" shares the exact same empty-state phrasing, so

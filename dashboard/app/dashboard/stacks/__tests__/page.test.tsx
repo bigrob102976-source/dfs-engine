@@ -13,25 +13,38 @@ function jsonResponse(body: unknown) {
 
 let originalRoot: string | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
   originalRoot = process.env.MLB_DFS_ROOT;
   process.env.MLB_DFS_ROOT = "C:\\nonexistent-dfs-root-for-stacks-page-test";
   vi.stubGlobal(
     "fetch",
     vi.fn(() => jsonResponse({ run: null })),
   );
+  const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
+  __setPythonRunnerForTests(async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      status: "not_connected", reason: null, provider_name: null, provider_type: null,
+      is_mock: false, is_connected: false, source: "unconfigured", slates: [], slates_available: 0,
+    }),
+    stderr: "",
+    command: [],
+  }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (originalRoot === undefined) delete process.env.MLB_DFS_ROOT;
   else process.env.MLB_DFS_ROOT = originalRoot;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  const { __resetPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
+  __resetPythonRunnerForTests();
 });
 
 describe("StacksPage (missing batter snapshot)", () => {
-  it("shows Refresh Required Data instead of a developer command", () => {
-    render(<StacksPage />);
+  it("shows Refresh Required Data instead of a developer command", async () => {
+    const jsx = await StacksPage({ searchParams: Promise.resolve({}) } as never);
+    render(jsx);
 
     expect(screen.getByText("Refresh Required Data")).toBeInTheDocument();
     expect(screen.queryByText(/python /)).not.toBeInTheDocument();

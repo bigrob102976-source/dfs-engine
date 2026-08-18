@@ -1,5 +1,5 @@
 from dfs.models import DKSalaryRow
-from dfs.slate_validation import parse_game_info, validate_slate
+from dfs.slate_validation import parse_game_info, resolve_game_ids, validate_slate
 
 
 def _dk_row(game_info, team="NYY"):
@@ -87,3 +87,28 @@ def test_unparseable_game_info_does_not_crash():
     dk_rows = [_dk_row("Postponed")]
     result = validate_slate(dk_rows, {"games": games})
     assert result.dk_game_matches["Postponed"].status == "unparseable"
+
+
+# ----------------------------------------------------------------------------
+# resolve_game_ids (Milestone 26)
+# ----------------------------------------------------------------------------
+
+
+def test_resolve_game_ids_returns_sorted_deduplicated_ids():
+    games = [
+        _game("222", "NYY", "BOS", "2026-08-11T23:05:00+00:00"),
+        _game("111", "SD", "LAD", "2026-08-11T22:10:00+00:00"),
+    ]
+    result = resolve_game_ids(["NYY@BOS 07:05PM ET", "SD@LAD 06:10PM ET", "NYY@BOS 07:05PM ET"], games)
+    assert result == ["111", "222"]
+
+
+def test_resolve_game_ids_drops_unmatched_and_ambiguous_entries():
+    games = [_game("111", "NYY", "BOS", "2026-08-11T23:05:00+00:00")]
+    result = resolve_game_ids(["NYY@BOS 07:05PM ET", "ZZZ@YYY 08:00PM ET", "garbage"], games)
+    assert result == ["111"]
+
+
+def test_resolve_game_ids_empty_input_returns_empty_list():
+    assert resolve_game_ids([], []) == []
+    assert resolve_game_ids(["NYY@BOS 07:05PM ET"], []) == []

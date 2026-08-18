@@ -28,6 +28,7 @@ from dfs.draftkings_parser import DraftKingsCSVFormatError, parse_salary_csv
 from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.draftkings_csv_storage import DEFAULT_DFS_INPUT_ROOT, DraftKingsUpload, list_uploads
 from dfs.providers.models import ProviderPlayer, ProviderSlateInfo, ProviderSlateResult
+from dfs.slate_validation import resolve_game_ids
 
 
 def _opponent_from_game_info(team: str, game_info: str) -> Optional[str]:
@@ -63,7 +64,9 @@ class DraftKingsCsvProvider(DFSSalaryProvider):
     def __init__(self, dfs_input_root: str = str(DEFAULT_DFS_INPUT_ROOT)):
         self.dfs_input_root = dfs_input_root
 
-    def get_slate(self, date: str, sport: str = "MLB", site: str = "draftkings") -> ProviderSlateResult:
+    def get_slate(
+        self, date: str, sport: str = "MLB", site: str = "draftkings", research_games: Optional[List[dict]] = None
+    ) -> ProviderSlateResult:
         if sport.upper() != "MLB":
             raise ProviderNoSlateError(f"DraftKingsCsvProvider only supports MLB, got sport={sport!r}.")
 
@@ -91,9 +94,10 @@ class DraftKingsCsvProvider(DFSSalaryProvider):
 
             slate_id = f"dkcsv-{upload.slate_label.lower().replace(' ', '-')}-{date}"
             games = {row.game_info for row in dk_rows if row.game_info}
+            game_ids = resolve_game_ids(list(games), research_games) if research_games else []
             slates.append(ProviderSlateInfo(
                 slate_id=slate_id, slate_name=upload.slate_label, site=site, sport=sport,
-                start_time=None, game_count=len(games),
+                start_time=None, game_count=len(games), game_ids=game_ids, player_count=len(dk_rows),
             ))
             players_by_slate[slate_id] = [
                 ProviderPlayer(

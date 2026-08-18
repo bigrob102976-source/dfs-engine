@@ -46,6 +46,11 @@ describe("TopNavigation", () => {
     expect(screen.getByText("Projection Source")).toBeInTheDocument();
   });
 
+  it("renders the Milestone 26 global slate selector on every page (distinct from rightSlot)", () => {
+    renderTopNav({ slateSelector: <span>Slate: Main</span> });
+    expect(screen.getByText("Slate: Main")).toBeInTheDocument();
+  });
+
   it("renders the theme toggle", () => {
     renderTopNav();
     expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument();

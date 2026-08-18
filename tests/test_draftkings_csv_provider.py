@@ -96,3 +96,41 @@ def test_rejects_non_mlb_sport(tmp_path):
 
 def test_implements_interface():
     assert isinstance(DraftKingsCsvProvider(dfs_input_root="unused"), DFSSalaryProvider)
+
+
+# ----------------------------------------------------------------------------
+# game_ids / player_count (Milestone 26)
+# ----------------------------------------------------------------------------
+
+
+def test_game_ids_empty_when_no_research_games_passed(tmp_path):
+    save_upload(MAIN_CSV, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
+    result = provider.get_slate("2026-08-14")
+    assert result.slates[0].game_ids == []
+
+
+def test_game_ids_resolved_when_research_games_passed(tmp_path):
+    save_upload(MAIN_CSV, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    save_upload(TURBO_CSV, "2026-08-14", "Turbo", "DKSalariesTurbo.csv", output_root=tmp_path)
+    research_games = [
+        {"game_id": "g-main", "away_team_abbr": "TOR", "home_team_abbr": "BOS", "game_datetime_utc": "2026-08-14T23:05:00Z"},
+        {"game_id": "g-turbo", "away_team_abbr": "NYY", "home_team_abbr": "BAL", "game_datetime_utc": "2026-08-14T23:05:00Z"},
+    ]
+
+    provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
+    result = provider.get_slate("2026-08-14", research_games=research_games)
+
+    by_name = {s.slate_name: s for s in result.slates}
+    assert by_name["Main"].game_ids == ["g-main"]
+    assert by_name["Turbo"].game_ids == ["g-turbo"]
+    # No cross-slate leakage: Main never resolves Turbo's game and vice versa.
+    assert "g-turbo" not in by_name["Main"].game_ids
+    assert "g-main" not in by_name["Turbo"].game_ids
+
+
+def test_player_count_matches_dk_row_count(tmp_path):
+    save_upload(MAIN_CSV, "2026-08-14", "Main", "DKSalaries.csv", output_root=tmp_path)
+    provider = DraftKingsCsvProvider(dfs_input_root=str(tmp_path))
+    result = provider.get_slate("2026-08-14")
+    assert result.slates[0].player_count == 2  # Ace Pitcher + Lead Off

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { buildHitterRows } from "@/lib/normalize";
+import { effectiveGameIds, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildStackSummaries } from "@/lib/stacks";
 
 export const dynamic = "force-dynamic";
@@ -11,19 +12,25 @@ function fmt(v: number | null): string {
   return v === null ? "--" : v.toFixed(1);
 }
 
-export default function StacksPage() {
-  const date = getTodayChicagoDate();
-  const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
-  const ownership = date ? loadLatestOwnershipSnapshot(date).data : null;
+export default async function StacksPage(props: PageProps<"/dashboard/stacks">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const rows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
+  const date = getTodayChicagoDate();
+  const slateCtx = await resolveSlateContext(date, slateId);
+  const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
+  const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
+
+  const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
+  const rows = filterByGameIds(allRows, effectiveGameIds(slateCtx));
   const stacks = buildStackSummaries(rows, ownership?.team_popularity ?? {});
+  const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 
   return (
     <div>
       <PageHeader
         title="Stacks"
-        description="Existing per-team data summarized -- no simulation. Team Popularity requires an ownership snapshot to be loaded."
+        description={`Existing per-team data summarized -- no simulation. Team Popularity requires an ownership snapshot to be loaded.${slateDescription}`}
       />
 
       {!batterSnapshot ? (

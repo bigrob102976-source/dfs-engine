@@ -68,6 +68,11 @@ def main() -> None:
     parser.add_argument("--date", required=True)
     parser.add_argument("--pool", required=True, help="Path to a dk_player_pool_<timestamp>.json file")
     parser.add_argument("--output-root", default="ownership_predictions")
+    parser.add_argument(
+        "--slate-id", default=None,
+        help="Milestone 26: scopes the saved snapshot to ownership_predictions/<date>/<slate-id>/ so multiple "
+             "real DK slates sharing a date never overwrite each other's ownership. Omit for old date-only behavior.",
+    )
     args = parser.parse_args()
 
     pool_doc = _load_pool(args.pool)
@@ -167,9 +172,9 @@ def main() -> None:
     document = build_ownership_document(
         args.date, generated_at, OWNERSHIP_MODEL_VERSION, args.pool,
         pool_doc.get("pitcher_snapshot_path"), pool_doc.get("batter_snapshot_path"),
-        projections, team_popularity, normalization_report,
+        projections, team_popularity, normalization_report, slate_id=args.slate_id,
     )
-    path = save_ownership_document(document, args.date, ts, output_root=args.output_root)
+    path = save_ownership_document(document, args.date, ts, output_root=args.output_root, slate_id=args.slate_id)
     print(f"Ownership snapshot saved (immutable): {path}")
 
 

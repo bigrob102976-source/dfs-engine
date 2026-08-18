@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Milestone 26: OptimizerWorkspace reads `?slate=` via useSearchParams()
+// to sync with the global slate selector -- an empty URL (no slate=)
+// here matches every existing test's assumption that the Optimizer's
+// own dropdown/localStorage-persisted selection is authoritative.
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 import { OptimizerWorkspace } from "../OptimizerWorkspace";
 
 const SLATES_READY = {
@@ -269,6 +277,57 @@ describe("OptimizerWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lock Leadoff Hitter" }));
     expect(screen.getByRole("button", { name: "Unlock Leadoff Hitter" })).toBeInTheDocument();
     expect(screen.getByText("Locked (1)")).toBeInTheDocument();
+  });
+
+  it("Milestone 26: resets locks/exclusions on a real slate switch instead of reconciling by raw dkPlayerId, since DK ids collide across different slates' own exports (confirmed via live validation against real 2026-08-12 Main/Turbo CSVs, where id 1006 was Merrill Kelly in Main but Trevor Larnach in Turbo)", async () => {
+    const TWO_SLATES = {
+      date: "2026-08-12",
+      status: "ready",
+      reason: null,
+      providerName: "mock_dev_provider",
+      providerType: "mock",
+      isMock: true,
+      isConnected: true,
+      source: "mock_explicit",
+      slates: [
+        { slateId: "main", slateName: "Main", gameCount: 9, startTime: "7:05 PM" },
+        { slateId: "turbo", slateName: "Turbo", gameCount: 4, startTime: "8:10 PM" },
+      ],
+      slatesAvailable: 2,
+    };
+    // Turbo's pool reuses "d1" for a completely different person -- exactly
+    // the real DK-CSV-export collision live validation found.
+    const TURBO_POOL = {
+      ...POOL_RESULT,
+      slateId: "turbo",
+      slateName: "Turbo",
+      players: [{ ...POOL_RESULT.players[0], dkPlayerId: "d1", name: "Different Turbo Player", team: "TB" }],
+      activePlayers: 1,
+    };
+    let poolCallCount = 0;
+    installFetchMock({
+      "/api/optimizer/slates": () => jsonResponse(TWO_SLATES),
+      "/api/optimizer/pool": () => {
+        poolCallCount += 1;
+        return jsonResponse({ pool: poolCallCount === 1 ? { ...POOL_RESULT, slateId: "main" } : TURBO_POOL });
+      },
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Select a slate")).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Slate:/ }), { target: { value: "main" } });
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "Lock Leadoff Hitter" }));
+    expect(screen.getByText("Locked (1)")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Slate:/ }), { target: { value: "turbo" } });
+    await waitFor(() => expect(screen.getByText("Different Turbo Player")).toBeInTheDocument(), { timeout: 5000 });
+
+    // The stale "d1" lock must NOT silently re-target the new pool's "d1"
+    // (Different Turbo Player) -- it must be reset, not reconciled by id.
+    expect(screen.queryByText("Locked (1)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lock Different Turbo Player" })).toBeInTheDocument();
+    expect(screen.getByText(/Switched slates.*Main.*Turbo.*reset/)).toBeInTheDocument();
   });
 
   it("runs the full build flow and renders the resulting lineups", async () => {

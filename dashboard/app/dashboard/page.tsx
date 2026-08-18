@@ -49,6 +49,7 @@ import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
+import { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildStackSummaries } from "@/lib/stacks";
 import { buildYesterdaySummary, findLatestEvaluatedDate } from "@/lib/yesterday";
 
@@ -66,21 +67,29 @@ function fmt(v: number | null, digits = 1): string {
  * or ownership value, and the existing operational widgets (RefreshPanel,
  * SlateReadiness, Artifact Detail, External Projections status) remain
  * on this same page, unchanged, further down. */
-export default function TodaysSlatePage() {
+export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
+
   const date = getTodayChicagoDate();
+  const slateCtx = await resolveSlateContext(date, slateId);
+  const gameIds = effectiveGameIds(slateCtx);
   const summary = buildSlateSummary(date);
   const readiness = getArtifactStatus(date);
   const statuses = buildPipelineStatuses(date);
 
   const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
   const batterSnapshot = loadLatestBatterSnapshot(date).data;
-  const ownership = loadLatestOwnershipSnapshot(date).data;
-  const environmentReport = loadLatestEnvironmentReport(date);
-  const matchReport = loadLatestDkMatchReport(date).data;
+  const ownership = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
+  const fullDayEnvironmentReport = loadLatestEnvironmentReport(date);
+  const environmentReport = fullDayEnvironmentReport
+    ? { ...fullDayEnvironmentReport, games: filterByGameIdField(fullDayEnvironmentReport.games, gameIds) }
+    : null;
+  const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
   const providerSlate = loadLatestProviderSlate(date).data;
 
-  const pitcherRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null);
-  const hitterRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);
+  const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null), gameIds);
+  const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null), gameIds);
   const stacks = buildStackSummaries(hitterRows, ownership?.team_popularity ?? {});
 
   // Milestone 20: AI Projection Engine -- joined onto the same rows
@@ -148,6 +157,7 @@ export default function TodaysSlatePage() {
         isMock={Boolean(providerSlate?.is_mock)}
         selectedSlateId={typeof providerSlate?.selected_slate_id === "string" ? (providerSlate.selected_slate_id as string) : null}
         lastUpdated={lastUpdated}
+        viewingSlateLabel={slateCtx.selected ? formatSlateLabel(slateCtx.selected) : null}
       />
 
       {alerts.length > 0 && (

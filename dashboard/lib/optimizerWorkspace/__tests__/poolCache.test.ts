@@ -117,8 +117,11 @@ function defaultHandlers(): Record<string, Handler> {
       });
       return ok();
     },
-    "scripts/project_dk_ownership.py": () => {
-      writeJson(`ownership_predictions/${DATE}/ownership_${nextTs()}.json`, {
+    "scripts/project_dk_ownership.py": (args) => {
+      const slateId = argValue(args, "--slate-id");
+      const dir = slateId ? `ownership_predictions/${DATE}/${slateId}` : `ownership_predictions/${DATE}`;
+      writeJson(`${dir}/ownership_${nextTs()}.json`, {
+        slate_id: slateId ?? null,
         players: [
           { dk_player_id: "d1", mlb_player_id: "h1", projected_ownership: 22, leverage_score: 5 },
           { dk_player_id: "d2", mlb_player_id: "p1", projected_ownership: 30, leverage_score: -2 },
@@ -169,7 +172,9 @@ describe("listSlates", () => {
     expect(result.isConnected).toBe(true);
     expect(result.source).toBe("mock_explicit");
     expect(result.slatesAvailable).toBe(1);
-    expect(result.slates).toEqual([{ slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null }]);
+    expect(result.slates).toEqual([
+      { slateId: "mock-main", slateName: "Mock Main (Dev)", gameCount: 15, startTime: null, gameIds: [], playerCount: null },
+    ]);
   });
 
   it("reports not_connected cleanly for an explicit, unrecognized provider name (never falls back silently)", async () => {
@@ -332,6 +337,63 @@ describe("loadPool", () => {
     expect(hitter.nativeDelta).toBeCloseTo(-0.5, 5); // 9.5 - 10 (independent projection)
     expect(hitter.nativeConfidence).toBe(70);
     expect(hitter.nativeReasons).toEqual(["r1"]);
+  });
+
+  it("Milestone 26: two slates sharing a date never leak each other's ownership (confirmed real bug fix)", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      "scripts/build_dfs_pool_from_provider.py": (args) => {
+        const providerSlatePath = argValue(args, "--provider-slate")!;
+        const providerDoc = JSON.parse(fs.readFileSync(providerSlatePath, "utf-8")) as { selected_slate_id: string };
+        const slateId = providerDoc.selected_slate_id;
+        const ts = nextTs();
+        writeJson(`dfs_input/${DATE}/dk_player_pool_${ts}.json`, {
+          roster_feasibility_pass: true,
+          player_count: 1,
+          players: [
+            {
+              dk_player_id: slateId, mlb_player_id: `p-${slateId}`, name: `${slateId} player`, team: "BOS",
+              player_type: "pitcher", dk_positions: ["P"], salary: 8000, projection: 20, ceiling: 32,
+              risk_score: 25, confidence: 90, batting_order: null, game_id: "g1", opponent: "TOR",
+              lineup_status: "active", match_status: "matched",
+            },
+          ],
+        });
+        writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, { dk_entries: 1, matched_to_mlb: 1, unmatched_count: 0, dk_games_total: 1 });
+        return ok();
+      },
+      "scripts/fetch_dfs_slate.py": (args) => {
+        const slateId = argValue(args, "--slate-id") ?? "mock-main";
+        writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+          status: "ready", provider_name: "mock_dev_provider", provider_type: "mock", is_mock: true,
+          source: "mock_explicit", selected_slate_id: slateId,
+          slates: [{ slate_id: slateId, slate_name: slateId, game_count: 1, start_time: null }], players: [],
+        });
+        return ok();
+      },
+      "scripts/project_dk_ownership.py": (args) => {
+        const slateId = argValue(args, "--slate-id")!;
+        const own = slateId === "turbo" ? 55 : 12;
+        writeJson(`ownership_predictions/${DATE}/${slateId}/ownership_${nextTs()}.json`, {
+          slate_id: slateId,
+          players: [{ dk_player_id: slateId, mlb_player_id: `p-${slateId}`, projected_ownership: own, leverage_score: 0 }],
+        });
+        return ok();
+      },
+    };
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { loadPool } = await import("../poolCache");
+    const main = await loadPool(DATE, "main");
+    const turbo = await loadPool(DATE, "turbo");
+
+    expect(main.players[0].ownership).toBe(12);
+    expect(turbo.players[0].ownership).toBe(55);
+    // Loading Main again after Turbo must still show Main's own ownership, not Turbo's.
+    const mainAgain = await loadPool(DATE, "main", true);
+    expect(mainAgain.players[0].ownership).toBe(12);
   });
 
   it("hasNativeProjections is false and native fields stay null when no snapshot exists", async () => {

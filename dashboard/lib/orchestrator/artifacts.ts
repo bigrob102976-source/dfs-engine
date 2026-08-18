@@ -58,8 +58,13 @@ export function matchReportFingerprint(date: string): Fingerprint {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_match_report_");
 }
 
-export function ownershipFingerprint(date: string): Fingerprint {
-  return fingerprintLatest(artifactPath(ARTIFACT_DIRS.ownershipPredictions, date), "ownership_");
+/** Milestone 26: pass `slateId` to check the slate-scoped
+ * ownership_predictions/<date>/<slateId>/ directory ownership/
+ * persistence.py now saves into per-slate -- omitting it checks the
+ * legacy date-only directory (pre-Milestone-26 artifacts). */
+export function ownershipFingerprint(date: string, slateId?: string | null): Fingerprint {
+  const dir = slateId ? artifactPath(ARTIFACT_DIRS.ownershipPredictions, date, slateId) : artifactPath(ARTIFACT_DIRS.ownershipPredictions, date);
+  return fingerprintLatest(dir, "ownership_");
 }
 
 export function lineupSetFingerprint(date: string): Fingerprint {

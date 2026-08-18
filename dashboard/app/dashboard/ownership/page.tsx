@@ -2,6 +2,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestOwnershipSnapshot } from "@/lib/loaders";
+import { formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +14,25 @@ function fmt(v: number | null | undefined, digits = 1): string {
  * highest-owned first, with each player's leverage score alongside so
  * chalk and contrarian plays are visible at a glance. Read-only --
  * ownership projections themselves are computed entirely by
- * ownership/ (Milestone 9/10), never recomputed here. */
-export default function OwnershipPage() {
+ * ownership/ (Milestone 9/10), never recomputed here.
+ *
+ * Milestone 26: ownership is inherently SLATE-RELATIVE (a $9,500 pitcher
+ * means something different on a 3-game Turbo slate than a 9-game Main
+ * slate -- see ownership/slate_normalization.py) -- when a slate is
+ * selected, this reads that slate's own ownership_predictions/<date>/
+ * <slateId>/ snapshot, never another slate's or a stale merged one. */
+export default async function OwnershipPage(props: PageProps<"/dashboard/ownership">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
+
   const date = getTodayChicagoDate();
-  const snapshot = loadLatestOwnershipSnapshot(date).data;
+  const slateCtx = await resolveSlateContext(date, slateId);
+  const snapshot = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
+  const slateDescription = slateCtx.selected ? ` (${formatSlateLabel(slateCtx.selected)})` : "";
 
   return (
     <div>
-      <PageHeader title="Ownership" description={snapshot ? `Projected ownership for ${date}'s slate.` : undefined} />
+      <PageHeader title="Ownership" description={snapshot ? `Projected ownership for ${date}'s slate${slateDescription}.` : undefined} />
 
       {!snapshot ? (
         <EmptyState

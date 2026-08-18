@@ -85,7 +85,9 @@ class MockProvider(DFSSalaryProvider):
         self.research_output_root = research_output_root
         self.predictions_root = predictions_root
 
-    def get_slate(self, date: str, sport: str = "MLB", site: str = "draftkings") -> ProviderSlateResult:
+    def get_slate(
+        self, date: str, sport: str = "MLB", site: str = "draftkings", research_games: Optional[List[dict]] = None
+    ) -> ProviderSlateResult:
         if sport.upper() != "MLB":
             raise ProviderNoSlateError(f"MockProvider only supports MLB, got sport={sport!r}.")
 
@@ -145,7 +147,7 @@ class MockProvider(DFSSalaryProvider):
 
         slate_info = ProviderSlateInfo(
             slate_id=slate_id, slate_name="Mock Main (Dev)", site=site, sport=sport,
-            start_time=None, game_count=len(games_by_id),
+            start_time=None, game_count=len(games_by_id), game_ids=sorted(games_by_id.keys()), player_count=len(players),
         )
         return ProviderSlateResult(
             slates=[slate_info], players_by_slate={slate_id: players}, source=self.name,

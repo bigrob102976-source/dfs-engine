@@ -161,6 +161,7 @@ export interface TeamPopularity extends JsonRecord {
 
 export interface OwnershipSnapshot extends TimestampFields, JsonRecord {
   slate_date: string;
+  slate_id?: string | null;
   model_version: string;
   source_dk_player_pool_path?: string;
   pitcher_snapshot_reference?: string | null;
@@ -211,6 +212,11 @@ export interface DKPlayerPool extends JsonRecord {
   roster_feasibility_pass?: boolean;
   player_count: number;
   players: DFSPlayer[];
+  /** Milestone 26: set by scripts/build_dfs_pool_from_provider.py's
+   * save_pool(extra_metadata=...) call -- which specific provider slate
+   * this pool was built for, when built via the provider pipeline
+   * (never set for the older manual --csv build path). */
+  selected_slate_id?: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -29,9 +29,20 @@ const STATUS_OK = JSON.stringify({
   report: { exists: false, generated_at: null, game_count: null, engine_version: null },
 });
 
-function makeStatusRunner(result: PythonRunResult): PythonRunner {
+const NO_SLATES = ok(
+  JSON.stringify({
+    status: "not_connected", reason: null, provider_name: null, provider_type: null,
+    is_mock: false, is_connected: false, source: "unconfigured", slates: [], slates_available: 0,
+  }),
+);
+
+// Milestone 26: VegasPage now also calls resolveSlateContext(), which
+// shells out to scripts/list_dfs_slates.py -- every test needs that
+// stubbed too, not just the Game Environment status check.
+function makeStatusRunner(result: PythonRunResult, slatesResult: PythonRunResult = NO_SLATES): PythonRunner {
   return async (script) => {
     if (script === "scripts/game_environment_status.py") return result;
+    if (script === "scripts/list_dfs_slates.py") return slatesResult;
     throw new Error(`Unexpected script call in test: ${script}`);
   };
 }
@@ -66,7 +77,7 @@ describe("VegasPage", () => {
     __setPythonRunnerForTests(makeStatusRunner(ok(STATUS_OK)));
 
     const VegasPage = (await import("../page")).default;
-    const jsx = await VegasPage();
+    const jsx = await VegasPage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     expect(screen.getByText("No Games")).toBeInTheDocument();
@@ -97,7 +108,7 @@ describe("VegasPage", () => {
     setRunnerAgain(makeStatusRunner(ok(STATUS_OK)));
 
     const VegasPage = (await import("../page")).default;
-    const jsx = await VegasPage();
+    const jsx = await VegasPage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     expect(screen.getByText("Vegas Provider / NOT CONNECTED")).toBeInTheDocument();
@@ -111,7 +122,7 @@ describe("VegasPage", () => {
     __setPythonRunnerForTests(makeStatusRunner(fail()));
 
     const VegasPage = (await import("../page")).default;
-    const jsx = await VegasPage();
+    const jsx = await VegasPage({ searchParams: Promise.resolve({}) } as never);
     render(jsx);
 
     expect(screen.getByText("Provider Offline")).toBeInTheDocument();

@@ -70,6 +70,8 @@ export async function listSlates(date: string): Promise<SlateListResult> {
     slateName: (s.slate_name as string | null) ?? null,
     gameCount: (s.game_count as number | null) ?? null,
     startTime: (s.start_time as string | null) ?? null,
+    gameIds: Array.isArray(s.game_ids) ? (s.game_ids as string[]) : [],
+    playerCount: (s.player_count as number | null) ?? null,
   }));
 
   return {
@@ -240,9 +242,16 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   // anything else goes wrong, browsing/building continues without
   // ownership rather than failing slate selection entirely.
   let ownershipPath: string | null = null;
-  const ownBefore = ownershipFingerprint(date);
-  const ownResult = await runPythonScript("scripts/project_dk_ownership.py", ["--date", date, "--pool", poolAfter.path]);
-  const ownAfter = ownershipFingerprint(date);
+  const ownBefore = ownershipFingerprint(date, slateId);
+  const ownResult = await runPythonScript("scripts/project_dk_ownership.py", [
+    "--date",
+    date,
+    "--pool",
+    poolAfter.path,
+    "--slate-id",
+    slateId,
+  ]);
+  const ownAfter = ownershipFingerprint(date, slateId);
   if (ownResult.exitCode === 0 && fingerprintChanged(ownBefore, ownAfter)) {
     ownershipPath = ownAfter.path;
   }

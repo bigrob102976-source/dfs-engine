@@ -37,16 +37,62 @@ export function loadLatestBatterSnapshot(date: string): Loaded<BatterSnapshot> {
   return loadLatest<BatterSnapshot>(artifactPath(ARTIFACT_DIRS.predictions, date), "batter_board_");
 }
 
-export function loadLatestOwnershipSnapshot(date: string): Loaded<OwnershipSnapshot> {
-  return loadLatest<OwnershipSnapshot>(artifactPath(ARTIFACT_DIRS.ownershipPredictions, date), "ownership_");
+/** Milestone 26: ownership is estimated relative to ONE slate's player
+ * pool, so when `slateId` is given this reads ownership_predictions/
+ * <date>/<slateId>/ownership_*.json -- a DIFFERENT slate sharing the
+ * same date never overwrites/leaks into this result (see
+ * ownership/persistence.py's module docstring for the save-side half
+ * of this fix). Omitting `slateId` preserves the exact pre-Milestone-26
+ * date-only path, so artifacts written before this milestone remain
+ * readable unchanged. */
+export function loadLatestOwnershipSnapshot(date: string, slateId?: string | null): Loaded<OwnershipSnapshot> {
+  const dir = slateId ? artifactPath(ARTIFACT_DIRS.ownershipPredictions, date, slateId) : artifactPath(ARTIFACT_DIRS.ownershipPredictions, date);
+  return loadLatest<OwnershipSnapshot>(dir, "ownership_");
 }
 
-export function loadLatestDKPlayerPool(date: string): Loaded<DKPlayerPool> {
-  return loadLatest<DKPlayerPool>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_player_pool_");
+/** Milestone 26: dfs_input/<date>/dk_player_pool_*.json isn't stored in
+ * per-slate subfolders (unlike ownership_predictions/ -- see
+ * ownership/persistence.py's module docstring for why that one needed
+ * to be) -- but every pool built via the provider pipeline (scripts/
+ * build_dfs_pool_from_provider.py) already stamps its own
+ * `selected_slate_id` on the saved document. When `slateId` is given,
+ * this scans every pool file for the date (oldest first) and returns
+ * the LATEST one whose selected_slate_id matches, so a page showing
+ * "Turbo" never displays salaries/positions from whichever slate the
+ * Optimizer happened to build most recently. Omitting `slateId`
+ * preserves the exact previous "just take the newest file" behavior. */
+export function loadLatestDKPlayerPool(date: string, slateId?: string | null): Loaded<DKPlayerPool> {
+  if (!slateId) {
+    return loadLatest<DKPlayerPool>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_player_pool_");
+  }
+  const dir = artifactPath(ARTIFACT_DIRS.dfsInput, date);
+  const files = findAllFiles(dir, "dk_player_pool_");
+  for (let i = files.length - 1; i >= 0; i -= 1) {
+    const data = safeReadJson<DKPlayerPool>(files[i]);
+    if (data && data.selected_slate_id === slateId) {
+      return { data, path: files[i] };
+    }
+  }
+  return { data: null, path: null };
 }
 
-export function loadLatestDkMatchReport(date: string): Loaded<Record<string, unknown>> {
-  return loadLatest<Record<string, unknown>>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_match_report_");
+function matchReportPathForPool(poolPath: string): string {
+  return path.join(path.dirname(poolPath), path.basename(poolPath).replace("dk_player_pool_", "dk_match_report_"));
+}
+
+/** See loadLatestDKPlayerPool's docstring -- the match report shares
+ * its pool's exact timestamp (both written by the same save_pool()
+ * call), so resolving the right pool for a slate and swapping the
+ * filename prefix finds its match report too, without dk_match_report_
+ * files needing their own slate_id field. */
+export function loadLatestDkMatchReport(date: string, slateId?: string | null): Loaded<Record<string, unknown>> {
+  if (!slateId) {
+    return loadLatest<Record<string, unknown>>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_match_report_");
+  }
+  const pool = loadLatestDKPlayerPool(date, slateId);
+  if (!pool.path) return { data: null, path: null };
+  const reportPath = matchReportPathForPool(pool.path);
+  return { data: safeReadJson<Record<string, unknown>>(reportPath), path: reportPath };
 }
 
 /** The most recent scripts/fetch_dfs_slate.py output for `date` -- the
