@@ -109,6 +109,15 @@ class DFSPlayer:
     match_status: str = "unmatched"  # matched | unmatched | ambiguous
     match_confidence: Optional[str] = None
 
+    # Milestone 30.1: the explicit playing-status/optimizer-eligibility
+    # layer -- see dfs/eligibility.py for the full status list and how
+    # each is computed. Every DK row keeps this field regardless of
+    # status; rows are never dropped from the pool, only labeled.
+    # STARTING_PITCHER | STARTING_HITTER | LINEUP_UNCONFIRMED | BENCH |
+    # RELIEF_PITCHER | SCRATCHED | UNMATCHED | AMBIGUOUS
+    eligibility_status: str = "UNMATCHED"
+    optimizer_eligible: bool = False
+
     avg_points_per_game_dk: Optional[float] = None  # DK's own metric, preserved but never fed into our model
 
     # Milestone 27.4: source-to-pool trace -- see DKSalaryRow's identical

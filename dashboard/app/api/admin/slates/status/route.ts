@@ -4,8 +4,25 @@ import { requireAdminApi } from "@/lib/auth/guards";
 import { listAuditLog } from "@/lib/db/auditLog";
 import { effectiveDisplayStatus, listSlateStatuses } from "@/lib/db/slateStatus";
 import { listJobsForSlate } from "@/lib/jobs/queue";
+import { loadLatestDkMatchReport } from "@/lib/loaders";
 import { listSlates } from "@/lib/optimizerWorkspace/poolCache";
 import { evaluatePublishReadiness } from "@/lib/slatePublishReadiness";
+
+// Milestone 30.1: the eligibility breakdown dfs/eligibility.py computes
+// and dfs/player_pool.py::build_match_report attaches to the saved match
+// report's "eligibility" key -- read-only here, never recomputed.
+interface EligibilityCounts {
+  raw_dk_players: number;
+  starting_pitchers: number;
+  relief_pitchers: number;
+  confirmed_hitters: number;
+  bench_hitters: number;
+  waiting_for_lineups: number;
+  scratched: number;
+  unmatched: number;
+  ambiguous: number;
+  optimizer_eligible: number;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +63,8 @@ export async function GET(request: Request) {
     // `jobs` table (lib/jobs/queue.ts) rather than only the coarse
     // PROCESSING/READY/PARTIAL/ERROR status column.
     const activeJob = listJobsForSlate(date, s.slateId).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
+    const matchReport = loadLatestDkMatchReport(date, s.slateId).data;
+    const eligibility = (matchReport?.eligibility as EligibilityCounts | undefined) ?? null;
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -61,6 +80,7 @@ export async function GET(request: Request) {
       publishedAt: statusRow?.published_at ?? null,
       readiness,
       activeJob: activeJob ? { id: activeJob.id, jobType: activeJob.job_type, status: activeJob.status, progress: activeJob.progress, currentStep: activeJob.current_step } : null,
+      eligibility,
     };
   });
 

@@ -1,6 +1,8 @@
+import { RefreshStatusButton } from "@/components/RefreshStatusButton";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getPublishedVersion } from "@/lib/db/slateStatus";
+import { safeReadJson } from "@/lib/discovery";
 import { resolveSlateContext } from "@/lib/slateContext";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +12,31 @@ interface DataStatusRow {
   ready: boolean;
 }
 
+// Milestone 30.1: the same eligibility breakdown dfs/eligibility.py
+// computes and dfs/player_pool.py::build_match_report attaches to the
+// published match report -- read-only here, never recomputed.
+interface EligibilityCounts {
+  starting_pitchers: number;
+  confirmed_hitters: number;
+  waiting_for_lineups: number;
+  optimizer_eligible: number;
+}
+
+interface PlayerPoolSummary {
+  startingPitchers: number;
+  expectedPitcherSlots: number;
+  confirmedHitters: number;
+  expectedHitterSlots: number;
+  waitingForLineups: number;
+  optimizerEligible: number;
+}
+
 interface MemberSlateRow {
   slateId: string;
   slateName: string | null;
   lastUpdated: string | null;
   statuses: DataStatusRow[];
+  playerPool: PlayerPoolSummary | null;
 }
 
 function fmtDateTime(iso: string | null): string {
@@ -41,6 +63,22 @@ export default async function SlateManagerPage() {
 
   const rows: MemberSlateRow[] = ctx.slates.map((s) => {
     const version = getPublishedVersion(date, s.slateId);
+    // Milestone 30.1: the same match report already pinned by publish
+    // (version.matchReportPath) -- never a fresh/unpinned load, so this
+    // widget always matches whatever slate a member is actually seeing.
+    const matchReport = safeReadJson<{ dk_games_total?: number; eligibility?: EligibilityCounts }>(version?.matchReportPath ?? null);
+    const eligibility = matchReport?.eligibility ?? null;
+    const gamesTotal = matchReport?.dk_games_total ?? 0;
+    const playerPool: PlayerPoolSummary | null = eligibility
+      ? {
+          startingPitchers: eligibility.starting_pitchers,
+          expectedPitcherSlots: gamesTotal * 2, // 2 probable-starter slots per game
+          confirmedHitters: eligibility.confirmed_hitters,
+          expectedHitterSlots: gamesTotal * 18, // 9 starting hitters x 2 teams per game
+          waitingForLineups: eligibility.waiting_for_lineups,
+          optimizerEligible: eligibility.optimizer_eligible,
+        }
+      : null;
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -52,12 +90,13 @@ export default async function SlateManagerPage() {
         { label: "AI", ready: Boolean(version?.aiSnapshotPath) },
         { label: "Ownership", ready: Boolean(version?.ownershipPath) },
       ],
+      playerPool,
     };
   });
 
   return (
     <div>
-      <PageHeader title="Slate Manager" description={`Published DraftKings slates for ${date}.`} />
+      <PageHeader title="Slate Manager" description={`Published DraftKings slates for ${date}.`} actions={<RefreshStatusButton />} />
 
       {rows.length === 0 ? (
         <p className="p-4 text-xs text-text-faint">
@@ -75,7 +114,7 @@ export default async function SlateManagerPage() {
                 <span className="text-text">{fmtDateTime(r.lastUpdated)}</span>
               </div>
 
-              <dl className="grid grid-cols-2 gap-y-1 text-[11px]">
+              <dl className="mb-3 grid grid-cols-2 gap-y-1 text-[11px]">
                 {r.statuses.map((st) => (
                   <div key={st.label} className="col-span-2 flex items-center justify-between">
                     <dt className="text-text-faint">{st.label}</dt>
@@ -85,6 +124,31 @@ export default async function SlateManagerPage() {
                   </div>
                 ))}
               </dl>
+
+              {r.playerPool && (
+                <div className="border-t border-border-subtle pt-2 text-[11px]">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-text-faint">Player Pool</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-faint">Starting Pitchers</span>
+                    <span className="text-text">
+                      {r.playerPool.startingPitchers}/{r.playerPool.expectedPitcherSlots} confirmed
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-faint">Starting Hitters</span>
+                    <span className="text-text">
+                      {r.playerPool.confirmedHitters}/{r.playerPool.expectedHitterSlots} confirmed
+                    </span>
+                  </div>
+                  {r.playerPool.waitingForLineups > 0 && (
+                    <div className="mt-1 text-yellow">{r.playerPool.waitingForLineups} hitters waiting for lineups to post</div>
+                  )}
+                  <div className="mt-1 flex items-center justify-between font-semibold">
+                    <span className="text-text-faint">Optimizer Eligible</span>
+                    <span className="text-green">{r.playerPool.optimizerEligible}</span>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

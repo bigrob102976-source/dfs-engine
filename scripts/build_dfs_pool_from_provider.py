@@ -94,6 +94,7 @@ def main() -> None:
         result = build_pool(
             dk_rows, args.date, args.output, args.predictions_root, args.pitcher_snapshot, args.batter_snapshot,
             source_provenance_claim=source_provenance_claim,
+            slate_id=slate_doc.get("selected_slate_id"), dfs_input_root=args.dfs_input_root,
         )
     except UnsafeSourceProvenanceError as e:
         print(f"\nDFS SALARIES: SOURCE PROVENANCE BLOCKED\n{e}")

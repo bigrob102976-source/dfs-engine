@@ -52,6 +52,8 @@ const POOL_RESULT = {
       confidence: 80,
       lineupStatus: "active",
       matchStatus: "matched",
+      eligibilityStatus: "STARTING_HITTER",
+      optimizerEligible: true,
       externalProjection: null,
       adjustedProjection: null,
       adjustmentDelta: null,
@@ -99,6 +101,8 @@ const POOL_RESULT = {
       confidence: 90,
       lineupStatus: "active",
       matchStatus: "matched",
+      eligibilityStatus: "STARTING_PITCHER",
+      optimizerEligible: true,
       externalProjection: null,
       adjustedProjection: null,
       adjustmentDelta: null,
@@ -416,7 +420,10 @@ describe("OptimizerWorkspace", () => {
     // slate but the previously-locked player now scratched.
     const scratchedPool = {
       ...POOL_RESULT,
-      players: [{ ...POOL_RESULT.players[0], lineupStatus: "lineup_not_confirmed" }, POOL_RESULT.players[1]],
+      players: [
+        { ...POOL_RESULT.players[0], lineupStatus: "lineup_not_confirmed", eligibilityStatus: "SCRATCHED", optimizerEligible: false },
+        POOL_RESULT.players[1],
+      ],
     };
     installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: scratchedPool }) });
     render(<OptimizerWorkspace />);

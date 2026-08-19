@@ -5,7 +5,9 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  usePathname: () => "/dashboard/pitchers",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // Milestone 29: resolveSlateContext() filters slates to PUBLISHED-only

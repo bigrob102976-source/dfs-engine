@@ -12,12 +12,14 @@ def _pool_doc():
                 "opponent": "TOR", "game_id": "g1", "player_type": "hitter", "dk_positions": ["OF"],
                 "salary": 4000, "projection": 10.0, "ceiling": 18.0, "floor": 4.0, "risk_score": 30.0,
                 "confidence": 80.0, "lineup_status": "active",
+                "eligibility_status": "STARTING_HITTER", "optimizer_eligible": True,
             },
             {
                 "dk_player_id": "d2", "mlb_player_id": "p1", "name": "Test Pitcher", "team": "TOR",
                 "opponent": "BOS", "game_id": "g1", "player_type": "pitcher", "dk_positions": ["P"],
                 "salary": 8000, "projection": 20.0, "ceiling": 32.0, "floor": 8.0, "risk_score": 25.0,
                 "confidence": 90.0, "lineup_status": "active",
+                "eligibility_status": "STARTING_PITCHER", "optimizer_eligible": True,
             },
         ],
     }

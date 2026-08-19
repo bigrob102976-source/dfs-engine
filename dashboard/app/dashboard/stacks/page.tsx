@@ -52,8 +52,14 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold text-text">{s.team}</span>
                 <span className="text-[11px] text-text-faint">
-                  {s.confirmedHitterCount} / {s.totalHitterCount} confirmed
-                  {s.confirmedHitterCount < s.totalHitterCount && <span className="ml-1 text-yellow">(lineup not yet confirmed)</span>}
+                  {s.status === "WAITING_FOR_LINEUP" ? (
+                    <span className="font-semibold uppercase text-yellow">Waiting For Lineup</span>
+                  ) : (
+                    <>
+                      {s.confirmedHitterCount} / {s.totalHitterCount} confirmed
+                      {s.confirmedHitterCount < s.totalHitterCount && <span className="ml-1 text-yellow">({s.totalHitterCount - s.confirmedHitterCount} bench/unconfirmed)</span>}
+                    </>
+                  )}
                 </span>
               </div>
               <div className="mb-3 grid grid-cols-3 gap-2 text-center">
@@ -79,20 +85,19 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
                 </div>
               </div>
               <div className="border-t border-border-subtle pt-2">
-                <div className="mb-1 text-[10px] uppercase text-text-faint">Top 5 (by Projection, then Salary)</div>
-                <ul className="text-xs text-text-muted">
-                  {s.top5.map((h) => (
-                    <li key={h.id} className="flex justify-between py-0.5">
-                      <span className="text-text">
-                        {h.name}
-                        {h.lineupStatus && h.lineupStatus !== "active" && (
-                          <span className="ml-1.5 text-[10px] uppercase text-yellow">{h.lineupStatus.replace(/_/g, " ")}</span>
-                        )}
-                      </span>
-                      <span>{h.projection !== null ? fmt(h.projection) : `$${h.salary?.toLocaleString() ?? "--"}`}</span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="mb-1 text-[10px] uppercase text-text-faint">Top 5 Confirmed Starters (by Projection, then Salary)</div>
+                {s.top5.length === 0 ? (
+                  <p className="py-1 text-xs text-text-faint">No confirmed starting lineup yet -- check back once it posts.</p>
+                ) : (
+                  <ul className="text-xs text-text-muted">
+                    {s.top5.map((h) => (
+                      <li key={h.id} className="flex justify-between py-0.5">
+                        <span className="text-text">{h.name}</span>
+                        <span>{h.projection !== null ? fmt(h.projection) : `$${h.salary?.toLocaleString() ?? "--"}`}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
           ))}

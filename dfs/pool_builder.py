@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from config.runtime_settings import is_mock_mode_enabled
+from dfs.eligibility import compute_eligibility
 from dfs.lineup_smoke_test import find_one_legal_lineup
 from dfs.models import DFSPlayer, DKSalaryRow
-from dfs.persistence import save_match_report, save_player_pool
+from dfs.persistence import load_latest_player_pool, save_match_report, save_player_pool
 from dfs.player_integrity import PlayerIntegrityResult, summarize as summarize_integrity, validate_pool
 from dfs.player_pool import build_dfs_players, build_match_report
 from dfs.player_resolver import build_canonical_by_id, build_canonical_index, build_name_only_index, resolve_all
@@ -91,6 +92,7 @@ def build_pool(
     pitcher_snapshot_path: Optional[str] = None, batter_snapshot_path: Optional[str] = None,
     crosswalk: Optional[Dict[str, str]] = None,
     source_provenance_claim: Optional[str] = None, dev_mode: Optional[bool] = None,
+    slate_id: Optional[str] = None, dfs_input_root: str = "dfs_input",
 ) -> PoolBuildResult:
     """Runs identity matching, slate validation, player-pool assembly,
     and roster-feasibility checking -- identical to what
@@ -140,6 +142,23 @@ def build_pool(
         dk_rows, matches, canonical_by_id, slate_validation.dk_game_matches, pitcher_raw_by_id,
         pitcher_snapshot, batter_snapshot, pitcher_snapshot_path, batter_snapshot_path,
     )
+
+    # Milestone 30.1: explicit playing-status/optimizer-eligibility layer,
+    # computed from the RAW research pitchers/batters (confirmed starters
+    # and posted lineups), independent of whether an agent projection
+    # exists -- see dfs/eligibility.py's module docstring. Best-effort
+    # previous-pool lookup for SCRATCHED detection: any failure to read a
+    # prior snapshot must never block building today's pool.
+    try:
+        previous_pool_doc = load_latest_player_pool(date, slate_id, output_root=dfs_input_root)
+    except (OSError, ValueError):
+        previous_pool_doc = None
+    previous_eligibility_by_dk_id = (
+        {p["dk_player_id"]: p.get("eligibility_status") for p in previous_pool_doc.get("players", [])}
+        if previous_pool_doc else {}
+    )
+    compute_eligibility(players, package["pitchers"], package["batters"], previous_eligibility_by_dk_id)
+
     report = build_match_report(dk_rows, matches, players, slate_validation)
 
     integrity_results = validate_pool(players, package["games"], canonical_by_id)
@@ -147,7 +166,7 @@ def build_pool(
     report["source_provenance"] = resolved_provenance
     report["source_realism"] = realism.to_dict()
 
-    active_pool = [p for p in players if p.lineup_status == "active"]
+    active_pool = [p for p in players if p.optimizer_eligible]
     feasibility = check_roster_feasibility(active_pool)
     legal_lineup = find_one_legal_lineup(active_pool) if feasibility.passed else None
     roster_feasibility_pass = feasibility.passed and legal_lineup is not None
@@ -200,6 +219,17 @@ def print_pool_report(result: PoolBuildResult) -> None:
     print(f"Unmatched:\n{report['unmatched_count']}\n")
     print(f"Ambiguous:\n{report['ambiguous_count']}\n")
     print(f"Missing model projection:\n{report['missing_projection']}\n")
+
+    elig = report.get("eligibility") or {}
+    print("Optimizer eligibility (Milestone 30.1):\n")
+    print(f"Raw DK players: {elig.get('raw_dk_players', 0)}")
+    print(f"Starting pitchers: {elig.get('starting_pitchers', 0)}")
+    print(f"Relief pitchers: {elig.get('relief_pitchers', 0)}")
+    print(f"Confirmed hitters: {elig.get('confirmed_hitters', 0)}")
+    print(f"Bench hitters: {elig.get('bench_hitters', 0)}")
+    print(f"Waiting for lineups: {elig.get('waiting_for_lineups', 0)}")
+    print(f"Scratched: {elig.get('scratched', 0)}")
+    print(f"Optimizer eligible: {elig.get('optimizer_eligible', 0)}\n")
     print(f"Games on DK slate:\n{report['dk_games_total']}\n")
     print(f"Games matched to research:\n{report['dk_games_matched_to_research']} / {report['dk_games_total']}\n")
     print(f"Salary coverage:\n{report['salary_coverage_percent']}%\n")

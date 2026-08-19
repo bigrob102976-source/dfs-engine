@@ -61,7 +61,12 @@ def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None):
     players = []
     skipped = []
     for record in pool_doc.get("players", []):
-        if record.get("lineup_status") != "active":
+        # Milestone 30.1: optimizer_eligible (confirmed starting pitcher /
+        # confirmed starting hitter, see dfs/eligibility.py) is now the
+        # sole selection gate -- replaces the old lineup_status=="active"
+        # check, which conflated match/projection-availability status
+        # with real starter confirmation.
+        if not record.get("optimizer_eligible"):
             continue
 
         override = projection_overrides.get(record.get("mlb_player_id")) if record.get("mlb_player_id") else None

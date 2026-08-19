@@ -88,6 +88,8 @@ function defaultHandlers(): Record<string, Handler> {
             opponent: "TOR",
             lineup_status: "active",
             match_status: "matched",
+            eligibility_status: "STARTING_HITTER",
+            optimizer_eligible: true,
           },
           {
             dk_player_id: "d2",
@@ -106,6 +108,8 @@ function defaultHandlers(): Record<string, Handler> {
             opponent: "BOS",
             lineup_status: "active",
             match_status: "matched",
+            eligibility_status: "STARTING_PITCHER",
+            optimizer_eligible: true,
           },
         ],
       });
@@ -357,6 +361,7 @@ describe("loadPool", () => {
               player_type: "pitcher", dk_positions: ["P"], salary: 8000, projection: 20, ceiling: 32,
               risk_score: 25, confidence: 90, batting_order: null, game_id: "g1", opponent: "TOR",
               lineup_status: "active", match_status: "matched",
+              eligibility_status: "STARTING_PITCHER", optimizer_eligible: true,
             },
           ],
         });

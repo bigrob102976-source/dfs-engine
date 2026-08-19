@@ -9,6 +9,7 @@ lineup status -- players are never silently dropped, only labeled.
 
 from typing import Dict, List, Optional
 
+from dfs.eligibility import eligibility_counts
 from dfs.models import CanonicalPlayer, DFSPlayer, DKSalaryRow, PlayerMatch
 from dfs.slate_validation import DKGameMatch, SlateValidation
 from dfs.team_abbreviations import normalize_dk_team_abbr
@@ -151,6 +152,12 @@ def build_match_report(dk_rows: List[DKSalaryRow], matches: List[PlayerMatch],
         "hitters_active": sum(1 for p in hitters if p.lineup_status == "active"),
         "hitters_excluded_lineup_not_posted": sum(1 for p in hitters if p.lineup_status == "lineup_not_confirmed"),
         "missing_projection": sum(1 for p in players if p.lineup_status == "missing_projection"),
+        # Milestone 30.1: the explicit playing-status/optimizer-eligibility
+        # breakdown -- see dfs/eligibility.py. Independent of (and a
+        # correction to the conflation in) the legacy lineup_status/
+        # pitchers_active/hitters_active fields above, which are kept
+        # unchanged for existing consumers.
+        "eligibility": eligibility_counts(players),
         "unmatched_count": len(unmatched),
         "ambiguous_count": len(ambiguous),
         "unmatched": [m.to_dict() for m in unmatched],

@@ -8,7 +8,8 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     id: "p1", playerType: "hitter", name: "Test Player", team: "NYY", opponent: "BOS", gameId: "g1",
     position: "OF", positions: ["OF"], battingOrder: 3, salary: 5000, projection: 10, ceiling: 15, floor: 5,
     overall: null, power: null, matchup: null, risk: null, confidence: null, ownership: 20, ownershipTier: null,
-    chalkScore: null, leverage: 3, tags: [], reasons: [], lineupStatus: null, matchStatus: null, raw: {} as PlayerRow["raw"],
+    chalkScore: null, leverage: 3, tags: [], reasons: [], lineupStatus: null, matchStatus: null,
+    eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, raw: {} as PlayerRow["raw"],
     ...overrides,
   };
 }
@@ -51,14 +52,21 @@ describe("buildProjectionLabRows", () => {
 describe("buildProjectionLabSummary", () => {
   it("computes coverage counts and largest deltas without recomputing any projection", () => {
     const rows = [
-      { id: "p1", name: "Judge", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 6000, ownership: 20, leverage: 2, blueCollarProjection: 11.8, nativeProjection: 12.1, nativeConfidence: 80, aiProjection: 12.7, aiConfidence: 82, aiVsNativeDelta: 0.6, bigMoneyVsBlueCollarDelta: 0.9, actualDkPoints: null },
-      { id: "p2", name: "Soto", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 5800, ownership: 15, leverage: 1, blueCollarProjection: null, nativeProjection: 10.5, nativeConfidence: 70, aiProjection: 9.3, aiConfidence: 75, aiVsNativeDelta: -1.2, bigMoneyVsBlueCollarDelta: null, actualDkPoints: null },
+      { id: "p1", name: "Judge", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 6000, ownership: 20, leverage: 2, blueCollarProjection: 11.8, nativeProjection: 12.1, nativeConfidence: 80, aiProjection: 12.7, aiConfidence: 82, aiVsNativeDelta: 0.6, bigMoneyVsBlueCollarDelta: 0.9, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
+      { id: "p2", name: "Soto", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 5800, ownership: 15, leverage: 1, blueCollarProjection: null, nativeProjection: 10.5, nativeConfidence: 70, aiProjection: 9.3, aiConfidence: 75, aiVsNativeDelta: -1.2, bigMoneyVsBlueCollarDelta: null, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
+      { id: "p3", name: "Reliever", team: "BOS", opponent: null, gameId: null, playerType: "pitcher" as const, position: "P", salary: 4200, ownership: 1, leverage: 0, blueCollarProjection: null, nativeProjection: 3.0, nativeConfidence: 40, aiProjection: null, aiConfidence: null, aiVsNativeDelta: null, bigMoneyVsBlueCollarDelta: null, actualDkPoints: null, eligibilityStatus: "RELIEF_PITCHER", optimizerEligible: false },
     ];
     const summary = buildProjectionLabSummary(rows);
-    expect(summary.players).toBe(2);
+    expect(summary.players).toBe(3);
+    expect(summary.eligiblePlayers).toBe(2);
     expect(summary.blueCollarCoverage).toBe(1);
-    expect(summary.nativeCoverage).toBe(2);
+    expect(summary.nativeCoverage).toBe(3);
     expect(summary.aiCoverage).toBe(2);
+    // Native/AI eligible coverage is measured against eligiblePlayers only
+    // -- the non-eligible reliever's own native projection must not
+    // count toward "eligible coverage" even though it exists.
+    expect(summary.nativeEligibleCoverage).toBe(2);
+    expect(summary.aiEligibleCoverage).toBe(2);
     expect(summary.largestAiUpgrade?.id).toBe("p1");
     expect(summary.largestAiDowngrade?.id).toBe("p2");
     expect(summary.largestBigMoneyVsBlueCollarDifference?.id).toBe("p1");

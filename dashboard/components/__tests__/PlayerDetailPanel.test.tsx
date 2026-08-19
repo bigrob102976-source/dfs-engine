@@ -32,6 +32,8 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     reasons: ["0.400 season xwOBA reflects elite underlying hitting skill.", "30.0% barrel rate gives him one of the strongest power profiles."],
     lineupStatus: null,
     matchStatus: null,
+    eligibilityStatus: null,
+    optimizerEligible: false,
     raw: {
       snapshot: {
         season_metrics: { xwoba: 0.4, barrel_percent: 30.0 },

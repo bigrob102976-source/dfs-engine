@@ -24,6 +24,8 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     risk: 30,
     confidence: 90,
     lineupStatus: "active",
+    eligibilityStatus: "STARTING_HITTER",
+    optimizerEligible: true,
     matchStatus: "matched",
     externalProjection: null,
     adjustedProjection: null,

@@ -76,6 +76,7 @@ def main() -> None:
     result = build_pool(
         dk_rows, args.date, args.output, args.predictions_root,
         args.pitcher_snapshot, args.batter_snapshot, crosswalk,
+        dfs_input_root=args.dfs_input_root,
     )
     print()
 

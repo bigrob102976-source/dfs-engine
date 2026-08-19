@@ -48,6 +48,12 @@ export interface PoolPlayerRow {
   confidence: number | null;
   lineupStatus: string;
   matchStatus: string;
+  // Milestone 30.1: the explicit playing-status/optimizer-eligibility
+  // layer (dfs/eligibility.py) -- STARTING_PITCHER | STARTING_HITTER |
+  // LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | SCRATCHED | UNMATCHED |
+  // AMBIGUOUS. null/false for pools saved before this milestone.
+  eligibilityStatus: string | null;
+  optimizerEligible: boolean;
 
   // Milestone 17: optional three-way projection comparison, joined in
   // from the latest adjusted-projection snapshot by mlbPlayerId. `projection`

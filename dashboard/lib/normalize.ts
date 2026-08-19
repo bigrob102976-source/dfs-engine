@@ -87,6 +87,8 @@ export function buildPitcherRows(
       reasons: p.reasons ?? [],
       lineupStatus: poolPlayer?.lineup_status ?? null,
       matchStatus: poolPlayer?.match_status ?? null,
+      eligibilityStatus: poolPlayer?.eligibility_status ?? null,
+      optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
       raw: { snapshot: p, ownership: own, pool: poolPlayer },
     };
   });
@@ -125,6 +127,8 @@ export function buildPitcherRows(
       reasons: p.reasons ?? [],
       lineupStatus: p.lineup_status,
       matchStatus: p.match_status,
+      eligibilityStatus: p.eligibility_status ?? null,
+      optimizerEligible: p.optimizer_eligible ?? false,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }
@@ -171,6 +175,8 @@ export function buildHitterRows(
       reasons: h.reasons ?? [],
       lineupStatus: poolPlayer?.lineup_status ?? null,
       matchStatus: poolPlayer?.match_status ?? null,
+      eligibilityStatus: poolPlayer?.eligibility_status ?? null,
+      optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
       raw: { snapshot: h, ownership: own, pool: poolPlayer },
     };
   });
@@ -209,6 +215,8 @@ export function buildHitterRows(
       reasons: p.reasons ?? [],
       lineupStatus: p.lineup_status,
       matchStatus: p.match_status,
+      eligibilityStatus: p.eligibility_status ?? null,
+      optimizerEligible: p.optimizer_eligible ?? false,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }

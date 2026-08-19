@@ -24,6 +24,8 @@ function player(overrides: Partial<PoolPlayerRow> = {}): PoolPlayerRow {
     confidence: 80,
     lineupStatus: "active",
     matchStatus: "matched",
+    eligibilityStatus: "STARTING_HITTER",
+    optimizerEligible: true,
     externalProjection: null,
     adjustedProjection: null,
     adjustmentDelta: null,
@@ -64,7 +66,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     providerSource: "mock_explicit",
     generatedAt: "2026-08-12T18:00:00Z",
     players,
-    activePlayers: players.filter((p) => p.lineupStatus === "active").length,
+    activePlayers: players.filter((p) => p.optimizerEligible).length,
     pitcherCount: 0,
     hitterCount: 0,
     hasExternalProjections: false,
@@ -105,7 +107,7 @@ describe("reconcileConstraintsWithPool", () => {
   });
 
   it("drops a lock with a warning when the player is present but scratched", () => {
-    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", name: "Scratched Guy", lineupStatus: "lineup_not_confirmed" })]), {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", name: "Scratched Guy", eligibilityStatus: "SCRATCHED", optimizerEligible: false })]), {
       locks: ["d1"],
       exclusions: [],
       maxExposure: {},
@@ -115,7 +117,7 @@ describe("reconcileConstraintsWithPool", () => {
   });
 
   it("keeps an exclusion for a scratched player without warning (excluding an inactive player is harmless)", () => {
-    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", lineupStatus: "lineup_not_confirmed" })]), {
+    const result = reconcileConstraintsWithPool(pool([player({ dkPlayerId: "d1", eligibilityStatus: "SCRATCHED", optimizerEligible: false })]), {
       locks: [],
       exclusions: ["d1"],
       maxExposure: {},

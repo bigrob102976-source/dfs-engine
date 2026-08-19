@@ -39,7 +39,11 @@ def _build_input_players(pool_doc: dict):
     pitchers, hitters = [], []
     active_count = 0
     for record in pool_doc.get("players", []):
-        if record.get("lineup_status") != "active":
+        # Milestone 30.1: optimizer_eligible (confirmed starter, see
+        # dfs/eligibility.py) replaces lineup_status=="active" as the
+        # ownership-projection input gate too -- ownership only makes
+        # sense for players who can actually be selected into a lineup.
+        if not record.get("optimizer_eligible"):
             continue
         active_count += 1
         if record.get("projection") is None or record.get("ceiling") is None:

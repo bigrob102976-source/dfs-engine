@@ -200,6 +200,14 @@ export interface DFSPlayer extends JsonRecord {
   season_sample_size: number | null;
   lineup_status: string;
   match_status: string;
+  /** Milestone 30.1: explicit playing-status/optimizer-eligibility layer
+   * -- see dfs/eligibility.py. STARTING_PITCHER | STARTING_HITTER |
+   * LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | SCRATCHED | UNMATCHED |
+   * AMBIGUOUS. Optional only so pool files saved before this milestone
+   * (which lack the field) don't fail to parse -- readers should treat a
+   * missing value as UNMATCHED/not eligible, never assume eligibility. */
+  eligibility_status?: string;
+  optimizer_eligible?: boolean;
 }
 
 export interface DKPlayerPool extends JsonRecord {
@@ -380,6 +388,13 @@ export interface PlayerRow {
   // DK pool was loaded at all (pool-free callers/tests).
   lineupStatus: string | null;
   matchStatus: string | null;
+  // Milestone 30.1: the explicit playing-status/optimizer-eligibility
+  // layer (dfs/eligibility.py) -- STARTING_PITCHER | STARTING_HITTER |
+  // LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | SCRATCHED | UNMATCHED |
+  // AMBIGUOUS. null only when no DK pool was loaded (pool-free callers/
+  // tests) or the pool predates this milestone.
+  eligibilityStatus: string | null;
+  optimizerEligible: boolean;
   raw: {
     snapshot: JsonRecord;
     ownership: OwnershipPlayer | null;

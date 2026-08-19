@@ -20,6 +20,19 @@ interface ActiveJob {
   currentStep: string | null;
 }
 
+interface EligibilityCounts {
+  raw_dk_players: number;
+  starting_pitchers: number;
+  relief_pitchers: number;
+  confirmed_hitters: number;
+  bench_hitters: number;
+  waiting_for_lineups: number;
+  scratched: number;
+  unmatched: number;
+  ambiguous: number;
+  optimizer_eligible: number;
+}
+
 interface SlateBoardRow {
   slateId: string;
   slateName: string | null;
@@ -35,6 +48,7 @@ interface SlateBoardRow {
   publishedAt: string | null;
   readiness: { ok: boolean; required: ReadinessCheck[]; optional: ReadinessCheck[] };
   activeJob: ActiveJob | null;
+  eligibility: EligibilityCounts | null;
 }
 
 interface StatusResponse {
@@ -221,6 +235,30 @@ export function AdminSlateOperations({ date }: { date: string }) {
                     </span>
                   ))}
                 </div>
+
+                {s.eligibility && (
+                  <div className="mb-3 border-t border-border-subtle pt-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-text-faint">Player Pool Eligibility (Milestone 30.1)</div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] sm:grid-cols-4">
+                      <dt className="text-text-faint">Raw DK Players</dt>
+                      <dd className="text-text">{s.eligibility.raw_dk_players}</dd>
+                      <dt className="text-text-faint">Starting Pitchers</dt>
+                      <dd className="text-text">{s.eligibility.starting_pitchers}</dd>
+                      <dt className="text-text-faint">Confirmed Hitters</dt>
+                      <dd className="text-text">{s.eligibility.confirmed_hitters}</dd>
+                      <dt className="text-text-faint">Waiting For Lineups</dt>
+                      <dd className="text-text">{s.eligibility.waiting_for_lineups}</dd>
+                      <dt className="text-text-faint">Relief Pitchers</dt>
+                      <dd className="text-text">{s.eligibility.relief_pitchers}</dd>
+                      <dt className="text-text-faint">Bench</dt>
+                      <dd className="text-text">{s.eligibility.bench_hitters}</dd>
+                      <dt className="text-text-faint">Scratched</dt>
+                      <dd className="text-text">{s.eligibility.scratched}</dd>
+                      <dt className="font-semibold text-text-faint">Optimizer Eligible</dt>
+                      <dd className="font-semibold text-green">{s.eligibility.optimizer_eligible}</dd>
+                    </dl>
+                  </div>
+                )}
 
                 <div className="flex flex-wrap gap-2">
                   <SecondaryButton type="button" disabled={busy !== null} onClick={() => runAction(s.slateId, s.slateName, "process")}>

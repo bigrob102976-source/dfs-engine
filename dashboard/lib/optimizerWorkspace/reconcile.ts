@@ -16,8 +16,9 @@ export interface ReconcileResult {
  *  - any id no longer present in the pool at all is dropped silently
  *    (the normal case on a slate change -- constraints from one slate
  *    never apply to another).
- *  - any LOCKED id whose player is present but no longer lineup_status
- *    "active" (e.g. scratched after a refresh) is dropped WITH a
+ *  - any LOCKED id whose player is present but no longer
+ *    optimizer_eligible (e.g. scratched, or bumped to BENCH/RELIEF_PITCHER
+ *    after a refresh -- see dfs/eligibility.py) is dropped WITH a
  *    warning -- a stale lock must never be silently kept.
  * Exclusions/exposures of an inactive player are harmless to keep (an
  * inactive player can't be rostered anyway), so only locks warn. */
@@ -28,7 +29,7 @@ export function reconcileConstraintsWithPool(pool: OptimizerPoolResult, current:
   const locks = current.locks.filter((id) => {
     const player = byId.get(id);
     if (!player) return false;
-    if (player.lineupStatus !== "active") {
+    if (!player.optimizerEligible) {
       warnings.push(`Locked player ${player.name} is no longer active.`);
       return false;
     }

@@ -9,10 +9,17 @@ export interface StackSummary {
   averageConfidence: number | null;
   confirmedHitterCount: number;
   // Milestone 27.2: `confirmedHitterCount` is exactly what its name
-  // says (lineupStatus === "active") -- separate from this, since a
-  // team's real DK hitters are now always preserved even before their
-  // lineup posts (see lib/normalize.ts's own Milestone 27.2 docstring).
+  // says (optimizerEligible, i.e. STARTING_HITTER -- see Milestone 30.1
+  // below) -- separate from this, since a team's real DK hitters are now
+  // always preserved even before their lineup posts (see
+  // lib/normalize.ts's own Milestone 27.2 docstring).
   totalHitterCount: number;
+  // Milestone 30.1: "WAITING_FOR_LINEUP" when this team has zero
+  // confirmed starting hitters yet (lineup not posted) -- "CONFIRMED"
+  // once at least one is posted. Every metric below (averages, top5) is
+  // computed from confirmed starters ONLY -- never diluted by bench
+  // players, and never fabricated from unconfirmed ones while waiting.
+  status: "CONFIRMED" | "WAITING_FOR_LINEUP";
   top5: PlayerRow[];
 }
 
@@ -37,16 +44,20 @@ export function buildStackSummaries(
 
   const summaries: StackSummary[] = [];
   for (const [team, rows] of byTeam) {
-    const projections = rows.map((r) => r.projection).filter((v): v is number => v !== null);
-    const ownerships = rows.map((r) => r.ownership).filter((v): v is number => v !== null);
-    const powers = rows.map((r) => r.power).filter((v): v is number => v !== null);
-    const confidences = rows.map((r) => r.confidence).filter((v): v is number => v !== null);
-    // Milestone 27.2: ranked by projection first (existing behavior,
-    // unchanged for any row that HAS one), falling back to salary as the
-    // tiebreak -- so a team with no projections yet (e.g. lineup not
-    // posted) still shows its real, highest-salaried DK players instead
-    // of an empty card, never a fabricated projection.
-    const top5 = [...rows]
+    // Milestone 30.1: stacks reflect confirmed starting lineups only --
+    // bench/unconfirmed hitters are preserved in `rows`/totalHitterCount
+    // for visibility, but never feed a stack's averages or top5.
+    const confirmedRows = rows.filter((r) => r.optimizerEligible);
+    const projections = confirmedRows.map((r) => r.projection).filter((v): v is number => v !== null);
+    const ownerships = confirmedRows.map((r) => r.ownership).filter((v): v is number => v !== null);
+    const powers = confirmedRows.map((r) => r.power).filter((v): v is number => v !== null);
+    const confidences = confirmedRows.map((r) => r.confidence).filter((v): v is number => v !== null);
+    // Ranked by projection first (existing behavior, unchanged for any
+    // confirmed row that HAS one), falling back to salary as the
+    // tiebreak. Never falls back to bench/unconfirmed rows -- a team
+    // with zero confirmed starters yet gets an empty top5 and
+    // status="WAITING_FOR_LINEUP", not a fabricated stack.
+    const top5 = [...confirmedRows]
       .sort((a, b) => {
         const proj = (b.projection ?? -1) - (a.projection ?? -1);
         if (proj !== 0) return proj;
@@ -61,8 +72,9 @@ export function buildStackSummaries(
       teamPopularityScore: teamPopularity[team]?.team_popularity_score ?? null,
       averagePower: avg(powers),
       averageConfidence: avg(confidences),
-      confirmedHitterCount: rows.filter((r) => r.lineupStatus === "active").length,
+      confirmedHitterCount: confirmedRows.length,
       totalHitterCount: rows.length,
+      status: confirmedRows.length > 0 ? "CONFIRMED" : "WAITING_FOR_LINEUP",
       top5,
     });
   }

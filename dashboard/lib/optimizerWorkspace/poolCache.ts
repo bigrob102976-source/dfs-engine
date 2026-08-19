@@ -133,6 +133,8 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       confidence: p.confidence,
       lineupStatus: p.lineup_status,
       matchStatus: p.match_status,
+      eligibilityStatus: p.eligibility_status ?? null,
+      optimizerEligible: p.optimizer_eligible ?? false,
       externalProjection: comparison?.externalProjection ?? null,
       adjustedProjection: comparison?.adjustedProjection ?? null,
       adjustmentDelta: comparison?.adjustmentDelta ?? null,
@@ -162,10 +164,14 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     };
   });
 
-  const activePlayers = players.filter((p) => p.lineupStatus === "active");
+  // Milestone 30.1: optimizer_eligible (confirmed starter, see
+  // dfs/eligibility.py) replaces lineupStatus === "active" here too --
+  // this count feeds the optimizer workspace's own player-pool summary,
+  // which must match what the optimizer itself will actually select from.
+  const activePlayers = players.filter((p) => p.optimizerEligible);
   const confirmedGameIds = new Set(activePlayers.filter((p) => p.playerType === "hitter" && p.gameId).map((p) => p.gameId as string));
   const unconfirmedGameIds = new Set(
-    players.filter((p) => p.playerType === "hitter" && p.lineupStatus === "lineup_not_confirmed" && p.gameId).map((p) => p.gameId as string),
+    players.filter((p) => p.playerType === "hitter" && p.eligibilityStatus === "LINEUP_UNCONFIRMED" && p.gameId).map((p) => p.gameId as string),
   );
 
   return {

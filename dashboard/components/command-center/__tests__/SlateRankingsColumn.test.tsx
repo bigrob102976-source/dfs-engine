@@ -21,7 +21,8 @@ function aiRow(overrides: Partial<AiRankedPlayer> = {}): AiRankedPlayer {
     id: "p1", playerType: "hitter", name: "Test Player", team: "DET", opponent: "CLE", gameId: GAME.game_id,
     position: "OF", positions: ["OF"], battingOrder: 1, salary: 4000, projection: 10, ceiling: 18, floor: 4,
     overall: 60, power: 60, matchup: 60, risk: 30, confidence: 80, ownership: 15, ownershipTier: "mid",
-    chalkScore: 50, leverage: 5, tags: [], reasons: [], lineupStatus: null, matchStatus: null, raw: { snapshot: {}, ownership: null, pool: null },
+    chalkScore: 50, leverage: 5, tags: [], reasons: [], lineupStatus: null, matchStatus: null,
+    eligibilityStatus: null, optimizerEligible: false, raw: { snapshot: {}, ownership: null, pool: null },
   };
   return { ...base, aiProjection: null, aiDelta: null, aiConfidence: null, aiRisk: null, aiGrade: null, ...overrides };
 }

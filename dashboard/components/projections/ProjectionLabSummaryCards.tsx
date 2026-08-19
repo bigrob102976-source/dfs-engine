@@ -15,13 +15,26 @@ function Card({ label, value, sub }: { label: string; value: string; sub?: strin
  * never a new calculation. */
 export function ProjectionLabSummaryCards({ summary }: { summary: ProjectionLabSummary }) {
   const pct = (n: number) => (summary.players > 0 ? `${Math.round((n / summary.players) * 100)}%` : "--");
+  // Milestone 30.1: Native/AI coverage is measured primarily against
+  // eligible (confirmed starter) players -- hundreds of relief pitchers/
+  // bench hitters must never make coverage look artificially poor.
+  const eligiblePct = (n: number) => (summary.eligiblePlayers > 0 ? `${Math.round((n / summary.eligiblePlayers) * 100)}%` : "--");
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
-      <Card label="Players" value={String(summary.players)} />
+      <Card label="Raw DK Players" value={String(summary.players)} />
+      <Card label="Optimizer Eligible" value={String(summary.eligiblePlayers)} />
       <Card label="BlueCollar Coverage" value={`${summary.blueCollarCoverage} (${pct(summary.blueCollarCoverage)})`} />
-      <Card label="Native Coverage" value={`${summary.nativeCoverage} (${pct(summary.nativeCoverage)})`} />
-      <Card label="AI Coverage" value={`${summary.aiCoverage} (${pct(summary.aiCoverage)})`} />
+      <Card
+        label="Native Eligible Coverage"
+        value={`${summary.nativeEligibleCoverage}/${summary.eligiblePlayers} (${eligiblePct(summary.nativeEligibleCoverage)})`}
+        sub={`${summary.nativeCoverage} of all preserved DK rows`}
+      />
+      <Card
+        label="AI Eligible Coverage"
+        value={`${summary.aiEligibleCoverage}/${summary.eligiblePlayers} (${eligiblePct(summary.aiEligibleCoverage)})`}
+        sub={`${summary.aiCoverage} of all preserved DK rows`}
+      />
       <Card label="Avg Native Projection" value={summary.averageNativeProjection === null ? "--" : summary.averageNativeProjection.toFixed(1)} />
       <Card label="Avg AI Adjustment" value={summary.averageAiAdjustment === null ? "--" : `${summary.averageAiAdjustment >= 0 ? "+" : ""}${summary.averageAiAdjustment.toFixed(1)}`} />
       <Card

@@ -34,6 +34,13 @@ export interface ProjectionLabRow {
   bigMoneyVsBlueCollarDelta: number | null; // Big Money AI (or Native if AI unavailable) - BlueCollar
 
   actualDkPoints: number | null; // null until postgame results exist
+
+  // Milestone 30.1: carried through so projection coverage can be
+  // measured against confirmed starters specifically, not just every
+  // preserved DK row (a relief-pitcher-heavy slate shouldn't make
+  // coverage look artificially poor -- see buildProjectionLabSummary).
+  eligibilityStatus: string | null;
+  optimizerEligible: boolean;
 }
 
 export function buildProjectionLabRows(
@@ -72,15 +79,24 @@ export function buildProjectionLabRows(
       aiVsNativeDelta: aiProjection !== null && nativeProjection !== null ? Math.round((aiProjection - nativeProjection) * 100) / 100 : null,
       bigMoneyVsBlueCollarDelta: bigMoneyFinal !== null && blueCollarProjection !== null ? Math.round((bigMoneyFinal - blueCollarProjection) * 100) / 100 : null,
       actualDkPoints: actualByPlayerId.get(r.id) ?? null,
+      eligibilityStatus: r.eligibilityStatus,
+      optimizerEligible: r.optimizerEligible,
     };
   });
 }
 
 export interface ProjectionLabSummary {
-  players: number;
-  blueCollarCoverage: number; // count with a BlueCollar value
+  players: number; // every preserved DK row, regardless of eligibility
+  // Milestone 30.1: confirmed starters only (optimizerEligible) -- the
+  // denominator that actually matters for projection-model coverage.
+  // Hundreds of relief pitchers/bench hitters must never make coverage
+  // look artificially poor.
+  eligiblePlayers: number;
+  blueCollarCoverage: number; // count with a BlueCollar value (all preserved rows)
   nativeCoverage: number;
   aiCoverage: number;
+  nativeEligibleCoverage: number; // native coverage among eligiblePlayers only
+  aiEligibleCoverage: number; // AI coverage among eligiblePlayers only
   averageNativeProjection: number | null;
   averageAiAdjustment: number | null; // average (aiProjection - nativeProjection) where both exist
   largestAiUpgrade: ProjectionLabRow | null;
@@ -92,6 +108,10 @@ export function buildProjectionLabSummary(rows: ProjectionLabRow[]): ProjectionL
   const blueCollarCoverage = rows.filter((r) => r.blueCollarProjection !== null).length;
   const nativeCoverage = rows.filter((r) => r.nativeProjection !== null).length;
   const aiCoverage = rows.filter((r) => r.aiProjection !== null).length;
+
+  const eligibleRows = rows.filter((r) => r.optimizerEligible);
+  const nativeEligibleCoverage = eligibleRows.filter((r) => r.nativeProjection !== null).length;
+  const aiEligibleCoverage = eligibleRows.filter((r) => r.aiProjection !== null).length;
 
   const nativeValues = rows.map((r) => r.nativeProjection).filter((v): v is number => v !== null);
   const averageNativeProjection = nativeValues.length ? Math.round((nativeValues.reduce((s, v) => s + v, 0) / nativeValues.length) * 100) / 100 : null;
@@ -110,9 +130,12 @@ export function buildProjectionLabSummary(rows: ProjectionLabRow[]): ProjectionL
 
   return {
     players: rows.length,
+    eligiblePlayers: eligibleRows.length,
     blueCollarCoverage,
     nativeCoverage,
     aiCoverage,
+    nativeEligibleCoverage,
+    aiEligibleCoverage,
     averageNativeProjection,
     averageAiAdjustment,
     largestAiUpgrade: largestAiUpgrade && largestAiUpgrade.aiVsNativeDelta! > 0 ? largestAiUpgrade : null,
