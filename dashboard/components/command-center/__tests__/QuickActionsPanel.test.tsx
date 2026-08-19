@@ -1,25 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 
 import { QuickActionsPanel } from "../QuickActionsPanel";
-
-const refreshMock = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: refreshMock }),
-}));
-
-function jsonResponse(body: unknown) {
-  return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
-}
-
-beforeEach(() => {
-  refreshMock.mockClear();
-  vi.stubGlobal("fetch", vi.fn(() => jsonResponse({ run: null })));
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 const EXPECTED_LINKS: Array<[string, string]> = [
   ["Build Lineups", "/dashboard/optimizer"],
@@ -32,7 +14,6 @@ const EXPECTED_LINKS: Array<[string, string]> = [
   ["Yesterday", "/dashboard/yesterday"],
   ["History", "/dashboard/history"],
   ["Portfolio", "/dashboard/portfolio"],
-  ["Import Projections", "/dashboard/import"],
 ];
 
 describe("QuickActionsPanel", () => {
@@ -48,17 +29,9 @@ describe("QuickActionsPanel", () => {
     expect(screen.getByRole("link", { name: "Weather" })).toHaveAttribute("href", "/dashboard/environment");
   });
 
-  it("Refresh Research posts a smart, targeted refresh (pitchers/batters only) and revalidates", async () => {
-    const impl = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() => jsonResponse({ run: null }));
-    vi.stubGlobal("fetch", impl);
+  it("Milestone 29: never renders Import Projections or a Refresh Research control -- both are admin-only operations now", () => {
     render(<QuickActionsPanel />);
-
-    fireEvent.click(screen.getByText("Refresh Research"));
-
-    await vi.waitFor(() => expect(impl).toHaveBeenCalled());
-    const [url, init] = impl.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/refresh");
-    expect(JSON.parse(init.body as string)).toEqual({ targetSteps: ["pitchers", "batters"], smart: true });
-    await vi.waitFor(() => expect(refreshMock).toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: "Import Projections" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Refresh Research")).not.toBeInTheDocument();
   });
 });

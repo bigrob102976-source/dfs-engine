@@ -8,9 +8,6 @@ import { SlateKpiGrid } from "@/components/command-center/SlateKpiGrid";
 import { SlateRankingsColumn } from "@/components/command-center/SlateRankingsColumn";
 import { VegasCoverageCard } from "@/components/command-center/VegasCoverageCard";
 import { AiProjectionPerformanceCard } from "@/components/AiProjectionPerformanceCard";
-import { ExternalProjectionsStatusCard } from "@/components/ExternalProjectionsStatusCard";
-import { RefreshPanel } from "@/components/RefreshPanel";
-import { SlateReadiness } from "@/components/SlateReadiness";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
@@ -37,6 +34,7 @@ import {
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getPublishedVersion } from "@/lib/db/slateStatus";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
   loadLatestBatterSnapshot,
@@ -46,7 +44,6 @@ import {
   loadLatestPitcherSnapshot,
   loadLatestProviderSlate,
 } from "@/lib/loaders";
-import { getArtifactStatus } from "@/lib/orchestrator/artifactStatus";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
@@ -64,20 +61,28 @@ function fmt(v: number | null, digits = 1): string {
 /** AI Slate Command Center (redesign of /dashboard). Combines existing
  * pages/data -- Game Environment (Vegas/Weather/Bullpen/Park), Pitcher
  * /Batter Agent, Ownership, Stacks -- into one flagship view. Every
- * number traces to an already-built snapshot (see
- * lib/commandCenter.ts); nothing here recomputes a projection, score,
- * or ownership value, and the existing operational widgets (RefreshPanel,
- * SlateReadiness, Artifact Detail, External Projections status) remain
- * on this same page, unchanged, further down. */
+ * number traces to an already-built snapshot (see lib/commandCenter.ts);
+ * nothing here recomputes a projection, score, or ownership value.
+ *
+ * Milestone 29: this is now a pure MEMBER consumption view -- no upload,
+ * no refresh trigger, no operational controls. RefreshPanel/
+ * SlateReadiness/ExternalProjectionsStatusCard (all of which called
+ * routes that are admin-only now) were removed; the read-only Artifact
+ * Detail status grid stays (it's informational, never actionable). Every
+ * admin action that used to live here (Refresh Today's Slate, Refresh
+ * Research, Refresh Missing Data) now lives exclusively on
+ * /admin/slates. */
 export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
   const date = getTodayChicagoDate();
-  const slateCtx = await resolveSlateContext(date, slateId);
+  // Milestone 29: auto-select the sole published slate when the member
+  // hasn't explicitly chosen one -- never silently default to the
+  // unfiltered Full Day view when exactly one real published slate exists.
+  const slateCtx = await resolveSlateContext(date, slateId, { autoSelectSoleSlate: true });
   const gameIds = effectiveGameIds(slateCtx);
   const summary = buildSlateSummary(date);
-  const readiness = getArtifactStatus(date);
   const statuses = buildPipelineStatuses(date);
 
   const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
@@ -151,12 +156,20 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const evaluatedDate = findLatestEvaluatedDate();
   const projectionComparison = evaluatedDate ? loadLatestProjectionSourceComparison(evaluatedDate) : null;
 
+  // Milestone 29: when a slate is selected, "Last Updated" reflects the
+  // PUBLISHED version's own timestamp (never a Refresh currently in
+  // progress on disk) -- the same atomic-member-view guarantee every
+  // published_* pointer field on slate_status enforces. Full-day
+  // (no slate selected) has no publish concept, so it keeps the
+  // existing latest-artifact-timestamp behavior unchanged.
+  const publishedVersion = slateCtx.selected ? getPublishedVersion(date, slateCtx.selected.slateId) : null;
   const lastUpdated =
-    statuses
+    publishedVersion?.publishedAt ??
+    (statuses
       .map((s) => s.generatedAtUtc)
       .filter((v): v is string => Boolean(v))
       .sort()
-      .reverse()[0] ?? (typeof providerSlate?.generated_at_utc === "string" ? (providerSlate.generated_at_utc as string) : null);
+      .reverse()[0] ?? (typeof providerSlate?.generated_at_utc === "string" ? (providerSlate.generated_at_utc as string) : null));
 
   return (
     <div>
@@ -229,12 +242,6 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         lowestNativeConfidence={lowestNativeConfidence10}
       />
 
-      {/* Pipeline operations -- unchanged, existing widgets */}
-      <SectionHeader title="Pipeline Operations" />
-      <div className="mb-6">
-        <RefreshPanel />
-      </div>
-
       <SectionHeader title="Model Health & Pipeline" />
       <div className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <DataCard title="Model Health" action={<Link href="/dashboard/health" className="text-[11px] text-accent hover:text-accent-hover">Full report →</Link>}>
@@ -270,8 +277,6 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         <AiProjectionPerformanceCard doc={projectionComparison} />
       </div>
 
-      <SlateReadiness readiness={readiness} />
-
       <div className="mt-4">
         <SectionHeader title="Artifact Detail" />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -279,10 +284,6 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
             <StatusCard key={status.label} status={status} />
           ))}
         </div>
-      </div>
-
-      <div className="mt-6">
-        <ExternalProjectionsStatusCard />
       </div>
     </div>
   );

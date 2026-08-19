@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { getCurrentRun, startRefresh, type StartRefreshOptions } from "@/lib/orchestrator/runner";
 import type { PipelineStepId } from "@/lib/orchestrator/types";
 
@@ -8,10 +9,15 @@ export const dynamic = "force-dynamic";
 const VALID_STEP_IDS: readonly PipelineStepId[] = ["research", "pitchers", "batters", "dfsSalaries", "playerPool", "ownership", "optimizer"];
 
 /** Returns the current (or most recently completed) refresh run, or null
- * if none has ever run in this environment. Polled by the dashboard's
- * RefreshPanel, SlateReadiness, and MissingDataState components while a
- * run is active. */
+ * if none has ever run in this environment. Polled by the admin Slate
+ * Operations page while a run is active. Milestone 29: admin-only -- the
+ * full-day pipeline refresh is an admin backend operation; members never
+ * trigger or observe it directly (they see slate_status via
+ * /api/admin/slates/status is admin-only too, or the member-facing
+ * "Last Updated"/Data Status derived from the published version). */
 export async function GET() {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
   return NextResponse.json({ run: getCurrentRun() });
 }
 
@@ -28,6 +34,9 @@ export async function GET() {
  * 409 if a run is already in progress or paused awaiting a slate
  * selection. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let options: StartRefreshOptions | undefined;
 
   const rawBody = await request.text();

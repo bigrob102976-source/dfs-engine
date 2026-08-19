@@ -1,15 +1,50 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const cookieStore = new Map<string, string>();
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => (cookieStore.has(name) ? { name, value: cookieStore.get(name)! } : undefined),
+    set: (name: string, value: string) => {
+      cookieStore.set(name, value);
+    },
+    delete: (name: string) => {
+      cookieStore.delete(name);
+    },
+  }),
+}));
 
 const mockGetStatus = vi.fn();
 vi.mock("@/lib/externalProjectionsStatus", () => ({
   getExternalProjectionsStatus: (...args: unknown[]) => mockGetStatus(...args),
 }));
 
+const { __resetDbForTests } = await import("@/lib/db/client");
+const { createUser, updateUserRole } = await import("@/lib/db/users");
+const { establishSession } = await import("@/lib/auth/session");
 import SettingsPage from "../page";
 
+async function loginAsAdmin() {
+  const admin = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  updateUserRole(admin.id, "ADMIN");
+  await establishSession(admin.id, null);
+  return admin;
+}
+
+beforeEach(() => {
+  __resetDbForTests();
+  cookieStore.clear();
+});
+
 describe("SettingsPage", () => {
+  it("redirects a MEMBER away -- this is an admin-only DFS data-provider settings page", async () => {
+    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    await establishSession(member.id, null);
+    await expect(SettingsPage()).rejects.toThrow(/NEXT_REDIRECT/);
+  });
+
   it("shows BlueCollar as Waiting for API key, never exposing a credential, when unconfigured", async () => {
+    await loginAsAdmin();
     mockGetStatus.mockResolvedValue({
       slate_date: "2026-08-13",
       provider: { configured_source: "unconfigured", reason: null, provider_key: null, provider_name: null, provider_version: null, is_mock: null, is_configured: false, available_providers: ["mock", "bluecollar"] },
@@ -29,6 +64,7 @@ describe("SettingsPage", () => {
   });
 
   it("shows Connected with Last Updated / Slate / Players when a real provider is configured", async () => {
+    await loginAsAdmin();
     mockGetStatus.mockResolvedValue({
       slate_date: "2026-08-13",
       provider: { configured_source: "explicit", reason: null, provider_key: "bluecollar", provider_name: "BlueCollar DFS", provider_version: "1.0", is_mock: false, is_configured: true, available_providers: ["mock", "bluecollar"] },
@@ -44,6 +80,7 @@ describe("SettingsPage", () => {
   });
 
   it("shows MOCK EXTERNAL PROJECTIONS distinctly when the mock provider is active", async () => {
+    await loginAsAdmin();
     mockGetStatus.mockResolvedValue({
       slate_date: "2026-08-13",
       provider: { configured_source: "explicit", reason: null, provider_key: "mock", provider_name: "MOCK EXTERNAL PROJECTIONS", provider_version: "mock-1.0", is_mock: true, is_configured: true, available_providers: ["mock", "bluecollar"] },

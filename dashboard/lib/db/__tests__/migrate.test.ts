@@ -10,7 +10,9 @@ describe("migrations", () => {
   it("applies all migration files and records them in schema_migrations", () => {
     const db = getDb();
     const rows = db.prepare("SELECT filename FROM schema_migrations ORDER BY filename").all() as Array<{ filename: string }>;
-    expect(rows.map((r) => r.filename)).toEqual(["0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql"]);
+    expect(rows.map((r) => r.filename)).toEqual([
+      "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
+    ]);
   });
 
   it("re-running migrations on the same database is a safe no-op", () => {
@@ -20,7 +22,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(3);
+    expect(rows.c).toBe(4);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {

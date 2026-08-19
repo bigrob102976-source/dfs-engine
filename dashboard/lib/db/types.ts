@@ -148,3 +148,80 @@ export interface AdminAuditLogEntry {
   metadata_json: string | null;
   created_at: string;
 }
+
+// Milestone 29: admin slate publishing lifecycle.
+export type SlateLifecycleStatus = "DRAFT" | "PROCESSING" | "READY" | "PUBLISHED" | "PARTIAL" | "ERROR" | "ARCHIVED";
+
+export interface SlateStatusRow {
+  id: string;
+  slate_date: string;
+  slate_id: string;
+  slate_label: string | null;
+  status: SlateLifecycleStatus;
+
+  pool_path: string | null;
+  match_report_path: string | null;
+  ownership_path: string | null;
+  native_snapshot_path: string | null;
+  ai_snapshot_path: string | null;
+  vegas_snapshot_path: string | null;
+  research_snapshot_path: string | null;
+  source_hash: string | null;
+  source_provenance: string | null;
+  validation_json: string | null;
+  last_processed_at: string | null;
+  last_refreshed_at: string | null;
+
+  published_version: number | null;
+  published_at: string | null;
+  published_by: string | null;
+  published_pool_path: string | null;
+  published_match_report_path: string | null;
+  published_ownership_path: string | null;
+  published_native_snapshot_path: string | null;
+  published_ai_snapshot_path: string | null;
+  published_vegas_snapshot_path: string | null;
+  published_research_snapshot_path: string | null;
+  published_source_hash: string | null;
+
+  created_at: string;
+  updated_at: string;
+}
+
+export type SlatePublishEvent = "PUBLISHED" | "UNPUBLISHED" | "ARCHIVED";
+
+export interface SlatePublishHistoryRow {
+  id: string;
+  slate_date: string;
+  slate_id: string;
+  slate_label: string | null;
+  data_version: number;
+  event: SlatePublishEvent;
+  published_at: string;
+  published_by: string | null;
+  source_hash: string | null;
+  pool_path: string | null;
+  match_report_path: string | null;
+  ownership_path: string | null;
+  native_snapshot_path: string | null;
+  ai_snapshot_path: string | null;
+  vegas_snapshot_path: string | null;
+  research_snapshot_path: string | null;
+}
+
+/** The pinned artifact paths a member-facing loader should read for a
+ * currently-published slate -- see lib/db/slateStatus.ts::getPublishedVersion(). */
+export interface PublishedSlateVersion {
+  slateDate: string;
+  slateId: string;
+  dataVersion: number;
+  publishedAt: string;
+  poolPath: string | null;
+  matchReportPath: string | null;
+  ownershipPath: string | null;
+  nativeSnapshotPath: string | null;
+  aiSnapshotPath: string | null;
+  vegasSnapshotPath: string | null;
+  researchSnapshotPath: string | null;
+  sourceHash: string | null;
+}

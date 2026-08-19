@@ -24,6 +24,7 @@
 // action (the global dropdown), never inferred/auto-picked, so nothing
 // about existing behavior changes until the user opts in.
 
+import { filterSlatesForCurrentViewer } from "./memberSlateVisibility";
 import { listSlates } from "./optimizerWorkspace/poolCache";
 import type { SlateOption } from "./orchestrator/types";
 
@@ -45,11 +46,25 @@ export interface SlateContext {
 /** Resolves available slates for `date` and, if `requestedSlateId` names
  * one of them, the selected slate. Never auto-selects a default -- an
  * unmatched/absent `requestedSlateId` simply means "no slate selected"
- * (full-day view), not an error. */
-export async function resolveSlateContext(date: string, requestedSlateId?: string | null): Promise<SlateContext> {
+ * (full-day view), not an error -- UNLESS `autoSelectSoleSlate` is
+ * explicitly opted into (Command Center only, per Milestone 29's "auto-
+ * load the latest published slate when only one exists" requirement).
+ *
+ * Milestone 29: `slates` is filtered to PUBLISHED-only for anyone who
+ * isn't ADMIN (lib/memberSlateVisibility.ts) -- a draft/processing/
+ * unpublished slate can never appear in a member's slate list or be
+ * silently selectable via a stale `?slate=` URL, enforced here (server-
+ * side, the one place every /dashboard/* page's slate list flows
+ * through) rather than by hiding a UI control. */
+export async function resolveSlateContext(
+  date: string, requestedSlateId?: string | null, options?: { autoSelectSoleSlate?: boolean },
+): Promise<SlateContext> {
   const result = await listSlates(date);
-  const slates = result.slates;
-  const selected = requestedSlateId ? (slates.find((s) => s.slateId === requestedSlateId) ?? null) : null;
+  const slates = await filterSlatesForCurrentViewer(result.slates, date);
+  let selected = requestedSlateId ? (slates.find((s) => s.slateId === requestedSlateId) ?? null) : null;
+  if (!requestedSlateId && !selected && options?.autoSelectSoleSlate && slates.length === 1) {
+    selected = slates[0];
+  }
 
   return {
     slates,

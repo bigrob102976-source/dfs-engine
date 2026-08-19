@@ -1,53 +1,42 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mockRefresh }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
-function jsonResponse(body: unknown) {
-  return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
-}
-
-function writeJson(root: string, relPath: string, data: unknown) {
-  const filePath = path.join(root, relPath);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data));
-}
-
 const DATE = "2026-08-17";
-let tmpDir: string;
+vi.mock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => DATE }));
 
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-slate-manager-page-"));
-  process.env.MLB_DFS_ROOT = tmpDir;
-  vi.stubGlobal("fetch", vi.fn(() => jsonResponse({})));
-  vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => DATE }));
-});
+const cookieStore = new Map<string, string>();
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => (cookieStore.has(name) ? { name, value: cookieStore.get(name)! } : undefined),
+    set: (name: string, value: string) => {
+      cookieStore.set(name, value);
+    },
+    delete: (name: string) => {
+      cookieStore.delete(name);
+    },
+  }),
+}));
 
-afterEach(() => {
-  vi.doUnmock("@/lib/currentDate");
-  vi.resetModules();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  delete process.env.MLB_DFS_ROOT;
-});
+const { __resetDbForTests } = await import("@/lib/db/client");
+const { createUser, updateUserRole } = await import("@/lib/db/users");
+const { establishSession } = await import("@/lib/auth/session");
+const { publishSlateRecord, upsertSlateStatus } = await import("@/lib/db/slateStatus");
+import SlateManagerPage from "../page";
 
-async function stubSlates(slates: unknown[], providerName: string | null = "draftkings_csv", isMock = false) {
+async function stubSlates(slates: unknown[]) {
   const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
   __setPythonRunnerForTests(async (script: string) => {
     if (script === "scripts/list_dfs_slates.py") {
       return {
         exitCode: 0,
         stdout: JSON.stringify({
-          status: slates.length ? "ready" : "not_connected", reason: null, provider_name: providerName,
-          provider_type: isMock ? "mock" : "real", is_mock: isMock, is_connected: slates.length > 0,
-          source: isMock ? "mock_explicit" : "real_dk_csv", slates, slates_available: slates.length,
+          status: slates.length ? "ready" : "not_connected", reason: null, provider_name: "draftkings_csv",
+          provider_type: "real", is_mock: false, is_connected: slates.length > 0,
+          source: "real_dk_csv", slates, slates_available: slates.length,
         }),
         stderr: "",
         command: [],
@@ -57,43 +46,59 @@ async function stubSlates(slates: unknown[], providerName: string | null = "draf
   });
 }
 
-describe("SlateManagerPage", () => {
-  it("shows the empty state when no slates are discovered", async () => {
-    await stubSlates([], null, false);
-    const SlateManagerPage = (await import("../page")).default;
+async function loginAsMember() {
+  const member = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  await establishSession(member.id, null);
+  return member;
+}
+
+beforeEach(() => {
+  __resetDbForTests();
+  cookieStore.clear();
+});
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  const { __resetPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
+  __resetPythonRunnerForTests();
+});
+
+describe("SlateManagerPage (member, read-only)", () => {
+  it("shows an honest empty state when no slates are published yet", async () => {
+    await loginAsMember();
+    await stubSlates([{ slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 }]);
+    // "main" was discovered but never published -- must not appear to a member.
     render(await SlateManagerPage());
-    expect(screen.getByText(/No slates discovered yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No slates have been published yet/)).toBeInTheDocument();
   });
 
-  it("marks a slate READY only when both its pool and ownership snapshot exist", async () => {
-    await stubSlates([
-      { slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 },
-      { slate_id: "turbo", slate_name: "Turbo", game_count: 3, start_time: null, game_ids: ["g2"], player_count: 58 },
-    ]);
+  it("never renders any upload/refresh/remove control", async () => {
+    await loginAsMember();
+    await stubSlates([]);
+    render(await SlateManagerPage());
+    expect(screen.queryByText(/Import DraftKings Slates/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Remove Local Slate/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /refresh/i })).not.toBeInTheDocument();
+  });
 
-    writeJson(tmpDir, `dfs_input/${DATE}/dk_player_pool_0000000001.json`, { selected_slate_id: "main", player_count: 142, players: [] });
-    writeJson(tmpDir, `dfs_input/${DATE}/dk_match_report_0000000001.json`, {});
-    writeJson(tmpDir, `ownership_predictions/${DATE}/main/ownership_0000000001.json`, { slate_id: "main", players: [] });
-    // Turbo has a pool but no ownership yet -- PARTIAL, not READY.
-    writeJson(tmpDir, `dfs_input/${DATE}/dk_player_pool_0000000002.json`, { selected_slate_id: "turbo", player_count: 58, players: [] });
-    writeJson(tmpDir, `dfs_input/${DATE}/dk_match_report_0000000002.json`, {});
+  it("shows a published slate's Last Updated and per-signal Data Status", async () => {
+    await loginAsMember();
+    await stubSlates([{ slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 }]);
+    const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
+    updateUserRole(admin.id, "ADMIN");
+    upsertSlateStatus(DATE, "main", { slateLabel: "Main", status: "READY" });
+    publishSlateRecord({
+      slateDate: DATE, slateId: "main", slateLabel: "Main", publishedBy: admin.id,
+      poolPath: "dfs_input/x/pool.json", matchReportPath: null, ownershipPath: "ownership_predictions/x/o.json",
+      nativeSnapshotPath: "native_projection_snapshots/x/n.json", aiSnapshotPath: null,
+      vegasSnapshotPath: "game_environment_snapshots/x/e.json", researchSnapshotPath: null, sourceHash: "h1",
+    });
 
-    const SlateManagerPage = (await import("../page")).default;
     render(await SlateManagerPage());
 
     expect(screen.getByText("Main")).toBeInTheDocument();
-    expect(screen.getByText("Turbo")).toBeInTheDocument();
-    expect(screen.getByText("READY")).toBeInTheDocument();
-    expect(screen.getByText("PARTIAL")).toBeInTheDocument();
-  });
-
-  it("marks a slate MISSING when neither its pool nor ownership exists yet", async () => {
-    await stubSlates([{ slate_id: "night", slate_name: "Night", game_count: 5, start_time: null, game_ids: ["g3"], player_count: 82 }]);
-
-    const SlateManagerPage = (await import("../page")).default;
-    render(await SlateManagerPage());
-
-    expect(screen.getByText("Night")).toBeInTheDocument();
-    expect(screen.getByText("MISSING")).toBeInTheDocument();
+    expect(screen.getByText("Last Updated")).toBeInTheDocument();
+    // Lineups (pool), Vegas, Native, Ownership are pinned -- READY. AI is not pinned -- "--".
+    expect(screen.getAllByText("READY").length).toBe(4);
   });
 });

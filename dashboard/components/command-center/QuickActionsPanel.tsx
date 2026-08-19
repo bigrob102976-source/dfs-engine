@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { RefreshResearchButton } from "./RefreshResearchButton";
 import { SectionHeader } from "@/components/ui/Header";
 
 const LINKS: Array<{ label: string; href: string }> = [
@@ -14,14 +13,15 @@ const LINKS: Array<{ label: string; href: string }> = [
   { label: "Yesterday", href: "/dashboard/yesterday" },
   { label: "History", href: "/dashboard/history" },
   { label: "Portfolio", href: "/dashboard/portfolio" },
-  { label: "Import Projections", href: "/dashboard/import" },
 ];
 
-/** RIGHT COLUMN: Quick Actions. Every entry links to an existing page --
- * nothing here is a new view. "Weather" deliberately points at
- * /dashboard/environment (where real per-game weather already lives)
- * rather than the /dashboard/weather placeholder, without modifying
- * Weather Intelligence itself. */
+/** RIGHT COLUMN: Quick Actions. Every entry links to an existing
+ * member-facing page -- nothing here is a new view. "Weather"
+ * deliberately points at /dashboard/environment (where real per-game
+ * weather already lives) rather than the /dashboard/weather placeholder,
+ * without modifying Weather Intelligence itself. Milestone 29: the
+ * "Refresh Research" button and "Import Projections" link (both admin
+ * data-source operations now) were removed -- see /admin/slates. */
 export function QuickActionsPanel() {
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
@@ -39,7 +39,6 @@ export function QuickActionsPanel() {
             </span>
           </Link>
         ))}
-        <RefreshResearchButton />
       </div>
     </div>
   );

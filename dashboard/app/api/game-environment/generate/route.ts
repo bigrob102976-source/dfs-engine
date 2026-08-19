@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
@@ -17,8 +18,12 @@ interface GenerateResult {
  * game_environment/engine.py via scripts/build_game_environment_report.py).
  * Deliberately separate from /api/refresh -- the environment engine reads
  * an already-built Research Package and never touches projections, ownership,
- * or the optimizer, so it doesn't belong in that pipeline. */
+ * or the optimizer, so it doesn't belong in that pipeline. Milestone 29:
+ * admin-only -- generating/refreshing backend slate data is an admin action. */
 export async function POST() {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   const date = getTodayChicagoDate();
   const result = await runPythonScript("scripts/build_game_environment_report.py", ["--date", date]);
   const doc = parseLastJsonLine(result.stdout) as unknown as GenerateResult | null;

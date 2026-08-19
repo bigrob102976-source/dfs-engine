@@ -1,7 +1,5 @@
 import Link from "next/link";
 
-import { CommandCenterRefreshButton } from "./CommandCenterRefreshButton";
-
 function formatTimestamp(iso: string | null): string {
   if (!iso) return "--";
   const d = new Date(iso);
@@ -11,10 +9,15 @@ function formatTimestamp(iso: string | null): string {
 
 /** Command Center top header: brand, "Today's Slate", date, a link to
  * the real per-slate picker (Optimizer already owns that interaction --
- * this never duplicates it), a Provider badge, Last Updated, and
- * Refresh. Every value is a prop the Server Component page already
- * computed from already-loaded snapshots -- no client fetch, no
- * subprocess call, no added backend runtime. */
+ * this never duplicates it), a Provider badge, and Last Updated. Every
+ * value is a prop the Server Component page already computed from
+ * already-loaded snapshots -- no client fetch, no subprocess call, no
+ * added backend runtime. Milestone 29: the Refresh button that used to
+ * live here is gone -- refreshing backend slate data is an admin-only
+ * action now (see /admin/slates), and `lastUpdated` reflects the
+ * PUBLISHED slate version's own timestamp when a slate is selected
+ * (app/dashboard/page.tsx), so a member always sees a consistent,
+ * trustworthy answer here without needing a manual refresh control. */
 export function CommandCenterHeader({
   date,
   gameCount,
@@ -71,8 +74,6 @@ export function CommandCenterHeader({
           <span className="text-[10px] uppercase tracking-wide text-text-faint">Last Updated</span>
           <span className="text-xs text-text">{formatTimestamp(lastUpdated)}</span>
         </div>
-
-        <CommandCenterRefreshButton />
       </div>
     </div>
   );

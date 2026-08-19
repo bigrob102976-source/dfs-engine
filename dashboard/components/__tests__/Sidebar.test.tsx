@@ -22,10 +22,15 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     for (const label of [
       "Dashboard", "Research", "Pitchers", "Hitters", "Stacks", "Weather", "Vegas",
-      "Ownership", "Optimizer", "Portfolio", "Results", "Model Health", "Settings",
+      "Ownership", "Optimizer", "Portfolio", "Results", "Model Health",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+
+  it("does not render Settings -- Milestone 29 moved DFS data-provider settings to admin-only", () => {
+    render(<Sidebar />);
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
   });
 
   it("renders the BIG MONEY DFS wordmark and subtitle when expanded", () => {

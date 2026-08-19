@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { saveProjectionCsvImport } from "@/lib/csvImport";
 import { isKnownImportProvider } from "@/lib/csvImportProviders";
 
@@ -9,8 +10,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Saves an uploaded projection CSV as an immutable External Projection
  * baseline snapshot and runs the adjustment layer against it so the
- * Optimizer's projection source selector picks it up immediately. */
+ * Optimizer's projection source selector picks it up immediately.
+ * Milestone 29: admin-only -- uploading a third-party data source is an
+ * admin backend data operation, same as a DK salary CSV upload. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let form: FormData;
   try {
     form = await request.formData();

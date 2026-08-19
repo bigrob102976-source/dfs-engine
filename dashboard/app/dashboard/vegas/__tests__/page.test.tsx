@@ -11,6 +11,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
+// Milestone 29: resolveSlateContext() filters slates to PUBLISHED-only
+// for a non-admin viewer -- this file's fixtures predate that filter,
+// so pass every slate through unchanged (as an ADMIN viewer would see it).
+vi.mock("@/lib/memberSlateVisibility", () => ({
+  filterSlatesForCurrentViewer: async (slates: unknown) => slates,
+}));
+
 function ok(stdout: string): PythonRunResult {
   return { exitCode: 0, stdout, stderr: "", command: [] };
 }

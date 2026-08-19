@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAuthApi } from "@/lib/auth/guards";
 import { buildLineups } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -13,8 +14,12 @@ export const dynamic = "force-dynamic";
  * flags scripts/optimize_dk_lineups.py's own CLI already defines). Every
  * successful build persists an immutable lineup set via the same
  * optimizer/persistence.py every other optimizer run in this project
- * uses. */
+ * uses. Milestone 29: any logged-in user (member or admin) may use the
+ * optimizer -- "use optimizer" is explicitly a MEMBER-permitted action. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAuthApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let body: unknown;
   try {
     body = await request.json();

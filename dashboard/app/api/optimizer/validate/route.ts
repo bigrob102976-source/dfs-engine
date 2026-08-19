@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAuthApi } from "@/lib/auth/guards";
 import { validateBuildRequest } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -8,8 +9,12 @@ export const dynamic = "force-dynamic";
 /** Fast, authoritative pre-solve validation -- runs the real optimizer's
  * own resolve_settings()/pre_solve_diagnostics() logic (never the CP-SAT
  * solver) so the UI can show "here's what's wrong" before the user
- * clicks Build. See optimizer/constraints.py::pre_solve_diagnostics. */
+ * clicks Build. See optimizer/constraints.py::pre_solve_diagnostics.
+ * Milestone 29: any logged-in user may use the optimizer. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAuthApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let body: unknown;
   try {
     body = await request.json();

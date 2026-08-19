@@ -8,6 +8,17 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
+// Milestone 29: resolveSlateContext() filters slates to PUBLISHED-only
+// for a non-admin viewer (lib/memberSlateVisibility.ts). This file's
+// fixtures predate that filter and don't exercise it -- pass every
+// slate through unchanged, as an ADMIN viewer would see it. (A real
+// logged-in-admin session doesn't survive this file's later
+// vi.resetModules() calls, which reload the DB module's singleton --
+// mocking the filter directly sidesteps that entirely.)
+vi.mock("@/lib/memberSlateVisibility", () => ({
+  filterSlatesForCurrentViewer: async (slates: unknown) => slates,
+}));
+
 import TopPitchersPage from "../page";
 
 function jsonResponse(body: unknown) {

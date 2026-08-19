@@ -11,6 +11,15 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
 }));
 
+// Milestone 29: resolveSlateContext() filters slates to PUBLISHED-only
+// for a non-admin viewer (lib/memberSlateVisibility.ts) -- this file's
+// fixtures predate that filter, so pass every slate through unchanged
+// (as an ADMIN viewer would see it) rather than requiring a real
+// logged-in session for every test here.
+vi.mock("@/lib/memberSlateVisibility", () => ({
+  filterSlatesForCurrentViewer: async (slates: unknown) => slates,
+}));
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
 }

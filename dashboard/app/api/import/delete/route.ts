@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { deleteProjectionImport } from "@/lib/csvImport";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +9,11 @@ export const dynamic = "force-dynamic";
  * refuses to delete anything outside external_projection_snapshots/ or
  * not tagged source == "csv_import" (see
  * external_projections/csv_import/history.py::_validate_owned_path) --
- * this route just surfaces that result. */
+ * this route just surfaces that result. Milestone 29: admin-only. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let body: unknown;
   try {
     body = await request.json();

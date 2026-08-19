@@ -3,6 +3,7 @@ import Link from "next/link";
 import { EnvironmentSectionToggles } from "@/components/environment/EnvironmentSectionToggles";
 import { MockModeToggle } from "@/components/MockModeToggle";
 import { PageHeader } from "@/components/ui/Header";
+import { requireAdmin } from "@/lib/auth/guards";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
@@ -21,8 +22,18 @@ function formatTimestamp(iso: string | null): string {
  * connecting a real external projection provider requires, without ever
  * exposing a credential value. BlueCollar is always shown as "Waiting
  * for API key" today -- see external_projections/bluecollar_provider.py
- * for the documented, non-network-touching reason why. */
+ * for the documented, non-network-touching reason why.
+ *
+ * Milestone 29: admin-only. Everything on this page (DFS/external-
+ * projection provider status, Mock Mode, Import Projections, Game
+ * Environment provider status) is backend data-source configuration,
+ * not a member account preference (see /account for that) -- gated here
+ * the same way every /admin/* route is (requireAdmin() redirects a
+ * non-admin to /dashboard), and the Settings link is removed from the
+ * member Sidebar (components/Sidebar.tsx) so it's never dangled in
+ * front of a member who'd just get redirected. */
 export default async function SettingsPage() {
+  await requireAdmin();
   const date = getTodayChicagoDate();
   const [status, environmentStatus, mockModeEnabled] = await Promise.all([
     getExternalProjectionsStatus(date),

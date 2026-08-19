@@ -20,7 +20,6 @@ const NAV_ITEMS = [
   { href: "/dashboard/portfolio", label: "Portfolio", icon: "📈" },
   { href: "/dashboard/yesterday", label: "Results", icon: "📉" },
   { href: "/dashboard/health", label: "Model Health", icon: "❤" },
-  { href: "/dashboard/settings", label: "Settings", icon: "⚙" },
 ];
 
 const STORAGE_KEY = "bigmoney-sidebar-collapsed";

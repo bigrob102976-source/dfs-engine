@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { analyzeProjectionCsv } from "@/lib/csvImport";
 import { isKnownImportProvider } from "@/lib/csvImportProviders";
 
@@ -10,8 +11,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Analyzes an uploaded projection CSV without saving anything -- powers
  * the Import Projections wizard's Preview / Auto Detect / Manual Mapping
  * / Validation Summary steps. Safe for the client to call again on every
- * mapping edit. */
+ * mapping edit. Milestone 29: admin-only (the whole Import wizard is an
+ * admin data-source operation). */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let form: FormData;
   try {
     form = await request.formData();

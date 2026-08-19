@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { resumeWithSlateSelection } from "@/lib/orchestrator/runner";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +9,12 @@ export const dynamic = "force-dynamic";
  * exposed more than one). Body: { "slateId": "..." }. The slateId is
  * browser-supplied but is validated against the run's own already-
  * discovered slate options before it's ever passed to a Python
- * subprocess -- arbitrary client strings never reach the command line. */
+ * subprocess -- arbitrary client strings never reach the command line.
+ * Milestone 29: admin-only, part of the admin refresh flow. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let body: unknown;
   try {
     body = await request.json();

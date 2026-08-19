@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAdminApi } from "@/lib/auth/guards";
 import { importDkContestResults } from "@/lib/contestResultsImport";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +12,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * and field size for a completed slate. Purely a postgame import: never
  * required to calculate a player's actual DK fantasy points (that comes
  * from results/<date>/*.json via the existing MLB Stats-based pipeline
- * regardless of whether a contest CSV is ever imported). */
+ * regardless of whether a contest CSV is ever imported). Milestone 29:
+ * admin-only, another backend-data upload action. */
 export async function POST(request: Request) {
+  const userOrRes = await requireAdminApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   let form: FormData;
   try {
     form = await request.formData();

@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { ARTIFACT_DIRS, artifactPath } from "@/lib/artifactRoot";
+import { requireAuthApi } from "@/lib/auth/guards";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ const CSV_NAME_PATTERN = /^dk_lineups_\d{8}T\d{6}\.csv$/;
  * this is the project's existing normalized optimizer CSV format, not a
  * verified DraftKings bulk-upload template. */
 export async function GET(request: Request) {
+  const userOrRes = await requireAuthApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   const url = new URL(request.url);
   const requested = url.searchParams.get("path");
   if (!requested) {

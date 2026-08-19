@@ -6,6 +6,11 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
 }));
 
+// See app/dashboard/__tests__/page.test.tsx's identical comment.
+vi.mock("@/lib/memberSlateVisibility", () => ({
+  filterSlatesForCurrentViewer: async (slates: unknown) => slates,
+}));
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
 }

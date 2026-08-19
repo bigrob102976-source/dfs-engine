@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminSlateOperations } from "@/components/admin/AdminSlateOperations";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard, MetricCard } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/Header";
@@ -18,12 +19,17 @@ function fmtDateTime(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "--" : d.toLocaleString();
 }
 
-/** Read-only pipeline health for today's slate -- reuses the exact same
- * buildPipelineStatuses/buildSlateSummary/StatusCard the member-facing
- * Today's Slate page uses, so this can never drift into showing a
- * fabricated or differently-computed status. No destructive controls
- * live here; operational actions (refresh, generate lineups) stay on
- * the member dashboard where they already have safeguards. */
+/** Milestone 29: the production Slate Operations page -- ADMIN-only
+ * (gated by app/admin/layout.tsx's requireAdmin()). Pipeline health for
+ * today's date at the top (reuses the exact same buildPipelineStatuses/
+ * buildSlateSummary/StatusCard the rest of the dashboard uses, so it can
+ * never drift into showing a fabricated or differently-computed status),
+ * then the real per-slate Slate Operations board below (Upload/Process/
+ * Refresh/Publish/Unpublish/Archive -- components/admin/AdminSlateOperations.tsx),
+ * each action server-side-gated by its own /api/admin/slates/* route's
+ * requireAdminApi() call. This is now the ONLY place these actions live
+ * -- the member dashboard's Slate Manager (/dashboard/slates) is a
+ * read-only status view with no upload/refresh/publish controls. */
 export default async function AdminSlatesPage() {
   const date = getTodayChicagoDate();
   const summary = buildSlateSummary(date);
@@ -96,6 +102,10 @@ export default async function AdminSlatesPage() {
             </div>
           </div>
         </DataCard>
+      </div>
+
+      <div className="mt-4">
+        <AdminSlateOperations date={date} />
       </div>
     </div>
   );
