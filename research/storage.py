@@ -2,18 +2,23 @@
 JSON files on disk. No database, no ORM — one folder per slate date.
 """
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List
 
+from research.artifact_storage import LocalArtifactStorage
 from research.models import BatterRecord, Game, PitcherRecord, ResearchMetadata, SlateIndex, Team
 
 
 def save_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    """Writes `data` as JSON to `path`, creating parent directories and
+    overwriting silently -- unchanged behavior from before Milestone 30.
+    Routed through LocalArtifactStorage (research/artifact_storage.py) so
+    every one of this repo's persistence modules that imports save_json
+    shares one centralized write primitive, swappable for a production
+    object-storage backend without touching each call site."""
+    path = Path(path)
+    LocalArtifactStorage(root=path.parent).write_json(path.name, data, allow_overwrite=True)
 
 
 def save_package(

@@ -97,6 +97,7 @@ export function UserAdminActions({
   disabled,
   hasComplimentary,
   hasSubscription,
+  hasBetaAccess,
   plans,
   entitlementsCatalog,
 }: {
@@ -105,6 +106,7 @@ export function UserAdminActions({
   disabled: boolean;
   hasComplimentary: boolean;
   hasSubscription: boolean;
+  hasBetaAccess: boolean;
   plans: Plan[];
   entitlementsCatalog: EntitlementOption[];
 }) {
@@ -127,6 +129,17 @@ export function UserAdminActions({
         confirmText={disabled ? "Restore this account's access?" : "Disable this account? They will be signed out immediately and unable to log in."}
         danger={!disabled}
         onConfirm={() => patchUser(userId, { action: disabled ? "restore_account" : "disable_account" })}
+      />
+
+      <ConfirmAction
+        label={hasBetaAccess ? "Remove Beta Access" : "Approve Beta Access"}
+        confirmText={
+          hasBetaAccess
+            ? "Remove this user's private beta access? They will lose access to the member product while PRIVATE_BETA is enabled."
+            : "Approve this user for private beta access?"
+        }
+        danger={hasBetaAccess}
+        onConfirm={() => patchUser(userId, { action: hasBetaAccess ? "revoke_beta_access" : "grant_beta_access" })}
       />
 
       {hasSubscription && (

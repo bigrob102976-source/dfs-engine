@@ -7,6 +7,7 @@ import { computeDbStats } from "@/lib/db/systemStats";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { getMockModeEnabled } from "@/lib/mockMode";
+import { getDatabaseReadiness, getJobQueueReadiness, getObjectStorageReadiness, getWorkerReadiness } from "@/lib/systemReadiness";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +25,15 @@ function fmtDateTime(iso: string | null): string {
  * definition of "is this connected." No READY is faked here. */
 export default async function AdminSystemPage() {
   const date = getTodayChicagoDate();
-  const [mockModeEnabled, externalStatus, environmentStatus] = await Promise.all([
+  const [mockModeEnabled, externalStatus, environmentStatus, databaseReadiness, objectStorageReadiness] = await Promise.all([
     getMockModeEnabled(),
     getExternalProjectionsStatus(date),
     getGameEnvironmentStatus(date),
+    getDatabaseReadiness(),
+    getObjectStorageReadiness(),
   ]);
+  const jobQueueReadiness = getJobQueueReadiness();
+  const workerReadiness = getWorkerReadiness();
   const dbStats = computeDbStats();
   const stripeConfigStatus = getStripeConfigStatus();
   const webhookCounts = countWebhookEventsByStatus();
@@ -47,6 +52,53 @@ export default async function AdminSystemPage() {
         <MetricCard label="Subscriptions" value={dbStats.totalSubscriptions} />
         <MetricCard label="Audit Log Entries" value={dbStats.totalAuditLogEntries} />
       </div>
+
+      <DataCard title="Production Infrastructure" className="mb-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded border border-border-subtle bg-bg-panel-raised p-3" title={databaseReadiness.detail}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-text">Database</span>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide ${databaseReadiness.status === "CONNECTED" ? "text-green" : "text-red"}`}>
+                {databaseReadiness.status}
+              </span>
+            </div>
+            <div className="text-[11px] text-text-faint">{databaseReadiness.kind === "postgres" ? "PostgreSQL" : "SQLite"}</div>
+          </div>
+          <div className="rounded border border-border-subtle bg-bg-panel-raised p-3" title={objectStorageReadiness.detail}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-text">Object Storage</span>
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-wide ${
+                  objectStorageReadiness.status === "CONNECTED" ? "text-green" : objectStorageReadiness.status === "NOT_CONFIGURED" ? "text-text-faint" : "text-red"
+                }`}
+              >
+                {objectStorageReadiness.status.replace("_", " ")}
+              </span>
+            </div>
+            <div className="text-[11px] text-text-faint">S3-compatible</div>
+          </div>
+          <div className="rounded border border-border-subtle bg-bg-panel-raised p-3" title={jobQueueReadiness.detail}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-text">Job Queue</span>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide ${jobQueueReadiness.status === "CONNECTED" ? "text-green" : "text-red"}`}>
+                {jobQueueReadiness.status}
+              </span>
+            </div>
+            <div className="text-[11px] text-text-faint">
+              {jobQueueReadiness.queuedCount ?? "--"} queued, {jobQueueReadiness.runningCount ?? "--"} running
+            </div>
+          </div>
+          <div className="rounded border border-border-subtle bg-bg-panel-raised p-3">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-text">Worker</span>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide ${workerReadiness.status === "ONLINE" ? "text-green" : "text-text-faint"}`}>
+                {workerReadiness.status}
+              </span>
+            </div>
+            <div className="text-[11px] text-text-faint">{workerReadiness.workers.length} worker(s) seen</div>
+          </div>
+        </div>
+      </DataCard>
 
       <DataCard title="DFS Salary Provider" className="mb-4">
         <div className="flex items-center justify-between">

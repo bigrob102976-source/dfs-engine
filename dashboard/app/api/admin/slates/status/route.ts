@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/auth/guards";
 import { listAuditLog } from "@/lib/db/auditLog";
 import { effectiveDisplayStatus, listSlateStatuses } from "@/lib/db/slateStatus";
+import { listJobsForSlate } from "@/lib/jobs/queue";
 import { listSlates } from "@/lib/optimizerWorkspace/poolCache";
 import { evaluatePublishReadiness } from "@/lib/slatePublishReadiness";
 
@@ -39,6 +40,12 @@ export async function GET(request: Request) {
   const slates = discovered.slates.map((s) => {
     const statusRow = statusById.get(s.slateId) ?? null;
     const readiness = evaluatePublishReadiness(date, s.slateId);
+    // Milestone 30: the most recent QUEUED/RUNNING job for this slate, if
+    // any -- lets the Slate Operations UI show a live progress bar/step
+    // while a Process/Refresh job is in flight, backed by the durable
+    // `jobs` table (lib/jobs/queue.ts) rather than only the coarse
+    // PROCESSING/READY/PARTIAL/ERROR status column.
+    const activeJob = listJobsForSlate(date, s.slateId).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -53,6 +60,7 @@ export async function GET(request: Request) {
       publishedVersion: statusRow?.published_version ?? null,
       publishedAt: statusRow?.published_at ?? null,
       readiness,
+      activeJob: activeJob ? { id: activeJob.id, jobType: activeJob.job_type, status: activeJob.status, progress: activeJob.progress, currentStep: activeJob.current_step } : null,
     };
   });
 

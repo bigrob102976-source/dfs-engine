@@ -32,6 +32,7 @@ export default async function AdminUsersPage(props: PageProps<"/admin/users">) {
     role: firstParam(params.role),
     subscriptionStatus: firstParam(params.subscriptionStatus),
     trialStatus: firstParam(params.trialStatus),
+    betaAccess: firstParam(params.betaAccess),
     limit: 50,
   };
 
@@ -52,6 +53,7 @@ export default async function AdminUsersPage(props: PageProps<"/admin/users">) {
               <th className="px-3 py-2 font-medium">Plan</th>
               <th className="px-3 py-2 font-medium">Subscription Status</th>
               <th className="px-3 py-2 font-medium">Trial Ends</th>
+              <th className="px-3 py-2 font-medium">Beta Access</th>
               <th className="px-3 py-2 font-medium">Joined</th>
             </tr>
           </thead>
@@ -68,12 +70,15 @@ export default async function AdminUsersPage(props: PageProps<"/admin/users">) {
                 <td className="px-3 py-2 text-text-muted">{u.plan_name ?? "--"}</td>
                 <td className={`px-3 py-2 font-medium ${statusToneClass(u.subscription_status)}`}>{u.subscription_status ?? "No subscription"}</td>
                 <td className="px-3 py-2 text-text-muted">{fmtDate(u.trial_ends_at)}</td>
+                <td className={`px-3 py-2 font-medium ${u.beta_access_granted_at ? "text-green" : "text-text-faint"}`}>
+                  {u.beta_access_granted_at ? "Granted" : "--"}
+                </td>
                 <td className="px-3 py-2 text-text-muted">{fmtDate(u.created_at)}</td>
               </tr>
             ))}
             {users.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-text-faint">
+                <td colSpan={7} className="px-3 py-6 text-center text-text-faint">
                   No users match these filters.
                 </td>
               </tr>

@@ -16,6 +16,11 @@ export interface User {
   trial_consumed_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Milestone 30: non-null means this user may use the member product
+   * while PRIVATE_BETA=true, even without an active subscription. See
+   * lib/auth/betaAccess.ts. */
+  beta_access_granted_at: string | null;
+  beta_access_granted_by: string | null;
 }
 
 export interface Session {
@@ -224,4 +229,38 @@ export interface PublishedSlateVersion {
   vegasSnapshotPath: string | null;
   researchSnapshotPath: string | null;
   sourceHash: string | null;
+}
+
+// Milestone 30: background job persistence (lib/jobs/*).
+export type JobType = "PROCESS_SLATE" | "REFRESH_SLATE" | "BUILD_LINEUPS" | "RESULTS_COLLECTION" | "MODEL_EVALUATION";
+export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
+
+export interface JobRow {
+  id: string;
+  job_type: JobType;
+  slate_date: string | null;
+  slate_id: string | null;
+  status: JobStatus;
+  created_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+  progress: number;
+  current_step: string | null;
+  error_code: string | null;
+  safe_error_message: string | null;
+  worker_id: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  payload_json: string | null;
+}
+
+export type WorkerHealthStatus = "ONLINE" | "STALE" | "OFFLINE";
+
+export interface WorkerHeartbeatRow {
+  worker_id: string;
+  last_seen_at: string;
+  status: string;
+  metadata_json: string | null;
 }

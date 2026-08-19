@@ -1,7 +1,10 @@
+import { redirect } from "next/navigation";
+
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { GlobalSlateSelector } from "@/components/layout/GlobalSlateSelector";
 import { Sidebar } from "@/components/Sidebar";
 import { TopNavigation } from "@/components/TopNavigation";
+import { hasProductAccess } from "@/lib/auth/betaAccess";
 import { requireAuth } from "@/lib/auth/guards";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import {
@@ -33,6 +36,13 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
   // subscription; a future per-feature gate would call
   // isFeatureVisibleToUser() from a specific page, not this shared layout).
   const user = await requireAuth();
+  // Milestone 30: PRIVATE_BETA=true gate -- ADMIN always passes;
+  // everyone else needs an explicit beta grant (lib/auth/betaAccess.ts).
+  // A no-op when PRIVATE_BETA isn't set, so local dev/tests are
+  // unaffected unless an operator explicitly opts in.
+  if (!hasProductAccess(user)) {
+    redirect("/beta-access-required");
+  }
   const today = getTodayChicagoDate();
   const searchDate = latestKnownSlateDate();
   const mockModeEnabled = await getMockModeEnabled();

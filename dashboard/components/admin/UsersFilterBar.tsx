@@ -31,6 +31,12 @@ const TRIAL_OPTIONS = [
   { value: "trial_expired", label: "Trial Expired" },
 ];
 
+const BETA_ACCESS_OPTIONS = [
+  { value: "", label: "Any Beta Access" },
+  { value: "granted", label: "Beta Access Granted" },
+  { value: "not_granted", label: "Beta Access Not Granted" },
+];
+
 /** Reads/writes filters as URL query params so the list is always
  * driven by a real server-rendered page.tsx (no client-side data
  * fetching duplication, filters are shareable/bookmarkable links). */
@@ -85,6 +91,17 @@ export function UsersFilterBar() {
         onChange={(e) => updateParam("trialStatus", e.target.value)}
       >
         {TRIAL_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <select
+        className={SELECT_CLASS}
+        value={searchParams.get("betaAccess") ?? ""}
+        onChange={(e) => updateParam("betaAccess", e.target.value)}
+      >
+        {BETA_ACCESS_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>

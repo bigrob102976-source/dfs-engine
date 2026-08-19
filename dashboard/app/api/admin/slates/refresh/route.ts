@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/auth/guards";
 import { recordAuditLog } from "@/lib/db/auditLog";
 import { getSlateStatus } from "@/lib/db/slateStatus";
-import { runSlatePipeline } from "@/lib/slatePipeline";
+import { enqueueJob } from "@/lib/jobs/queue";
+import { ensureSlateJobHandlersRegistered } from "@/lib/jobs/slateJobHandlers";
+import { runOneQueuedJob } from "@/lib/jobs/worker";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +17,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * label so "the DK salary source was never re-uploaded, only volatile
  * inputs were refreshed" is explicit in the audit trail and process
  * history, per this milestone's "Admin should NOT need to upload it
- * again during the day" requirement. Fire-and-forget, same as Process --
- * see that route's docstring for the background-job-readiness note.
+ * again during the day" requirement. Milestone 30: enqueues a durable
+ * REFRESH_SLATE job (lib/jobs/queue.ts) and runs it inline -- see the
+ * Process route's docstring for the same background-job-readiness note.
  * A currently PUBLISHED slate's member-visible version is untouched
  * until a subsequent Publish (see lib/db/slateStatus.ts's module
  * docstring -- this is the atomic-member-view guarantee). */
@@ -51,26 +54,25 @@ export async function POST(request: Request) {
   // both gated on published_version alone) for the entire duration of
   // this refresh. See lib/db/slateStatus.ts's docstrings.
 
+  ensureSlateJobHandlersRegistered();
+  const { job } = enqueueJob({ jobType: "REFRESH_SLATE", slateDate: date, slateId, createdBy: admin.id, payload: { slateLabel: label } });
+
   recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_refresh_started",
-    targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId, slateLabel: label },
+    targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId, slateLabel: label, jobId: job.id },
   });
 
-  runSlatePipeline(date, slateId, label)
-    .then((result) => {
-      recordAuditLog({
-        actorUserId: admin.id, actorLabel: admin.email, action: "slate_refresh_completed",
-        targetType: "slate", targetId: `${date}:${slateId}`,
-        metadata: { date, slateId, status: result.status, errorCount: result.errors.length },
-      });
-    })
-    .catch((err) => {
-      recordAuditLog({
-        actorUserId: admin.id, actorLabel: admin.email, action: "slate_refresh_failed",
-        targetType: "slate", targetId: `${date}:${slateId}`,
-        metadata: { date, slateId, error: err instanceof Error ? err.message : String(err) },
-      });
+  runOneQueuedJob(`inline-${job.id}`).then((result) => {
+    const failed = result.status === "FAILED" || result.status === "NO_HANDLER";
+    recordAuditLog({
+      actorUserId: admin.id, actorLabel: admin.email,
+      action: failed ? "slate_refresh_failed" : "slate_refresh_completed",
+      targetType: "slate", targetId: `${date}:${slateId}`,
+      metadata: failed
+        ? { date, slateId, jobId: job.id, error: result.job?.safe_error_message ?? null }
+        : { date, slateId, jobId: job.id, status: getSlateStatus(date, slateId)?.status ?? null },
     });
+  });
 
-  return NextResponse.json({ status: "started", date, slateId }, { status: 202 });
+  return NextResponse.json({ status: "started", date, slateId, jobId: job.id }, { status: 202 });
 }

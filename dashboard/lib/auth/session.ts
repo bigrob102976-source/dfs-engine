@@ -17,6 +17,9 @@ export interface CurrentUser {
   role: string;
   displayName: string | null;
   emailVerifiedAt: string | null;
+  /** Milestone 30: non-null means this user may use the member product
+   * while PRIVATE_BETA=true -- see lib/auth/betaAccess.ts. */
+  betaAccessGrantedAt: string | null;
 }
 
 function toCurrentUser(user: User): CurrentUser {
@@ -26,6 +29,7 @@ function toCurrentUser(user: User): CurrentUser {
     role: user.role,
     displayName: user.display_name,
     emailVerifiedAt: user.email_verified_at,
+    betaAccessGrantedAt: user.beta_access_granted_at,
   };
 }
 

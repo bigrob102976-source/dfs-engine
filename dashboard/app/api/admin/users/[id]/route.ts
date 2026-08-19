@@ -12,7 +12,7 @@ import {
   getCurrentSubscriptionForUser,
   insertSubscription,
 } from "@/lib/db/subscriptions";
-import { countAdmins, findUserById, setUserDisabled, updateUserRole } from "@/lib/db/users";
+import { countAdmins, findUserById, setBetaAccess, setUserDisabled, updateUserRole } from "@/lib/db/users";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +147,30 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
         targetType: "user",
         targetId: target.id,
         metadata: { planId, expiresAt: expiresAt ?? null },
+      });
+      break;
+    }
+
+    case "grant_beta_access": {
+      setBetaAccess(target.id, true, admin.id);
+      recordAuditLog({
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        action: "user_beta_access_granted",
+        targetType: "user",
+        targetId: target.id,
+      });
+      break;
+    }
+
+    case "revoke_beta_access": {
+      setBetaAccess(target.id, false, null);
+      recordAuditLog({
+        actorUserId: admin.id,
+        actorLabel: admin.email,
+        action: "user_beta_access_revoked",
+        targetType: "user",
+        targetId: target.id,
       });
       break;
     }

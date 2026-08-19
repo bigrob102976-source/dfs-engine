@@ -58,9 +58,20 @@ function researchSnapshotReference(date: string): string {
  * admin polling the status board sees live progress. Returns without
  * throwing even on partial failure -- the caller decides what to do with
  * a PARTIAL/ERROR result (e.g. still show it, just don't allow Publish). */
-export async function runSlatePipeline(date: string, slateId: string, slateLabel: string | null): Promise<SlatePipelineResult> {
+export async function runSlatePipeline(
+  date: string,
+  slateId: string,
+  slateLabel: string | null,
+  // Milestone 30: optional, additive -- reports coarse progress against
+  // this function's real stages (no fabricated fine-grained "M28
+  // performance stages"; none exist -- see lib/jobs/slateJobHandlers.ts).
+  // Every existing caller omits this and gets identical behavior to
+  // before this parameter existed.
+  onProgress: (progress: number, step: string) => void = () => {},
+): Promise<SlatePipelineResult> {
   const now = new Date().toISOString();
   upsertSlateStatus(date, slateId, { slateLabel, status: "PROCESSING" });
+  onProgress(5, "Building player pool");
 
   try {
     await loadPool(date, slateId, true);
@@ -72,15 +83,18 @@ export async function runSlatePipeline(date: string, slateId: string, slateLabel
 
   const errors: string[] = [];
 
+  onProgress(40, "Running Native projection engine");
   const nativeResult = await runPythonScript("scripts/run_native_projection_engine.py", ["--date", date]);
   if (nativeResult.exitCode !== 0) {
     errors.push(`Native projection engine failed: ${tail(nativeResult.stdout + nativeResult.stderr, 800)}`);
   }
 
+  onProgress(70, "Running AI projection engine");
   const aiResult = await runPythonScript("scripts/run_ai_projection_engine.py", ["--date", date]);
   if (aiResult.exitCode !== 0) {
     errors.push(`AI projection engine failed: ${tail(aiResult.stdout + aiResult.stderr, 800)}`);
   }
+  onProgress(95, "Finalizing slate status");
 
   const pool = loadLatestDKPlayerPool(date, slateId);
   const matchReport = loadLatestDkMatchReport(date, slateId);

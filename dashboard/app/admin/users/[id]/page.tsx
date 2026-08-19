@@ -50,6 +50,10 @@ export default async function AdminUserDetailPage(props: PageProps<"/admin/users
               <dd className="text-right">
                 {user.disabled_at ? <span className="text-red">Disabled {fmtDateTime(user.disabled_at)}</span> : <span className="text-green">Active</span>}
               </dd>
+              <dt className="text-text-faint">Beta Access</dt>
+              <dd className="text-right">
+                {user.beta_access_granted_at ? <span className="text-green">Granted {fmtDateTime(user.beta_access_granted_at)}</span> : <span className="text-text-faint">Not granted</span>}
+              </dd>
             </dl>
           </DataCard>
 
@@ -131,6 +135,7 @@ export default async function AdminUserDetailPage(props: PageProps<"/admin/users
             disabled={Boolean(user.disabled_at)}
             hasComplimentary={subscription?.status === "complimentary"}
             hasSubscription={subscription !== null}
+            hasBetaAccess={Boolean(user.beta_access_granted_at)}
             plans={plans}
             entitlementsCatalog={entitlementsCatalog}
           />

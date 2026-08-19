@@ -54,6 +54,22 @@ export function setUserDisabled(id: string, disabled: boolean): void {
   db.prepare("UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabled ? nowIso() : null, nowIso(), id);
 }
 
+/** Milestone 30: Private Beta gate (PRIVATE_BETA=true -- see lib/env.ts
+ * and lib/auth/betaAccess.ts). granted=true records WHO granted it
+ * (grantedByUserId, an admin's id) alongside WHEN; granted=false clears
+ * both columns. This is an account-level access gate, not an
+ * entitlement -- see the 0005 migration's docstring for why it isn't
+ * modeled as a user_entitlements row. */
+export function setBetaAccess(id: string, granted: boolean, grantedByUserId: string | null): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET beta_access_granted_at = ?, beta_access_granted_by = ?, updated_at = ? WHERE id = ?").run(
+    granted ? nowIso() : null,
+    granted ? grantedByUserId : null,
+    nowIso(),
+    id,
+  );
+}
+
 export interface ListUsersFilter {
   search?: string | null;
   role?: string | null;

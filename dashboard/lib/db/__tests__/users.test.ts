@@ -10,6 +10,7 @@ import {
   findUserByStripeCustomerId,
   listUsers,
   markTrialConsumed,
+  setBetaAccess,
   setStripeCustomerId,
   setUserDisabled,
   updateUserRole,
@@ -113,5 +114,24 @@ describe("users", () => {
 
     markTrialConsumed(user.id); // second call, e.g. from a second webhook delivery
     expect(findUserById(user.id)!.trial_consumed_at).toBe(first);
+  });
+
+  it("setBetaAccess(true) records both granted_at and granted_by", () => {
+    const admin = createUser({ email: "admin-beta@example.com", passwordHash: "h" });
+    const member = createUser({ email: "member-beta@example.com", passwordHash: "h" });
+    setBetaAccess(member.id, true, admin.id);
+    const reloaded = findUserById(member.id)!;
+    expect(reloaded.beta_access_granted_at).not.toBeNull();
+    expect(reloaded.beta_access_granted_by).toBe(admin.id);
+  });
+
+  it("setBetaAccess(false) clears both columns", () => {
+    const admin = createUser({ email: "admin-beta2@example.com", passwordHash: "h" });
+    const member = createUser({ email: "member-beta2@example.com", passwordHash: "h" });
+    setBetaAccess(member.id, true, admin.id);
+    setBetaAccess(member.id, false, null);
+    const reloaded = findUserById(member.id)!;
+    expect(reloaded.beta_access_granted_at).toBeNull();
+    expect(reloaded.beta_access_granted_by).toBeNull();
   });
 });

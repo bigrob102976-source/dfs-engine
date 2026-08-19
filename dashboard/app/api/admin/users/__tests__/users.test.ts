@@ -178,6 +178,33 @@ describe("PATCH /api/admin/users/[id] -- disable_account / restore_account", () 
   });
 });
 
+describe("PATCH /api/admin/users/[id] -- grant_beta_access / revoke_beta_access", () => {
+  it("grants beta access, recording who granted it, then revokes it", async () => {
+    const admin = await loginAsAdmin();
+    const target = createUser({ email: "beta-target@example.com", passwordHash: "h" });
+
+    const grantRes = await patchUser(
+      jsonRequest(`http://localhost/api/admin/users/${target.id}`, { action: "grant_beta_access" }),
+      ctx(target.id),
+    );
+    expect(grantRes.status).toBe(200);
+    let reloaded = findUserById(target.id)!;
+    expect(reloaded.beta_access_granted_at).not.toBeNull();
+    expect(reloaded.beta_access_granted_by).toBe(admin.id);
+    expect(listAuditLog({ action: "user_beta_access_granted" })).toHaveLength(1);
+
+    const revokeRes = await patchUser(
+      jsonRequest(`http://localhost/api/admin/users/${target.id}`, { action: "revoke_beta_access" }),
+      ctx(target.id),
+    );
+    expect(revokeRes.status).toBe(200);
+    reloaded = findUserById(target.id)!;
+    expect(reloaded.beta_access_granted_at).toBeNull();
+    expect(reloaded.beta_access_granted_by).toBeNull();
+    expect(listAuditLog({ action: "user_beta_access_revoked" })).toHaveLength(1);
+  });
+});
+
 describe("PATCH /api/admin/users/[id] -- extend_trial", () => {
   it("400s when the user has no subscription", async () => {
     await loginAsAdmin();

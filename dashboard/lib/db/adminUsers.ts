@@ -14,6 +14,7 @@ export interface AdminUserRow {
   disabled_at: string | null;
   email_verified_at: string | null;
   created_at: string;
+  beta_access_granted_at: string | null;
   subscription_id: string | null;
   plan_id: string | null;
   plan_name: string | null;
@@ -30,6 +31,9 @@ export interface AdminUsersFilter {
   subscriptionStatus?: string | null;
   /** "in_trial" = currently trialing; "trial_expired" = trialing but trial_ends_at has already passed. */
   trialStatus?: string | null;
+  /** Milestone 30: "granted" / "not_granted" -- filters on
+   * users.beta_access_granted_at, independent of role/subscription. */
+  betaAccess?: string | null;
   limit?: number;
   offset?: number;
 }
@@ -63,6 +67,11 @@ function buildWhere(filter: AdminUsersFilter): { where: string; params: (string 
     clauses.push("s.status = 'trialing' AND s.trial_ends_at IS NOT NULL AND s.trial_ends_at < ?");
     params.push(new Date().toISOString());
   }
+  if (filter.betaAccess === "granted") {
+    clauses.push("u.beta_access_granted_at IS NOT NULL");
+  } else if (filter.betaAccess === "not_granted") {
+    clauses.push("u.beta_access_granted_at IS NULL");
+  }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return { where, params };
@@ -75,7 +84,7 @@ export function listAdminUsers(filter: AdminUsersFilter = {}): AdminUserRow[] {
   const offset = filter.offset ?? 0;
   const rows = db
     .prepare(
-      `SELECT u.id, u.email, u.role, u.display_name, u.disabled_at, u.email_verified_at, u.created_at,
+      `SELECT u.id, u.email, u.role, u.display_name, u.disabled_at, u.email_verified_at, u.created_at, u.beta_access_granted_at,
               s.id as subscription_id, s.plan_id as plan_id, p.name as plan_name, s.status as subscription_status,
               s.trial_ends_at as trial_ends_at, s.current_period_end as current_period_end
        FROM users u

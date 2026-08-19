@@ -20,10 +20,19 @@
 // interface shape is designed and reviewed ahead of time, with ONE real
 // implementation (LocalStorageBackend, a thin wrapper around the exact
 // fs calls lib/discovery.ts already makes) proving it's suffient for
-// current behavior, and one documented stub (ProductionObjectStorageBackend)
-// showing what a hosted backend would need to fill in. No vendor is
-// chosen (S3 vs. GCS vs. Azure Blob vs. something else) since none is
-// already used anywhere in this project.
+// current behavior.
+//
+// Milestone 30: ProductionObjectStorageBackend is now a real, working
+// implementation against any S3-compatible provider (AWS S3, Cloudflare
+// R2, Backblaze B2, MinIO, ...) via @aws-sdk/client-s3, configured
+// entirely through five env vars (never hard-coded, matching this
+// project's existing DFS_PROVIDER_API_KEY-style secret convention):
+// OBJECT_STORAGE_ENDPOINT (optional -- omit for real AWS S3, required for
+// every other S3-compatible provider), OBJECT_STORAGE_REGION,
+// OBJECT_STORAGE_BUCKET, OBJECT_STORAGE_ACCESS_KEY, OBJECT_STORAGE_SECRET_KEY.
+// Constructed with no config (or an unresolvable one), it preserves its
+// original Milestone 29 behavior exactly: every method throws a clear
+// "not configured" error rather than silently reading local disk.
 
 export interface StorageBackend {
   /** Reads and JSON-parses a file at a repo-root-relative path (e.g.
@@ -95,46 +104,171 @@ export class LocalStorageBackend implements StorageBackend {
   }
 }
 
-/** Documented stub for a future hosted deployment. Deliberately throws
- * on every call rather than silently falling back to local disk (which
- * would be wrong -- a hosted process reading "local disk" would just
- * read its own empty/unrelated filesystem, not the admin's artifacts,
- * and fail in a much more confusing way later). Whoever wires up real
- * hosting fills this in once a concrete backend is chosen:
+export interface ObjectStorageConfig {
+  /** Omit for real AWS S3 (its region-based default endpoint is used).
+   * Required for every other S3-compatible provider (R2, B2, MinIO, ...). */
+  endpoint?: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+const REQUIRED_OBJECT_STORAGE_ENV_VARS = [
+  "OBJECT_STORAGE_REGION",
+  "OBJECT_STORAGE_BUCKET",
+  "OBJECT_STORAGE_ACCESS_KEY",
+  "OBJECT_STORAGE_SECRET_KEY",
+] as const;
+
+/** Reads the five OBJECT_STORAGE_* env vars (exact names from this
+ * milestone's spec). Returns null -- never throws -- when any required
+ * var is missing, so callers can decide for themselves whether that's
+ * fine (local dev) or fatal (production, see lib/storage/backend.ts). */
+export function resolveObjectStorageConfigFromEnv(): ObjectStorageConfig | null {
+  const region = process.env.OBJECT_STORAGE_REGION;
+  const bucket = process.env.OBJECT_STORAGE_BUCKET;
+  const accessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY;
+  const secretAccessKey = process.env.OBJECT_STORAGE_SECRET_KEY;
+  if (!region || !bucket || !accessKeyId || !secretAccessKey) return null;
+  return { endpoint: process.env.OBJECT_STORAGE_ENDPOINT || undefined, region, bucket, accessKeyId, secretAccessKey };
+}
+
+/** SAFE status for the Admin System page (Milestone 30) -- never returns
+ * a credential value, only which var names (not their contents) are
+ * missing. Mirrors lib/billing/stripeConfig.ts::getStripeConfigStatus's
+ * "nothing here ever logs or returns a secret VALUE" contract. */
+export function getObjectStorageConfigStatus(): { configured: true } | { configured: false; missing: string[] } {
+  const missing = REQUIRED_OBJECT_STORAGE_ENV_VARS.filter((name) => !process.env[name]);
+  return missing.length === 0 ? { configured: true } : { configured: false, missing: [...missing] };
+}
+
+function isNotFoundError(err: unknown): boolean {
+  const name = (err as { name?: string } | undefined)?.name;
+  const statusCode = (err as { $metadata?: { httpStatusCode?: number } } | undefined)?.$metadata?.httpStatusCode;
+  return name === "NoSuchKey" || name === "NotFound" || statusCode === 404;
+}
+
+/** Real S3-compatible object storage (AWS S3, Cloudflare R2, Backblaze
+ * B2, MinIO, ...) -- vendor-neutral via the standard S3 API surface.
+ * Configured entirely from env (see resolveObjectStorageConfigFromEnv);
+ * constructed with no config (the default), every method throws a clear
+ * "not configured" error rather than silently falling back to local disk
+ * -- a hosted process reading "local disk" would just read its own
+ * empty/unrelated filesystem, not the admin's artifacts, and fail in a
+ * much more confusing way later.
  *
- * - An object-storage client (AWS S3 / Google Cloud Storage / Azure
- *   Blob / R2 / ...) authenticated via environment-provided credentials
- *   (never hard-coded), mirroring how this project already keeps every
- *   other secret out of source (see dfs/providers/config.py's
- *   DFS_PROVIDER_API_KEY pattern).
- * - `readJson`/`exists` become a GET (or HEAD) request against
- *   `${bucket}/${relativePath}`.
- * - `listFiles`/`latestFile` become a prefix-listing call
- *   (e.g. S3 ListObjectsV2 with Prefix) instead of a directory read.
- * - The Python pipeline's own save side (research/prediction_snapshot.py,
- *   dfs/persistence.py, native_projections/persistence.py, etc.) would
- *   need the SAME backend choice on the write side, so an admin's
- *   Process/Refresh run uploads into the same bucket a hosted member
- *   read serves from -- that is a separate, larger change this
- *   milestone does not make (see the final report's "Hosting changes
- *   still required" section). */
+ * NOTE: the Python pipeline's own save side (research/prediction_snapshot.py,
+ * dfs/persistence.py, native_projections/persistence.py, etc.) needs the
+ * SAME backend choice on the write side, so an admin's Process/Refresh
+ * run uploads into the same bucket a hosted member read serves from --
+ * see native_projections/artifact_storage.py-equivalent work item and
+ * DEPLOYMENT.md for what remains before this is fully wired end to end. */
+type S3ClientModule = typeof import("@aws-sdk/client-s3");
+
 export class ProductionObjectStorageBackend implements StorageBackend {
+  private readonly config: ObjectStorageConfig | null;
+  private clientPromise: Promise<{ mod: S3ClientModule; client: import("@aws-sdk/client-s3").S3Client }> | null = null;
+
+  constructor(config: ObjectStorageConfig | null = resolveObjectStorageConfigFromEnv()) {
+    this.config = config;
+  }
+
+  private async requireClient(): Promise<{ mod: S3ClientModule; client: import("@aws-sdk/client-s3").S3Client; bucket: string }> {
+    const config = this.config;
+    if (!config) {
+      throw new Error(
+        "ProductionObjectStorageBackend is not configured -- set OBJECT_STORAGE_REGION, OBJECT_STORAGE_BUCKET, " +
+          "OBJECT_STORAGE_ACCESS_KEY, and OBJECT_STORAGE_SECRET_KEY (OBJECT_STORAGE_ENDPOINT is optional, only " +
+          "needed for S3-compatible providers other than AWS S3 itself).",
+      );
+    }
+    if (!this.clientPromise) {
+      this.clientPromise = import("@aws-sdk/client-s3").then((mod) => ({
+        mod,
+        client: new mod.S3Client({
+          region: config.region,
+          endpoint: config.endpoint,
+          // Path-style addressing is required by most non-AWS S3-compatible
+          // providers when a custom endpoint is set; AWS S3 itself (no
+          // custom endpoint) uses virtual-hosted-style as usual.
+          forcePathStyle: Boolean(config.endpoint),
+          credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+        }),
+      }));
+    }
+    const { mod, client } = await this.clientPromise;
+    return { mod, client, bucket: config.bucket };
+  }
+
   async readJson<T>(relativePath: string): Promise<T | null> {
-    throw new Error(
-      `ProductionObjectStorageBackend is not configured -- no object-storage vendor has been chosen yet. ` +
-        `Attempted to read: ${relativePath}`,
-    );
+    const { mod, client, bucket } = await this.requireClient();
+    try {
+      const result = await client.send(new mod.GetObjectCommand({ Bucket: bucket, Key: relativePath }));
+      const body = await result.Body?.transformToString("utf-8");
+      if (!body) return null;
+      return JSON.parse(body) as T;
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        console.error(`ProductionObjectStorageBackend.readJson failed for "${relativePath}":`, err instanceof Error ? err.message : err);
+      }
+      return null;
+    }
   }
 
   async exists(relativePath: string): Promise<boolean> {
-    throw new Error(`ProductionObjectStorageBackend is not configured. Attempted to check: ${relativePath}`);
+    const { mod, client, bucket } = await this.requireClient();
+    try {
+      await client.send(new mod.HeadObjectCommand({ Bucket: bucket, Key: relativePath }));
+      return true;
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        console.error(`ProductionObjectStorageBackend.exists failed for "${relativePath}":`, err instanceof Error ? err.message : err);
+      }
+      return false;
+    }
   }
 
   async listFiles(dirRelativePath: string, prefix: string, ext = ".json"): Promise<string[]> {
-    throw new Error(`ProductionObjectStorageBackend is not configured. Attempted to list: ${dirRelativePath}/${prefix}*${ext}`);
+    const { mod, client, bucket } = await this.requireClient();
+    const keyPrefix = `${dirRelativePath.replace(/\/+$/, "")}/${prefix}`;
+    try {
+      const result = await client.send(new mod.ListObjectsV2Command({ Bucket: bucket, Prefix: keyPrefix }));
+      return (result.Contents ?? [])
+        .map((obj) => obj.Key)
+        .filter((key): key is string => Boolean(key && key.endsWith(ext)))
+        .sort();
+    } catch (err) {
+      console.error(`ProductionObjectStorageBackend.listFiles failed for prefix "${keyPrefix}":`, err instanceof Error ? err.message : err);
+      return [];
+    }
   }
 
   async latestFile(dirRelativePath: string, prefix: string, ext = ".json"): Promise<string | null> {
-    throw new Error(`ProductionObjectStorageBackend is not configured. Attempted to find latest in: ${dirRelativePath}/${prefix}*${ext}`);
+    const files = await this.listFiles(dirRelativePath, prefix, ext);
+    return files.length ? files[files.length - 1] : null;
+  }
+}
+
+/** Real connectivity check -- used by the Admin System page's "Object
+ * Storage" status card. HeadBucketCommand only confirms the bucket is
+ * reachable with the configured credentials; it does not depend on any
+ * particular key existing (unlike exists()/readJson(), which treat a
+ * missing KEY as a normal, non-error outcome). Never throws; returns a
+ * structured result so a connection failure renders as "ERROR", not a
+ * 500. */
+export async function checkObjectStorageConnection(config: ObjectStorageConfig): Promise<{ connected: boolean; error: string | null }> {
+  try {
+    const { S3Client, HeadBucketCommand } = await import("@aws-sdk/client-s3");
+    const client = new S3Client({
+      region: config.region,
+      endpoint: config.endpoint,
+      forcePathStyle: Boolean(config.endpoint),
+      credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+    });
+    await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
+    return { connected: true, error: null };
+  } catch (err) {
+    return { connected: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

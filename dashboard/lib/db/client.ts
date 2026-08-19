@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { resolveDbBackend } from "./backend";
 import { runMigrations } from "./migrate";
 
 // Milestone 21: the membership/admin/entitlements database. This is a
@@ -32,11 +33,31 @@ function openDatabase(location: string): DatabaseSync {
 
 let dbInstance: DatabaseSync | null = null;
 
-/** Lazy singleton -- the database is opened (and migrated) on first
- * use, not at module load, so importing this module has no side
- * effects until a query actually runs. */
+/** Milestone 30: this accessor only ever knows how to speak SQLite --
+ * resolveDbBackend() (lib/db/backend.ts) is the single source of truth
+ * for "which database should this process use", and getDb() defers to
+ * it before ever touching disk:
+ *   - decision "sqlite" (dev/test with no DATABASE_URL, or an explicit
+ *     ALLOW_SQLITE_IN_PRODUCTION=true override) -> proceeds exactly as
+ *     before, zero behavior change for local development.
+ *   - decision "postgres" (DATABASE_URL is configured) -> throws. This
+ *     accessor is SQLite-only; the 17 query modules under lib/db/*.ts
+ *     that call getDb() have not yet been ported to the async Postgres
+ *     adapter (lib/db/postgresClient.ts) -- that port is real, separate
+ *     follow-up work (see DEPLOYMENT.md). Silently using local SQLite
+ *     here even though a shared Postgres database was explicitly
+ *     configured would be exactly the kind of silent, wrong fallback
+ *     this milestone forbids -- so this fails loudly instead. */
 export function getDb(): DatabaseSync {
   if (!dbInstance) {
+    const backend = resolveDbBackend();
+    if (backend.kind === "postgres") {
+      throw new Error(
+        "DATABASE_URL is configured for PostgreSQL, but lib/db/client.ts::getDb() is a SQLite-only accessor -- " +
+          "the application's query layer has not yet been ported to lib/db/postgresClient.ts's Postgres adapter. " +
+          "See DEPLOYMENT.md for what remains before this accessor can serve a production Postgres database.",
+      );
+    }
     dbInstance = openDatabase(resolveDbPath());
   }
   return dbInstance;

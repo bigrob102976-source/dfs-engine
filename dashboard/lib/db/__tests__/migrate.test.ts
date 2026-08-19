@@ -12,6 +12,7 @@ describe("migrations", () => {
     const rows = db.prepare("SELECT filename FROM schema_migrations ORDER BY filename").all() as Array<{ filename: string }>;
     expect(rows.map((r) => r.filename)).toEqual([
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
+      "0005_production_infrastructure.sql",
     ]);
   });
 
@@ -22,7 +23,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(4);
+    expect(rows.c).toBe(5);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {

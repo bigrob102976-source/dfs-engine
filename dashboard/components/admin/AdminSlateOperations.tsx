@@ -12,6 +12,14 @@ interface ReadinessCheck {
   detail: string;
 }
 
+interface ActiveJob {
+  id: string;
+  jobType: string;
+  status: string;
+  progress: number;
+  currentStep: string | null;
+}
+
 interface SlateBoardRow {
   slateId: string;
   slateName: string | null;
@@ -26,6 +34,7 @@ interface SlateBoardRow {
   publishedVersion: number | null;
   publishedAt: string | null;
   readiness: { ok: boolean; required: ReadinessCheck[]; optional: ReadinessCheck[] };
+  activeJob: ActiveJob | null;
 }
 
 interface StatusResponse {
@@ -93,6 +102,17 @@ export function AdminSlateOperations({ date }: { date: string }) {
     Promise.resolve().then(refresh);
   }, [refresh]);
 
+  // Milestone 30: while any slate has an active (QUEUED/RUNNING) job,
+  // poll status every 2s so the progress bar/current step below updates
+  // live without the admin needing to trigger another action -- backed
+  // by lib/jobs/queue.ts's durable job rows, not this component's memory.
+  const hasActiveJob = data?.slates.some((s) => s.activeJob !== null) ?? false;
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const interval = setInterval(refresh, 2000);
+    return () => clearInterval(interval);
+  }, [hasActiveJob, refresh]);
+
   async function runAction(slateId: string, slateName: string | null, action: "process" | "refresh" | "publish" | "unpublish" | "archive") {
     setBusy(`${slateId}:${action}`);
     setError(null);
@@ -153,6 +173,18 @@ export function AdminSlateOperations({ date }: { date: string }) {
                     {isProcessing && s.displayStatus !== "PROCESSING" ? " (refreshing)" : ""}
                   </span>
                 </div>
+
+                {s.activeJob && (
+                  <div className="mb-3">
+                    <div className="mb-1 flex items-center justify-between text-[10px] text-text-faint">
+                      <span>{s.activeJob.currentStep ?? (s.activeJob.status === "QUEUED" ? "Queued" : "Working...")}</span>
+                      <span>{s.activeJob.progress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-panel">
+                      <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${s.activeJob.progress}%` }} />
+                    </div>
+                  </div>
+                )}
 
                 <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
                   <dt className="text-text-faint">DK Source</dt>
