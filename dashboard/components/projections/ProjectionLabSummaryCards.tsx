@@ -35,7 +35,14 @@ export function ProjectionLabSummaryCards({ summary }: { summary: ProjectionLabS
         value={`${summary.aiEligibleCoverage}/${summary.eligiblePlayers} (${eligiblePct(summary.aiEligibleCoverage)})`}
         sub={`${summary.aiCoverage} of all preserved DK rows`}
       />
+      <Card
+        label="FantasyPros Coverage"
+        value={`${summary.fantasyProsCoverage}/${summary.eligiblePlayers} (${eligiblePct(summary.fantasyProsCoverage)})`}
+        sub="Comparison source only -- never affects eligibility"
+      />
       <Card label="Avg Native Projection" value={summary.averageNativeProjection === null ? "--" : summary.averageNativeProjection.toFixed(1)} />
+      <Card label="Avg AI Projection" value={summary.averageAiProjection === null ? "--" : summary.averageAiProjection.toFixed(1)} />
+      <Card label="Avg FantasyPros Projection" value={summary.averageFantasyProsProjection === null ? "--" : summary.averageFantasyProsProjection.toFixed(1)} />
       <Card label="Avg AI Adjustment" value={summary.averageAiAdjustment === null ? "--" : `${summary.averageAiAdjustment >= 0 ? "+" : ""}${summary.averageAiAdjustment.toFixed(1)}`} />
       <Card
         label="Largest AI Upgrade"
@@ -51,6 +58,16 @@ export function ProjectionLabSummaryCards({ summary }: { summary: ProjectionLabS
         label="Largest BM vs BlueCollar Diff"
         value={summary.largestBigMoneyVsBlueCollarDifference ? `${summary.largestBigMoneyVsBlueCollarDifference.bigMoneyVsBlueCollarDelta! >= 0 ? "+" : ""}${summary.largestBigMoneyVsBlueCollarDifference.bigMoneyVsBlueCollarDelta!.toFixed(1)}` : "--"}
         sub={summary.largestBigMoneyVsBlueCollarDifference?.name}
+      />
+      <Card
+        label="Largest Big Money Over FantasyPros"
+        value={summary.largestBigMoneyOverFantasyPros ? `+${summary.largestBigMoneyOverFantasyPros.bigMoneyVsFantasyProsDelta!.toFixed(1)}` : "--"}
+        sub={summary.largestBigMoneyOverFantasyPros?.name}
+      />
+      <Card
+        label="Largest Big Money Under FantasyPros"
+        value={summary.largestBigMoneyUnderFantasyPros ? summary.largestBigMoneyUnderFantasyPros.bigMoneyVsFantasyProsDelta!.toFixed(1) : "--"}
+        sub={summary.largestBigMoneyUnderFantasyPros?.name}
       />
     </div>
   );

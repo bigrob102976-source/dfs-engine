@@ -79,6 +79,13 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
         <dd className="text-right text-text">{fmt(player.projection)}</dd>
         <dt className="text-text-faint">BlueCollar (Adjusted)</dt>
         <dd className="text-right text-text">{player.adjustedProjection === null ? "NOT LOADED" : fmt(player.adjustedProjection)}</dd>
+        <dt className="text-text-faint">FantasyPros</dt>
+        <dd className="text-right text-text">
+          {player.fantasyProsProjection === null ? "NOT AVAILABLE" : fmt(player.fantasyProsProjection)}
+          {player.fantasyProsMatchStatus && player.fantasyProsMatchStatus !== "matched" && (
+            <span className="ml-1 text-[10px] text-text-faint">({player.fantasyProsMatchStatus})</span>
+          )}
+        </dd>
       </dl>
 
       {!hasComparison && <p className="mt-3 text-xs text-text-faint">BlueCollar: NOT LOADED for this player.</p>}

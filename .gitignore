@@ -37,6 +37,7 @@ dashboard/next-env.d.ts
 /game_environment_snapshots/
 /ai_projection_snapshots/
 /native_projection_snapshots/
+/fantasypros_snapshots/
 
 # Live, mutable dashboard-controlled settings (Milestone 19's Mock Mode
 # toggle) -- local runtime state, not a reproducible artifact or source.

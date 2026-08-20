@@ -6,6 +6,7 @@ import { loadActualDkPointsByPlayerId } from "@/lib/actualResults";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getProjectionComparisonByPlayerId } from "@/lib/externalProjections";
+import { getFantasyProsProjectionByPlayerId } from "@/lib/fantasyProsProjections";
 import { loadLatestBatterSnapshot, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
@@ -59,8 +60,21 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
   const nativeByPlayerId = getNativeProjectionByPlayerId(date);
   const aiByPlayerId = getAiProjectionByPlayerId(date);
   const actualByPlayerId = loadActualDkPointsByPlayerId(date);
+  // Milestone: FantasyPros -- the snapshot itself is date-scoped and
+  // MLB-wide (FantasyPros doesn't know about DK slates); joining it here,
+  // onto rows already filtered to this slate's games via filterByGameIds
+  // above, is what actually satisfies "never show every FantasyPros
+  // player" -- no slate-awareness needed inside fantasyProsProjections.ts.
+  const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(date);
 
-  const rows = buildProjectionLabRows([...pitcherRows, ...hitterRows], externalByPlayerId, nativeByPlayerId, aiByPlayerId, actualByPlayerId);
+  const rows = buildProjectionLabRows(
+    [...pitcherRows, ...hitterRows],
+    externalByPlayerId,
+    nativeByPlayerId,
+    aiByPlayerId,
+    actualByPlayerId,
+    fantasyProsByPlayerId,
+  );
   const summary = buildProjectionLabSummary(rows);
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : " -- Full Day";
 

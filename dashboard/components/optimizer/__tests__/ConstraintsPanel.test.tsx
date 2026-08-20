@@ -53,6 +53,8 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     nativeExpectedInnings: null,
     nativeHitterComponents: null,
     nativePitcherComponents: null,
+    fantasyProsProjection: null,
+    fantasyProsMatchStatus: null,
     ...overrides,
   };
 }
@@ -74,6 +76,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     externalProviderName: null,
     hasAiProjections: false,
     hasNativeProjections: false,
+    hasFantasyProsProjections: false,
     confirmedLineupGames: 1,
     unconfirmedLineupGames: 0,
     unmatchedCount: 0,

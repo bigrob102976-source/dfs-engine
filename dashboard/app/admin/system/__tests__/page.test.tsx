@@ -2,11 +2,15 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockExternalStatus = vi.fn();
+const mockFantasyProsStatus = vi.fn();
 const mockGameEnvStatus = vi.fn();
 const mockMockMode = vi.fn();
 
 vi.mock("@/lib/externalProjectionsStatus", () => ({
   getExternalProjectionsStatus: (...args: unknown[]) => mockExternalStatus(...args),
+}));
+vi.mock("@/lib/fantasyProsStatus", () => ({
+  getFantasyProsStatus: (...args: unknown[]) => mockFantasyProsStatus(...args),
 }));
 vi.mock("@/lib/gameEnvironmentStatus", () => ({
   getGameEnvironmentStatus: (...args: unknown[]) => mockGameEnvStatus(...args),
@@ -23,6 +27,21 @@ const AdminSystemPage = (await import("../page")).default;
 beforeEach(() => {
   __resetDbForTests();
   mockExternalStatus.mockResolvedValue({ error: "no python configured in test env" });
+  mockFantasyProsStatus.mockResolvedValue({
+    slate_date: "2026-08-19",
+    slate_id: null,
+    status: "NOT_CONFIGURED",
+    configured: false,
+    snapshot_exists: false,
+    retrieved_at: null,
+    public_api_limited: null,
+    api_tier: null,
+    hitter_count: null,
+    pitcher_count: null,
+    eligible_players: 0,
+    matched_eligible_players: 0,
+    unmatched_eligible_names: [],
+  });
   mockGameEnvStatus.mockResolvedValue({ error: "no python configured in test env" });
   mockMockMode.mockResolvedValue(false);
 });
@@ -54,6 +73,51 @@ describe("AdminSystemPage", () => {
     expect(screen.getByText("Stripe Webhooks")).toBeInTheDocument();
     expect(screen.getByText("Missing Configuration")).toBeInTheDocument();
     expect(screen.getByText("No failed webhook deliveries recorded.")).toBeInTheDocument();
+  });
+
+  it("shows FantasyPros NOT CONFIGURED by default", async () => {
+    render(await AdminSystemPage());
+    expect(screen.getByText("FantasyPros: NOT CONFIGURED")).toBeInTheDocument();
+  });
+
+  it("shows FantasyPros AVAILABLE with eligible-player coverage when a snapshot fully covers the slate", async () => {
+    mockFantasyProsStatus.mockResolvedValue({
+      slate_date: "2026-08-19",
+      slate_id: null,
+      status: "AVAILABLE",
+      configured: true,
+      snapshot_exists: true,
+      retrieved_at: "2026-08-19T12:00:00Z",
+      public_api_limited: true,
+      api_tier: "free",
+      hitter_count: 10,
+      pitcher_count: 10,
+      eligible_players: 5,
+      matched_eligible_players: 5,
+      unmatched_eligible_names: [],
+    });
+    render(await AdminSystemPage());
+    expect(screen.getByText("FantasyPros: AVAILABLE -- 5/5 eligible players")).toBeInTheDocument();
+  });
+
+  it("shows FantasyPros PARTIAL when coverage is incomplete, never claiming AVAILABLE", async () => {
+    mockFantasyProsStatus.mockResolvedValue({
+      slate_date: "2026-08-19",
+      slate_id: null,
+      status: "PARTIAL",
+      configured: true,
+      snapshot_exists: true,
+      retrieved_at: "2026-08-19T12:00:00Z",
+      public_api_limited: true,
+      api_tier: "free",
+      hitter_count: 10,
+      pitcher_count: 10,
+      eligible_players: 162,
+      matched_eligible_players: 2,
+      unmatched_eligible_names: ["Some Player"],
+    });
+    render(await AdminSystemPage());
+    expect(screen.getByText("FantasyPros: PARTIAL -- 2/162 eligible players")).toBeInTheDocument();
   });
 
   it("shows real webhook status counts and recent failures, never a fabricated payload", async () => {

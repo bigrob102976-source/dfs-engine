@@ -487,5 +487,57 @@ describe("buildLineups", () => {
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");
     });
+
+    it("fantasypros writes a --projection-overrides file with dk_points as the projection, leaving ceiling/floor null", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      writeJson(`fantasypros_snapshots/${DATE}/fantasypros_projection_20260812T200000.json`, {
+        slate_date: DATE, retrieved_at: `${DATE}T20:00:00Z`, hitter_count: 1, pitcher_count: 0,
+        hitters_matched: 1, pitchers_matched: 0, public_api_limited: true, api_tier: "free",
+        players: [
+          {
+            fantasypros_id: "1", name: "Kyle Schwarber", team: "PHI", player_type: "hitter", yahoo_id: null,
+            raw_stats: {}, dk_points: 8.4, dk_points_breakdown: {}, match_status: "matched",
+            match_confidence: "name_team_exact", mlb_player_id: "h1", candidate_mlb_ids: [], candidate_names: [],
+          },
+        ],
+      });
+      let capturedOverrides: Record<string, { projection: number; ceiling: number | null; floor: number | null }> | null = null;
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner(
+          {
+            "scripts/optimize_dk_lineups.py": (args) => {
+              const overridesPath = argValue(args, "--projection-overrides");
+              if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+              return ok(JSON.stringify({ errors: [] }));
+            },
+          },
+          calls,
+        ),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      await validateBuildRequest(baseRequest({ projectionSource: "fantasypros" }));
+
+      expect(capturedOverrides).not.toBeNull();
+      expect(capturedOverrides!.h1.projection).toBe(8.4);
+      expect(capturedOverrides!.h1.ceiling).toBeNull();
+      expect(capturedOverrides!.h1.floor).toBeNull();
+    });
+
+    it("fantasypros with no snapshot at all never passes --projection-overrides (graceful fallback)", async () => {
+      const calls: Array<{ script: string; args: string[] }> = [];
+      await seedCachedPool(calls);
+      // Deliberately no FantasyPros snapshot written.
+      const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+      __setPythonRunnerForTests(
+        makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
+      );
+      const { validateBuildRequest } = await import("../buildRunner");
+      const errors = await validateBuildRequest(baseRequest({ projectionSource: "fantasypros" }));
+      expect(errors).toEqual([]);
+      const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+      expect(call.args).not.toContain("--projection-overrides");
+    });
   });
 });

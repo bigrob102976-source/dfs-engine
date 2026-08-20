@@ -20,6 +20,7 @@ import type { SlateLifecycleStatus } from "./db/types";
 import { upsertSlateStatus } from "./db/slateStatus";
 import { findLatestFile } from "./discovery";
 import { loadLatestDkMatchReport, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot } from "./loaders";
+import { parseLastJsonLine } from "./optimizerWorkspace/jsonLine";
 import { loadPool } from "./optimizerWorkspace/poolCache";
 import { runPythonScript, tail } from "./orchestrator/pythonRunner";
 import { evaluatePublishReadiness } from "./slatePublishReadiness";
@@ -93,6 +94,22 @@ export async function runSlatePipeline(
   const aiResult = await runPythonScript("scripts/run_ai_projection_engine.py", ["--date", date]);
   if (aiResult.exitCode !== 0) {
     errors.push(`AI projection engine failed: ${tail(aiResult.stdout + aiResult.stderr, 800)}`);
+  }
+
+  // FantasyPros (optional, test/evaluation comparison source -- never
+  // affects `status` below, which is computed from readiness/pool
+  // presence alone). Unlike native/AI, this script always exits 0 for
+  // every EXPECTED outcome (not configured, no research yet, API error)
+  // -- it prints a JSON status line instead, since "FantasyPros isn't
+  // configured" is normal, not a pipeline failure. Only a genuinely
+  // unexpected non-zero exit is recorded as an error here.
+  onProgress(85, "Fetching FantasyPros projections");
+  const fantasyProsResult = await runPythonScript("scripts/fetch_fantasypros_projections.py", ["--date", date]);
+  const fantasyProsStatus = parseLastJsonLine(fantasyProsResult.stdout)?.status;
+  if (fantasyProsResult.exitCode !== 0) {
+    errors.push(`FantasyPros fetch failed: ${tail(fantasyProsResult.stdout + fantasyProsResult.stderr, 800)}`);
+  } else if (fantasyProsStatus === "api_error") {
+    errors.push(`FantasyPros API error: ${tail(fantasyProsResult.stdout, 400)}`);
   }
   onProgress(95, "Finalizing slate status");
 

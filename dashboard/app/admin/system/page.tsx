@@ -5,6 +5,7 @@ import { getTodayChicagoDate } from "@/lib/currentDate";
 import { countWebhookEventsByStatus, getLastSuccessfulWebhookEvent, listRecentWebhookEvents } from "@/lib/db/stripeWebhookEvents";
 import { computeDbStats } from "@/lib/db/systemStats";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
+import { getFantasyProsStatus } from "@/lib/fantasyProsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { getMockModeEnabled } from "@/lib/mockMode";
 import { getDatabaseReadiness, getJobQueueReadiness, getObjectStorageReadiness, getWorkerReadiness } from "@/lib/systemReadiness";
@@ -25,9 +26,10 @@ function fmtDateTime(iso: string | null): string {
  * definition of "is this connected." No READY is faked here. */
 export default async function AdminSystemPage() {
   const date = getTodayChicagoDate();
-  const [mockModeEnabled, externalStatus, environmentStatus, databaseReadiness, objectStorageReadiness] = await Promise.all([
+  const [mockModeEnabled, externalStatus, fantasyProsStatus, environmentStatus, databaseReadiness, objectStorageReadiness] = await Promise.all([
     getMockModeEnabled(),
     getExternalProjectionsStatus(date),
+    getFantasyProsStatus(date, null),
     getGameEnvironmentStatus(date),
     getDatabaseReadiness(),
     getObjectStorageReadiness(),
@@ -121,6 +123,54 @@ export default async function AdminSystemPage() {
             <dt className="text-text-faint">Baseline Loaded</dt>
             <dd className="text-right text-text">{externalStatus.baseline.exists ? "Yes" : "No"}</dd>
           </dl>
+        )}
+      </DataCard>
+
+      <DataCard title="FantasyPros" className="mb-4">
+        {"error" in fantasyProsStatus ? (
+          <p className="text-xs text-red">{fantasyProsStatus.error}</p>
+        ) : (
+          <>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm text-text">Status</span>
+              <span
+                className={`text-xs font-semibold uppercase tracking-wide ${
+                  fantasyProsStatus.status === "AVAILABLE"
+                    ? "text-green"
+                    : fantasyProsStatus.status === "PARTIAL"
+                      ? "text-yellow"
+                      : "text-text-faint"
+                }`}
+              >
+                {fantasyProsStatus.status === "NOT_CONFIGURED" && "FantasyPros: NOT CONFIGURED"}
+                {fantasyProsStatus.status === "NO_SNAPSHOT" && "FantasyPros: NO SNAPSHOT"}
+                {fantasyProsStatus.status === "AVAILABLE" &&
+                  `FantasyPros: AVAILABLE -- ${fantasyProsStatus.matched_eligible_players}/${fantasyProsStatus.eligible_players} eligible players`}
+                {fantasyProsStatus.status === "PARTIAL" &&
+                  `FantasyPros: PARTIAL -- ${fantasyProsStatus.matched_eligible_players}/${fantasyProsStatus.eligible_players} eligible players`}
+              </span>
+            </div>
+            <dl className="grid grid-cols-2 gap-y-2 text-xs">
+              <dt className="text-text-faint">Configured</dt>
+              <dd className="text-right text-text">{fantasyProsStatus.configured ? "Yes" : "No"}</dd>
+              <dt className="text-text-faint">Snapshot Retrieved</dt>
+              <dd className="text-right text-text">{fantasyProsStatus.retrieved_at ?? "--"}</dd>
+              <dt className="text-text-faint">Hitters / Pitchers Returned</dt>
+              <dd className="text-right text-text">
+                {fantasyProsStatus.hitter_count ?? "--"} / {fantasyProsStatus.pitcher_count ?? "--"}
+              </dd>
+              {fantasyProsStatus.public_api_limited && (
+                <>
+                  <dt className="text-text-faint">API Tier</dt>
+                  <dd className="text-right text-yellow">{fantasyProsStatus.api_tier ?? "free"} (public API limited)</dd>
+                </>
+              )}
+            </dl>
+            <p className="mt-2 text-[11px] text-text-faint">
+              A live API failure during Process/Refresh appears in that run&apos;s errors, not here -- this card only reflects the last
+              persisted snapshot. FantasyPros is a comparison + optional optimizer source; it never affects Native/AI or slate eligibility.
+            </p>
+          </>
         )}
       </DataCard>
 

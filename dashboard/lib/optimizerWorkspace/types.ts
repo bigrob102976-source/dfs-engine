@@ -93,9 +93,17 @@ export interface PoolPlayerRow {
   nativeExpectedInnings: number | null; // pitchers only
   nativeHitterComponents: NativeHitterComponents | null;
   nativePitcherComponents: NativePitcherComponents | null;
+
+  // FantasyPros: a COMPARISON + OPTIONAL OPTIMIZER SOURCE only -- joined
+  // in from the latest fantasypros_snapshots/<date>/*.json snapshot by
+  // mlbPlayerId, same shape as native/AI above. `projection` above is
+  // still ALWAYS the independent value; never fed into Native/AI's own
+  // computation (see lib/fantasyProsProjections.ts's module docstring).
+  fantasyProsProjection: number | null;
+  fantasyProsMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
 }
 
-export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native";
+export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -124,6 +132,7 @@ export interface OptimizerPoolResult {
   externalProviderName: string | null;
   hasAiProjections: boolean;
   hasNativeProjections: boolean;
+  hasFantasyProsProjections: boolean;
   vegasCoverage: DkSlateVegasCoverage;
 }
 

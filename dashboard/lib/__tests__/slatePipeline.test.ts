@@ -79,6 +79,11 @@ function defaultHandlers(): Record<string, Handler> {
       });
       return ok(JSON.stringify({ status: "ready", player_count: 1 }));
     },
+    // FantasyPros: optional, test/evaluation comparison source. The
+    // default/expected outcome for a test env with no API key configured
+    // is "not_configured" (exit 0, JSON status line) -- never a Python
+    // exception -- see fantasypros/build.py::build_fantasypros_snapshot.
+    "scripts/fetch_fantasypros_projections.py": () => ok(JSON.stringify({ status: "not_configured" })),
   };
 }
 
@@ -125,6 +130,7 @@ describe("runSlatePipeline", () => {
       "scripts/project_dk_ownership.py",
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
+      "scripts/fetch_fantasypros_projections.py",
     ]);
 
     const { getSlateStatus } = await import("../db/slateStatus");
@@ -167,6 +173,54 @@ describe("runSlatePipeline", () => {
 
     const { getSlateStatus } = await import("../db/slateStatus");
     expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("ERROR");
+  });
+
+  it("still marks the slate READY when FantasyPros reports an api_error -- Native/AI are unaffected and the error is recorded, not swallowed or fatal", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/fetch_fantasypros_projections.py": () => ok(JSON.stringify({ status: "api_error", error: "401 Unauthorized" })) };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("FantasyPros API error"))).toBe(true);
+
+    const { getSlateStatus } = await import("../db/slateStatus");
+    const status = getSlateStatus(DATE, SLATE_ID)!;
+    expect(status.status).toBe("READY");
+    expect(status.native_snapshot_path).toContain("native_projection_");
+    expect(status.ai_snapshot_path).toContain("ai_projection_");
+  });
+
+  it("still marks the slate READY when the FantasyPros script itself exits non-zero unexpectedly -- recorded as an error, never fatal to the slate", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/fetch_fantasypros_projections.py": () => fail("unexpected crash") };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("FantasyPros fetch failed"))).toBe(true);
+
+    const { getSlateStatus } = await import("../db/slateStatus");
+    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+  });
+
+  it("does not record an error when FantasyPros is simply not configured -- that is a normal, expected outcome", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors).toEqual([]);
+    expect(calls.map((c) => c.script)).toContain("scripts/fetch_fantasypros_projections.py");
   });
 
   it("sets status to PROCESSING immediately, before the pipeline completes", async () => {

@@ -411,4 +411,42 @@ describe("loadPool", () => {
     expect(pool.hasNativeProjections).toBe(false);
     expect(pool.players.every((p) => p.nativeProjection === null)).toBe(true);
   });
+
+  it("joins FantasyPros data by mlbPlayerId when a snapshot exists, never touching the independent projection", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    writeJson(`fantasypros_snapshots/${DATE}/fantasypros_projection_20260812T180000.json`, {
+      slate_date: DATE, retrieved_at: `${DATE}T18:00:00Z`, hitter_count: 1, pitcher_count: 0,
+      hitters_matched: 1, pitchers_matched: 0, public_api_limited: true, api_tier: "free",
+      players: [
+        {
+          fantasypros_id: "1", name: "Leadoff Hitter", team: "BOS", player_type: "hitter", yahoo_id: null,
+          raw_stats: {}, dk_points: 8.9, dk_points_breakdown: {}, match_status: "matched",
+          match_confidence: "name_team_exact", mlb_player_id: "h1", candidate_mlb_ids: [], candidate_names: [],
+        },
+      ],
+    });
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+
+    expect(pool.hasFantasyProsProjections).toBe(true);
+    const hitter = pool.players.find((p) => p.dkPlayerId === "d1")!;
+    expect(hitter.fantasyProsProjection).toBe(8.9);
+    expect(hitter.fantasyProsMatchStatus).toBe("matched");
+    expect(hitter.projection).not.toBe(8.9); // independent projection is unaffected by FantasyPros
+  });
+
+  it("hasFantasyProsProjections is false and fantasyPros fields stay null when no snapshot exists", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+    expect(pool.hasFantasyProsProjections).toBe(false);
+    expect(pool.players.every((p) => p.fantasyProsProjection === null)).toBe(true);
+  });
 });

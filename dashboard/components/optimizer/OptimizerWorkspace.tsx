@@ -295,7 +295,8 @@ export function OptimizerWorkspace() {
     const externalUnavailable = (projectionSource === "external" || projectionSource === "adjusted") && !pool.hasExternalProjections;
     const aiUnavailable = projectionSource === "ai" && !pool.hasAiProjections;
     const nativeUnavailable = projectionSource === "native" && !pool.hasNativeProjections;
-    if (externalUnavailable || aiUnavailable || nativeUnavailable) {
+    const fantasyProsUnavailable = projectionSource === "fantasypros" && !pool.hasFantasyProsProjections;
+    if (externalUnavailable || aiUnavailable || nativeUnavailable || fantasyProsUnavailable) {
       Promise.resolve().then(() => setProjectionSource("independent"));
     }
   }, [pool, projectionSource]);
@@ -460,12 +461,14 @@ export function OptimizerWorkspace() {
               { value: "ai" as ProjectionSource, label: "Big Money AI" },
               { value: "external" as ProjectionSource, label: externalSourceLabel },
               { value: "adjusted" as ProjectionSource, label: `${externalSourceLabel} (Adjusted)` },
+              { value: "fantasypros" as ProjectionSource, label: "FantasyPros" },
               { value: "independent" as ProjectionSource, label: "Legacy" },
             ]
           ).map((opt) => {
             const disabled =
               opt.value === "ai" ? !pool?.hasAiProjections
               : opt.value === "native" ? !pool?.hasNativeProjections
+              : opt.value === "fantasypros" ? !pool?.hasFantasyProsProjections
               : opt.value !== "independent" && !pool?.hasExternalProjections;
             return (
               <button
@@ -493,6 +496,9 @@ export function OptimizerWorkspace() {
         )}
         {!pool?.hasNativeProjections && (
           <span className="text-[11px] text-text-faint">Big Money Native not generated yet -- run scripts/run_native_projection_engine.py.</span>
+        )}
+        {!pool?.hasFantasyProsProjections && (
+          <span className="text-[11px] text-text-faint">FantasyPros not available -- not configured, no matched players, or not fetched yet.</span>
         )}
 
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">

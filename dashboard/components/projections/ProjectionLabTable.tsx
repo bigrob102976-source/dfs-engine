@@ -22,8 +22,11 @@ const COLUMNS: Column[] = [
   { key: "blueCollarProjection", label: "BlueCollar", sortKey: "blueCollarProjection", align: "right" },
   { key: "nativeProjection", label: "Big Money Native", sortKey: "nativeProjection", align: "right" },
   { key: "aiProjection", label: "Big Money AI", sortKey: "aiProjection", align: "right" },
+  { key: "fantasyProsProjection", label: "FantasyPros", sortKey: "fantasyProsProjection", align: "right" },
   { key: "aiVsNativeDelta", label: "AI Δ", sortKey: "aiVsNativeDelta", align: "right" },
   { key: "bigMoneyVsBlueCollarDelta", label: "BM vs BC Δ", sortKey: "bigMoneyVsBlueCollarDelta", align: "right" },
+  { key: "fpVsNativeDelta", label: "FP vs Native Δ", sortKey: "fpVsNativeDelta", align: "right" },
+  { key: "fpVsAiDelta", label: "FP vs AI Δ", sortKey: "fpVsAiDelta", align: "right" },
   { key: "ownership", label: "Own%", sortKey: "ownership", align: "right" },
   { key: "leverage", label: "Lev", sortKey: "leverage", align: "right" },
   { key: "actualDkPoints", label: "Actual DK", sortKey: "actualDkPoints", align: "right" },
@@ -138,11 +141,18 @@ export function ProjectionLabTable({ rows }: { rows: ProjectionLabRow[] }) {
                 <td className="px-2 py-1 text-right">{r.blueCollarProjection === null ? "NOT LOADED" : formatProjectionCell(r.blueCollarProjection)}</td>
                 <td className="px-2 py-1 text-right text-purple">{formatProjectionCell(r.nativeProjection)}</td>
                 <td className="px-2 py-1 text-right text-purple">{formatProjectionCell(r.aiProjection)}</td>
+                <td className="px-2 py-1 text-right">{formatProjectionCell(r.fantasyProsProjection, "NOT AVAILABLE")}</td>
                 <td className={`px-2 py-1 text-right ${r.aiVsNativeDelta !== null && r.aiVsNativeDelta >= 0 ? "text-green" : r.aiVsNativeDelta !== null ? "text-red" : ""}`}>
                   {formatDelta(r.aiVsNativeDelta)}
                 </td>
                 <td className={`px-2 py-1 text-right ${r.bigMoneyVsBlueCollarDelta !== null && r.bigMoneyVsBlueCollarDelta >= 0 ? "text-green" : r.bigMoneyVsBlueCollarDelta !== null ? "text-red" : ""}`}>
                   {formatDelta(r.bigMoneyVsBlueCollarDelta)}
+                </td>
+                <td className={`px-2 py-1 text-right ${r.fpVsNativeDelta !== null && r.fpVsNativeDelta >= 0 ? "text-green" : r.fpVsNativeDelta !== null ? "text-red" : ""}`}>
+                  {formatDelta(r.fpVsNativeDelta)}
+                </td>
+                <td className={`px-2 py-1 text-right ${r.fpVsAiDelta !== null && r.fpVsAiDelta >= 0 ? "text-green" : r.fpVsAiDelta !== null ? "text-red" : ""}`}>
+                  {formatDelta(r.fpVsAiDelta)}
                 </td>
                 <td className="px-2 py-1 text-right">{r.ownership !== null ? `${r.ownership.toFixed(1)}%` : "--"}</td>
                 <td className="px-2 py-1 text-right">{formatProjectionCell(r.leverage)}</td>

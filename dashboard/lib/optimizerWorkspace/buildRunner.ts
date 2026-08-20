@@ -5,6 +5,7 @@ import path from "node:path";
 import { getAiProjectionByPlayerId } from "../aiProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
+import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
@@ -17,17 +18,23 @@ import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
  * default -- Big Money's own projections, exactly as before this
  * milestone) never writes anything and passes no extra flag, so that
  * path is byte-identical to pre-M17 behavior. "external"/"adjusted"/"ai"/
- * "native" write a small, ephemeral {mlb_player_id: {projection, ceiling,
- * floor}} JSON file under the OS temp directory and pass it via
- * --projection-overrides -- the persisted dk_player_pool_<ts>.json
- * (Big Money's independent projections) is NEVER written to. A player
- * missing from the chosen source simply has no override entry, so
- * scripts/optimize_dk_lineups.py falls back to their independent value
- * rather than dropping them. Milestone 20: "ai" supplies its own
- * ceiling/floor (projection_engine/scoring.py computes both); Milestone
- * 23: "native" does too (native_projections/uncertainty.py) -- only
- * external/adjusted still leave those two null, so the optimizer falls
- * back to the pool's own independent ceiling/floor for those two. */
+ * "native"/"fantasypros" write a small, ephemeral {mlb_player_id:
+ * {projection, ceiling, floor}} JSON file under the OS temp directory and
+ * pass it via --projection-overrides -- the persisted
+ * dk_player_pool_<ts>.json (Big Money's independent projections) is NEVER
+ * written to. A player missing from the chosen source simply has no
+ * override entry, so scripts/optimize_dk_lineups.py falls back to their
+ * independent value rather than dropping them. Milestone 20: "ai" supplies
+ * its own ceiling/floor (projection_engine/scoring.py computes both);
+ * Milestone 23: "native" does too (native_projections/uncertainty.py) --
+ * external/adjusted/fantasypros leave those two null, so the optimizer
+ * falls back to the pool's own independent ceiling/floor for those three
+ * (FantasyPros' public API never returns a ceiling/floor, only a single
+ * expected-value projection -- see fantasypros/models.py). Selecting
+ * "fantasypros" changes ONLY the projection source; eligibility, salary,
+ * positions, Vegas, ownership, constraints, and stacks are untouched --
+ * getFantasyProsProjectionByPlayerId already only contains MATCHED
+ * players, so an unmatched/off-slate player is simply absent here too. */
 function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
   if (request.projectionSource === "independent") return null;
 
@@ -43,6 +50,12 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
     const nativeByPlayerId = getNativeProjectionByPlayerId(request.date);
     for (const [mlbPlayerId, player] of nativeByPlayerId) {
       overrides[mlbPlayerId] = { projection: player.native_projection, ceiling: player.native_ceiling, floor: player.native_floor };
+    }
+  } else if (request.projectionSource === "fantasypros") {
+    const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(request.date);
+    for (const [mlbPlayerId, player] of fantasyProsByPlayerId) {
+      if (player.dk_points === null) continue;
+      overrides[mlbPlayerId] = { projection: player.dk_points, ceiling: null, floor: null };
     }
   } else {
     const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);

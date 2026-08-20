@@ -5,6 +5,7 @@ import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { buildDkSlateVegasCoverage } from "../dkVegasCoverage";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId, loadLatestBaselineSnapshot } from "../externalProjections";
+import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
 import { loadLatestEnvironmentReport } from "../gameEnvironment";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
@@ -106,6 +107,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
   const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
   const nativeByPlayerId = getNativeProjectionByPlayerId(entry.date);
+  const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(entry.date);
   const vegasCoverage = buildDkSlateVegasCoverage(matchReport, loadLatestEnvironmentReport(entry.date));
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
@@ -113,6 +115,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     const comparison = p.mlb_player_id ? comparisonByPlayerId.get(p.mlb_player_id) : undefined;
     const ai = p.mlb_player_id ? aiByPlayerId.get(p.mlb_player_id) : undefined;
     const native = p.mlb_player_id ? nativeByPlayerId.get(p.mlb_player_id) : undefined;
+    const fantasyPros = p.mlb_player_id ? fantasyProsByPlayerId.get(p.mlb_player_id) : undefined;
     return {
       dkPlayerId: p.dk_player_id,
       mlbPlayerId: p.mlb_player_id,
@@ -161,6 +164,8 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       nativeExpectedInnings: native?.pitcher_opportunity?.expected_innings ?? null,
       nativeHitterComponents: native?.hitter_components ?? null,
       nativePitcherComponents: native?.pitcher_components ?? null,
+      fantasyProsProjection: fantasyPros?.dk_points ?? null,
+      fantasyProsMatchStatus: fantasyPros?.match_status ?? null,
     };
   });
 
@@ -200,6 +205,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     externalProviderName: loadLatestBaselineSnapshot(entry.date)?.provider_name ?? null,
     hasAiProjections: aiByPlayerId.size > 0,
     hasNativeProjections: nativeByPlayerId.size > 0,
+    hasFantasyProsProjections: fantasyProsByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
     vegasCoverage,
