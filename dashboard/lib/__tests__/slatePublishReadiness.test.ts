@@ -111,4 +111,39 @@ describe("evaluatePublishReadiness", () => {
     expect(readiness.ok).toBe(false);
     expect(readiness.required.find((c) => c.key === "game_resolution")!.ok).toBe(false);
   });
+
+  it("Milestone 31.1: blocks -- as a distinct labeled check, not folded into a generic failure -- when some teams' lineups have not posted", async () => {
+    writePool();
+    writeMatchReport({ teams_awaiting_lineups: ["HOU", "LAA", "WSH"] });
+    writeNative();
+    const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
+    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    expect(readiness.ok).toBe(false);
+    const check = readiness.required.find((c) => c.key === "lineup_confirmation")!;
+    expect(check.ok).toBe(false);
+    expect(check.detail).toBe("AWAITING LINEUPS: HOU, LAA, WSH");
+    // Every OTHER required check still reports its own real state --
+    // this isn't reported as a generic catch-all failure.
+    expect(readiness.required.find((c) => c.key === "source_provenance")!.ok).toBe(true);
+    expect(readiness.required.find((c) => c.key === "native_projections")!.ok).toBe(true);
+  });
+
+  it("is ok when teams_awaiting_lineups is an empty array (every lineup posted)", async () => {
+    writePool();
+    writeMatchReport({ teams_awaiting_lineups: [] });
+    writeNative();
+    const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
+    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    expect(readiness.ok).toBe(true);
+    expect(readiness.required.find((c) => c.key === "lineup_confirmation")!.ok).toBe(true);
+  });
+
+  it("is ok when teams_awaiting_lineups is absent entirely (older match report shape, backward compatible)", async () => {
+    writePool();
+    writeMatchReport(); // no teams_awaiting_lineups key at all
+    writeNative();
+    const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
+    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    expect(readiness.required.find((c) => c.key === "lineup_confirmation")!.ok).toBe(true);
+  });
 });

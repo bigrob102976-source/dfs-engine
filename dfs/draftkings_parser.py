@@ -11,6 +11,13 @@ rows.
 AvgPointsPerGame is parsed and preserved (it's real DraftKings data) but
 is explicitly NEVER used to influence our own projection -- see
 dfs/player_pool.py, which only ever attaches it as external metadata.
+
+Status and Starting (Milestone 31.1) are optional columns some DK
+exports include beyond the classic 9 -- parsed when present, left None
+when the file's header doesn't have them at all (never guessed/
+defaulted to a blank string, which would be indistinguishable from a
+genuinely blank value in a file that DOES have the column). See
+dfs/availability_filter.py for how Status feeds exclusion.
 """
 
 import csv
@@ -54,6 +61,17 @@ def _parse_avg_points(raw: Optional[str]) -> Optional[float]:
         return float(raw)
     except ValueError:
         return None
+
+
+def _parse_starting(raw: Optional[str]) -> Optional[bool]:
+    # Milestone 31.1: DK's "Starting" column, when present, is either "1"
+    # (posted in today's confirmed lineup) or blank -- never any other
+    # value observed. `raw is None` means the column doesn't exist in
+    # this file's header at all (a normal 9-column Classic export);
+    # that's distinct from the column existing with an empty value.
+    if raw is None:
+        return None
+    return raw.strip() == "1"
 
 
 def _validate_header(fieldnames: List[str]) -> None:
@@ -108,6 +126,14 @@ def _parse_row(
     position_field = raw.get("Position") or raw.get("Roster Position") or ""
     dk_positions = [p.strip() for p in position_field.split("/") if p.strip()]
 
+    # Milestone 31.1: Status/Starting are optional columns -- absent
+    # entirely from a classic 9-column DK export, present in some others.
+    # raw.get() returns None (not "") when the column itself is missing
+    # from this file's header, preserving the None-vs-blank distinction
+    # DKSalaryRow's dk_status/dk_starting fields document.
+    dk_status = raw.get("Status")
+    dk_status = dk_status.strip() if dk_status is not None else None
+
     return DKSalaryRow(
         dk_player_id=dk_id,
         name=(raw.get("Name") or "").strip(),
@@ -117,5 +143,7 @@ def _parse_row(
         game_info=(raw.get("Game Info") or "").strip(),
         avg_points_per_game=_parse_avg_points(raw.get("AvgPointsPerGame")),
         roster_position_raw=raw.get("Roster Position"),
+        dk_status=dk_status,
+        dk_starting=_parse_starting(raw.get("Starting")),
         source_row_number=source_row_number, source_filename=source_filename, source_sha256=source_sha256,
     )

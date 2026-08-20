@@ -120,3 +120,40 @@ def test_source_filename_and_sha256_are_recorded_and_shared_across_rows(tmp_path
     expected_hash = hashlib.sha256(csv_path.read_bytes()).hexdigest()
     assert rows[0].source_filename == "DKSalaries.csv"
     assert rows[0].source_sha256 == expected_hash
+
+
+# ----------------------------------------------------------------------------
+# Milestone 31.1: UTF-8 BOM + optional Status/Starting columns (an 11-column
+# DK export, not the classic 9). Reproduces the exact shape reported as
+# failing to ingest -- proves the parser already handles both correctly.
+# ----------------------------------------------------------------------------
+
+_HEADER_WITH_STATUS = "Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev,AvgPointsPerGame,Status,Starting\n"
+
+
+def test_bom_and_extra_status_starting_columns_parse_cleanly(tmp_path):
+    path = tmp_path / "DKSalaries.csv"
+    body = (
+        'OF,"Judge (1)",Judge,1,OF,6800,NYY@BOS 07:05PM ET,NYY,12.3,IL,\n'
+        'OF,"Soto (2)",Soto,2,OF,6500,NYY@BOS 07:05PM ET,NYY,11.0,DTD,1\n'
+        'OF,"Bellinger (3)",Bellinger,3,OF,4200,NYY@BOS 07:05PM ET,NYY,7.5,,1\n'
+    )
+    path.write_bytes(b"\xef\xbb\xbf" + (_HEADER_WITH_STATUS + body).encode("utf-8"))
+
+    rows = parse_salary_csv(path)
+    assert len(rows) == 3
+    assert rows[0].dk_player_id == "1"  # first header key parsed as "Position", not "﻿Position"
+    assert rows[0].dk_status == "IL"
+    assert rows[0].dk_starting is False
+    assert rows[1].dk_status == "DTD"
+    assert rows[1].dk_starting is True
+    assert rows[2].dk_status == ""  # column present, this row's value blank
+    assert rows[2].dk_starting is True
+
+
+def test_status_and_starting_are_none_when_columns_absent_from_header(tmp_path):
+    # The classic 9-column export -- Status/Starting simply don't exist.
+    csv_path = _write_csv(tmp_path, 'OF,"X Y (1)",X Y,1,OF,4000,NYY@BOS 07:05PM ET,NYY,1.0\n')
+    row = parse_salary_csv(csv_path)[0]
+    assert row.dk_status is None
+    assert row.dk_starting is None

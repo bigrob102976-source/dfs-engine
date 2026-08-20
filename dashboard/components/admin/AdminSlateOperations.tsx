@@ -236,6 +236,15 @@ export function AdminSlateOperations({ date }: { date: string }) {
                   ))}
                 </div>
 
+                {(() => {
+                  const lineupCheck = s.readiness.required.find((c) => c.key === "lineup_confirmation");
+                  return lineupCheck && !lineupCheck.ok && lineupCheck.detail.startsWith("AWAITING LINEUPS") ? (
+                    <div className="mb-3 rounded border border-yellow/30 bg-yellow/10 px-2 py-1.5 text-[11px] font-medium text-yellow">
+                      {lineupCheck.detail} -- re-pullable via Refresh Data, not publishable yet.
+                    </div>
+                  ) : null;
+                })()}
+
                 {s.eligibility && (
                   <div className="mb-3 border-t border-border-subtle pt-2">
                     <div className="mb-1 text-[10px] uppercase tracking-wide text-text-faint">Player Pool Eligibility (Milestone 30.1)</div>

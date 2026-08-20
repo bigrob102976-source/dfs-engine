@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from config.runtime_settings import is_mock_mode_enabled
+from dfs.availability_filter import apply_availability_filters
 from dfs.eligibility import compute_eligibility
 from dfs.lineup_smoke_test import find_one_legal_lineup
 from dfs.models import DFSPlayer, DKSalaryRow
@@ -93,6 +94,7 @@ def build_pool(
     crosswalk: Optional[Dict[str, str]] = None,
     source_provenance_claim: Optional[str] = None, dev_mode: Optional[bool] = None,
     slate_id: Optional[str] = None, dfs_input_root: str = "dfs_input",
+    exclude_il: bool = True, exclude_zero_avg_points: bool = True,
 ) -> PoolBuildResult:
     """Runs identity matching, slate validation, player-pool assembly,
     and roster-feasibility checking -- identical to what
@@ -111,7 +113,13 @@ def build_pool(
     for production and `dev_mode` (or config.runtime_settings's Mock
     Mode toggle, when `dev_mode` is left None) isn't enabled, this
     raises UnsafeSourceProvenanceError rather than silently building a
-    production pool from synthetic/mock data."""
+    production pool from synthetic/mock data.
+
+    `exclude_il`/`exclude_zero_avg_points` (Milestone 31.1): independently
+    toggleable DK Status/AvgPointsPerGame exclusion rules -- see
+    dfs/availability_filter.py. Both default True. DTD is always only
+    flagged, never excluded, and has no on/off switch since it never
+    removes anyone from the pool."""
     package = ensure_research_package(date, research_output_root)
     pitcher_snapshot, pitcher_snapshot_path = load_snapshot_arg(
         pitcher_snapshot_path, date, predictions_root, "pitcher_board", "Pitcher")
@@ -159,12 +167,20 @@ def build_pool(
     )
     compute_eligibility(players, package["pitchers"], package["batters"], previous_eligibility_by_dk_id)
 
+    # Milestone 31.1: DK Status/AvgPointsPerGame exclusion pass, layered
+    # on top of the confirmed-starter eligibility above -- narrows
+    # optimizer_eligible further (never removes a row), and only ever
+    # sets it False, never True; see dfs/availability_filter.py.
+    availability_result = apply_availability_filters(
+        players, exclude_il=exclude_il, exclude_zero_avg_points=exclude_zero_avg_points)
+
     report = build_match_report(dk_rows, matches, players, slate_validation)
 
     integrity_results = validate_pool(players, package["games"], canonical_by_id)
     report["identity_integrity"] = summarize_integrity(integrity_results)
     report["source_provenance"] = resolved_provenance
     report["source_realism"] = realism.to_dict()
+    report["availability_filter"] = availability_result.to_dict()
 
     active_pool = [p for p in players if p.optimizer_eligible]
     feasibility = check_roster_feasibility(active_pool)
@@ -230,6 +246,19 @@ def print_pool_report(result: PoolBuildResult) -> None:
     print(f"Waiting for lineups: {elig.get('waiting_for_lineups', 0)}")
     print(f"Scratched: {elig.get('scratched', 0)}")
     print(f"Optimizer eligible: {elig.get('optimizer_eligible', 0)}\n")
+
+    availability = report.get("availability_filter") or {}
+    if availability.get("excluded"):
+        print(f"DK Status/AvgPointsPerGame exclusions (Milestone 31.1): "
+              f"{availability['dropped_count']} dropped, {availability['kept_count']} kept\n")
+        for e in availability["excluded"]:
+            print(f"  - DK #{e['dk_player_id']} {e['name']} ({e['team']}): {e['reason']}")
+        print()
+
+    teams_awaiting = report.get("teams_awaiting_lineups") or []
+    if teams_awaiting:
+        print(f"AWAITING LINEUPS: {', '.join(teams_awaiting)}\n")
+
     print(f"Games on DK slate:\n{report['dk_games_total']}\n")
     print(f"Games matched to research:\n{report['dk_games_matched_to_research']} / {report['dk_games_total']}\n")
     print(f"Salary coverage:\n{report['salary_coverage_percent']}%\n")

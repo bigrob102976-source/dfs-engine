@@ -9,7 +9,7 @@ lineup status -- players are never silently dropped, only labeled.
 
 from typing import Dict, List, Optional
 
-from dfs.eligibility import eligibility_counts
+from dfs.eligibility import LINEUP_UNCONFIRMED, eligibility_counts
 from dfs.models import CanonicalPlayer, DFSPlayer, DKSalaryRow, PlayerMatch
 from dfs.slate_validation import DKGameMatch, SlateValidation
 from dfs.team_abbreviations import normalize_dk_team_abbr
@@ -89,6 +89,7 @@ def build_dfs_players(
             mlb_player_id=match.mlb_player_id, opponent=opponent, game_id=game_id,
             match_status=match.match_status, match_confidence=match.match_confidence,
             lineup_status=lineup_status, avg_points_per_game_dk=dk_row.avg_points_per_game,
+            dk_status=dk_row.dk_status, dk_starting=dk_row.dk_starting,
             source_row_number=dk_row.source_row_number, source_filename=dk_row.source_filename,
             source_sha256=dk_row.source_sha256,
         )
@@ -158,6 +159,14 @@ def build_match_report(dk_rows: List[DKSalaryRow], matches: List[PlayerMatch],
         # pitchers_active/hitters_active fields above, which are kept
         # unchanged for existing consumers.
         "eligibility": eligibility_counts(players),
+        # Milestone 31.1: which teams still have NO posted lineup at all,
+        # by abbreviation -- the admin board's "AWAITING LINEUPS: HOU,
+        # LAA, WSH" distinct state is driven directly from this, never
+        # from DK's own "Starting" column (dfs/eligibility.py's
+        # LINEUP_UNCONFIRMED is derived from the research package --
+        # MLB's own posted lineup -- which is more authoritative than
+        # DraftKings' own copy of it).
+        "teams_awaiting_lineups": sorted({p.team for p in players if p.eligibility_status == LINEUP_UNCONFIRMED}),
         "unmatched_count": len(unmatched),
         "ambiguous_count": len(ambiguous),
         "unmatched": [m.to_dict() for m in unmatched],

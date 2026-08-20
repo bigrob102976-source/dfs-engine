@@ -159,6 +159,43 @@ describe("runSlatePipeline", () => {
     expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("PARTIAL");
   });
 
+  it("Milestone 31.1: marks a half-posted-lineup slate PARTIAL (re-pullable), never READY, even when everything else succeeds", async () => {
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      "scripts/build_dfs_pool_from_provider.py": () => {
+        const ts = nextTs();
+        writeJson(`dfs_input/${DATE}/dk_player_pool_${ts}.json`, {
+          selected_slate_id: SLATE_ID, roster_feasibility_pass: true, player_count: 1,
+          players: [{
+            dk_player_id: "d1", mlb_player_id: "h1", name: "Leadoff Hitter", team: "BOS", player_type: "hitter",
+            dk_positions: ["OF"], salary: 4000, projection: 10, ceiling: 18, risk_score: 30, confidence: 80,
+            batting_order: 1, game_id: "g1", opponent: "TOR", lineup_status: "active", match_status: "matched",
+            source_sha256: "abc123hash",
+          }],
+        });
+        writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, {
+          dk_entries: 1, matched_to_mlb: 1, unmatched_count: 0, dk_games_total: 1, dk_games_matched_to_research: 1,
+          source_provenance: "OFFICIAL_USER_UPLOAD",
+          identity_integrity: { total: 1, valid: 1, warning: 0, invalid: 0 },
+          teams_awaiting_lineups: ["HOU", "LAA", "WSH"],
+        });
+        return ok();
+      },
+    };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("PARTIAL");
+    expect(result.errors).toEqual([]); // not an error -- an expected, re-pullable in-progress state
+
+    const { getSlateStatus } = await import("../db/slateStatus");
+    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("PARTIAL");
+  });
+
   it("marks the slate ERROR when the player pool itself fails to build", async () => {
     const handlers = { ...defaultHandlers(), "scripts/build_dfs_pool_from_provider.py": () => fail("crash") };
     const calls: Array<{ script: string; args: string[] }> = [];
@@ -173,6 +210,65 @@ describe("runSlatePipeline", () => {
 
     const { getSlateStatus } = await import("../db/slateStatus");
     expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("ERROR");
+  });
+
+  it("Milestone 31.1: recovers source_provenance/source_hash from disk on ERROR when the pool was actually written before a later step failed", async () => {
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      // Writes real pool/match-report files (with real provenance) --
+      // exactly like a genuine success -- but still exits non-zero,
+      // simulating a late-stage crash AFTER persistence.
+      "scripts/build_dfs_pool_from_provider.py": () => {
+        const ts = nextTs();
+        writeJson(`dfs_input/${DATE}/dk_player_pool_${ts}.json`, {
+          selected_slate_id: SLATE_ID, roster_feasibility_pass: true, player_count: 1,
+          players: [{
+            dk_player_id: "d1", mlb_player_id: "h1", name: "Leadoff Hitter", team: "BOS", player_type: "hitter",
+            dk_positions: ["OF"], salary: 4000, projection: 10, ceiling: 18, risk_score: 30, confidence: 80,
+            batting_order: 1, game_id: "g1", opponent: "TOR", lineup_status: "active", match_status: "matched",
+            source_sha256: "recovered-hash-xyz",
+          }],
+        });
+        writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, {
+          dk_entries: 1, matched_to_mlb: 1, unmatched_count: 0, dk_games_total: 1, dk_games_matched_to_research: 1,
+          source_provenance: "OFFICIAL_USER_UPLOAD",
+          identity_integrity: { total: 1, valid: 1, warning: 0, invalid: 0 },
+        });
+        return fail("crashed after writing output");
+      },
+    };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("ERROR");
+
+    const { getSlateStatus } = await import("../db/slateStatus");
+    const status = getSlateStatus(DATE, SLATE_ID)!;
+    expect(status.status).toBe("ERROR");
+    expect(status.source_provenance).toBe("OFFICIAL_USER_UPLOAD");
+    expect(status.source_hash).toBe("recovered-hash-xyz");
+    expect(status.pool_path).toContain("dk_player_pool_");
+  });
+
+  it("leaves provenance/hash null on ERROR when nothing was ever written for this slate", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/fetch_dfs_slate.py": () => fail("no upload found") };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("ERROR");
+
+    const { getSlateStatus } = await import("../db/slateStatus");
+    const status = getSlateStatus(DATE, SLATE_ID)!;
+    expect(status.source_provenance).toBeNull();
+    expect(status.source_hash).toBeNull();
   });
 
   it("still marks the slate READY when FantasyPros reports an api_error -- Native/AI are unaffected and the error is recorded, not swallowed or fatal", async () => {

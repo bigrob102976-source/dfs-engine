@@ -21,6 +21,15 @@ class DKSalaryRow:
     avg_points_per_game: Optional[float] = None
     roster_position_raw: Optional[str] = None
 
+    # Milestone 31.1: DraftKings' own optional Status/Starting columns
+    # (not present in the classic 9-column Classic export -- only some
+    # DK exports include them). None when the column itself is absent
+    # from this file's header, distinct from an empty string when the
+    # column exists but this row's value is blank -- see
+    # dfs/draftkings_parser.py's parsing for the exact distinction.
+    dk_status: Optional[str] = None  # e.g. "IL", "DTD", or "" (present column, blank value)
+    dk_starting: Optional[bool] = None
+
     # Milestone 27.4: source-to-pool trace -- lets an admin/debug view
     # trace any normalized player back to the exact raw source row it
     # came from. Populated only by dfs/draftkings_parser.py (a real CSV
@@ -119,6 +128,14 @@ class DFSPlayer:
     optimizer_eligible: bool = False
 
     avg_points_per_game_dk: Optional[float] = None  # DK's own metric, preserved but never fed into our model
+
+    # Milestone 31.1: DraftKings' own optional Status/Starting columns,
+    # copied verbatim from DKSalaryRow -- see that dataclass's identical
+    # fields for the None-vs-empty-string distinction. Read by
+    # dfs/availability_filter.py to exclude/flag players; never mutated
+    # by anything else.
+    dk_status: Optional[str] = None
+    dk_starting: Optional[bool] = None
 
     # Milestone 27.4: source-to-pool trace -- see DKSalaryRow's identical
     # fields, which these are copied verbatim from.

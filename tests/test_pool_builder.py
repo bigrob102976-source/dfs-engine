@@ -184,6 +184,70 @@ def test_build_pool_accepts_clean_official_upload_source(tmp_path):
     assert result.report["source_realism"]["blocked"] is False
 
 
+def test_build_pool_excludes_il_status_player_and_reports_it(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    rows = _dk_rows()
+    rows[1].dk_status = "IL"  # Leadoff Hitter -- a confirmed starter, but DK flags them IL
+
+    result = build_pool(rows, "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+
+    hitter = next(p for p in result.players if p.name == "Leadoff Hitter")
+    assert hitter.eligibility_status == "STARTING_HITTER"  # still a real confirmed starter...
+    assert hitter.optimizer_eligible is False  # ...but excluded by the IL rule
+    assert result.report["availability_filter"]["dropped_count"] == 1
+    assert result.report["availability_filter"]["excluded"][0]["reason"] == "DK Status = IL"
+    assert hitter not in result.active_pool
+
+
+def test_build_pool_flags_dtd_without_excluding(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    rows = _dk_rows()
+    rows[1].dk_status = "DTD"
+
+    result = build_pool(rows, "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+
+    hitter = next(p for p in result.players if p.name == "Leadoff Hitter")
+    assert hitter.optimizer_eligible is True
+    assert "DTD" in hitter.tags
+    assert result.report["availability_filter"]["dropped_count"] == 0
+
+
+def test_build_pool_exclusion_rules_are_toggleable(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    rows = _dk_rows()
+    rows[1].dk_status = "IL"
+
+    result = build_pool(rows, "2026-08-11", str(research_root), str(tmp_path / "predictions"), exclude_il=False)
+
+    hitter = next(p for p in result.players if p.name == "Leadoff Hitter")
+    assert hitter.optimizer_eligible is True
+    assert result.report["availability_filter"]["dropped_count"] == 0
+
+
+def test_build_pool_reports_teams_awaiting_lineups(tmp_path):
+    # TOR has no batter research records at all -- its lineup hasn't
+    # posted -- while BOS's has (per _write_research_package).
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    rows = _dk_rows() + [
+        DKSalaryRow(dk_player_id="d3", name="TOR Hitter", team_abbrev="TOR", dk_positions=["OF"], salary=4000, game_info="TOR@BOS 7:05PM ET"),
+    ]
+
+    result = build_pool(rows, "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+
+    assert result.report["teams_awaiting_lineups"] == ["TOR"]
+
+
+def test_build_pool_no_teams_awaiting_lineups_when_all_posted(tmp_path):
+    research_root = tmp_path / "research_output"
+    _write_research_package(research_root, "2026-08-11")
+    result = build_pool(_dk_rows(), "2026-08-11", str(research_root), str(tmp_path / "predictions"))
+    assert result.report["teams_awaiting_lineups"] == []
+
+
 def test_provider_players_to_dk_rows_conversion():
     provider_players = [
         {"external_player_id": "mock-1", "name": "X", "team": "AAA", "salary": 5000,

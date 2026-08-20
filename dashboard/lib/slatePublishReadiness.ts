@@ -54,6 +54,21 @@ export function evaluatePublishReadiness(date: string, slateId: string): Publish
 
   const nativeOk = nativeMap.size > 0;
 
+  // Milestone 31.1: a slate where some (not all) teams' lineups have
+  // posted is a distinct, expected-early-in-the-day state -- never
+  // silently READY (a late scratch/lineup swap on an unconfirmed team
+  // could still change), and never a generic ERROR either. Sourced
+  // from dfs/eligibility.py's LINEUP_UNCONFIRMED via the match report's
+  // teams_awaiting_lineups (dfs/player_pool.py::build_match_report) --
+  // never DK's own "Starting" column, which is only a copy of the real
+  // MLB-sourced lineup our research pipeline already tracks.
+  const teamsAwaitingLineups = Array.isArray(matchReport?.teams_awaiting_lineups)
+    ? (matchReport.teams_awaiting_lineups as string[])
+    : [];
+  // No match report at all means "unknown," not "vacuously confirmed" --
+  // must not report ok:true just because there's nothing to list yet.
+  const lineupsConfirmedOk = matchReport !== null && teamsAwaitingLineups.length === 0;
+
   const required: ReadinessCheck[] = [
     {
       key: "source_provenance", label: "Trusted DK source provenance", ok: provenanceOk,
@@ -74,6 +89,14 @@ export function evaluatePublishReadiness(date: string, slateId: string): Publish
     {
       key: "native_projections", label: "Native projections available", ok: nativeOk,
       detail: nativeOk ? `${nativeMap.size} players projected` : "no native projection snapshot found",
+    },
+    {
+      key: "lineup_confirmation", label: "All lineups confirmed", ok: lineupsConfirmedOk,
+      detail: lineupsConfirmedOk
+        ? "every team's lineup has posted"
+        : matchReport === null
+          ? "unknown -- no match report found"
+          : `AWAITING LINEUPS: ${teamsAwaitingLineups.join(", ")}`,
     },
   ];
 

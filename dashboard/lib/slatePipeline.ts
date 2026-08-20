@@ -78,7 +78,26 @@ export async function runSlatePipeline(
     await loadPool(date, slateId, true);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    upsertSlateStatus(date, slateId, { status: "ERROR", lastProcessedAt: now });
+    // Milestone 31.1: loadPool() can throw AFTER the pool/match report
+    // were already written to disk (e.g. a later read-back step
+    // failing) -- in that case the provenance/source hash it computed
+    // are real and observable, not "nothing happened." Best-effort
+    // recovery only: if nothing was ever written (the common case --
+    // e.g. a malformed CSV never got past parsing), these stay null,
+    // which is the honest state for a slate that's never built.
+    const recoveredMatchReport = loadLatestDkMatchReport(date, slateId);
+    const recoveredPool = loadLatestDKPlayerPool(date, slateId);
+    const recoveredHash = (recoveredPool.data?.players.find((p) => p.source_sha256)?.source_sha256 as string | undefined) ?? null;
+    const recoveredProvenance =
+      typeof recoveredMatchReport.data?.source_provenance === "string" ? (recoveredMatchReport.data.source_provenance as string) : null;
+    upsertSlateStatus(date, slateId, {
+      status: "ERROR",
+      lastProcessedAt: now,
+      poolPath: recoveredPool.path,
+      matchReportPath: recoveredMatchReport.path,
+      sourceHash: recoveredHash,
+      sourceProvenance: recoveredProvenance,
+    });
     return { status: "ERROR", errors: [`Player pool build failed: ${message}`] };
   }
 
