@@ -48,6 +48,10 @@ dashboard/next-env.d.ts
 # (a small fixture referenced by services/pitcher_data.py) stays tracked.
 /data/cache/
 
+# Milestone 31.0: raw FantasyData/SportsDataIO audit responses --
+# reproducible by re-fetching from a paid subscription, never source.
+/data/fantasydata/
+
 # env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
 .env
 .env.*
