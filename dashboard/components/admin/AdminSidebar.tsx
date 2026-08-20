@@ -11,6 +11,7 @@ const ADMIN_NAV_ITEMS = [
   { href: "/admin/sports", label: "Sports", icon: "🏆" },
   { href: "/admin/features", label: "Features", icon: "🚩" },
   { href: "/admin/slates", label: "Slates", icon: "📋" },
+  { href: "/admin/draftkings-unofficial", label: "DK Dev Data", icon: "🧪" },
   { href: "/admin/system", label: "System", icon: "🖥" },
   { href: "/admin/audit", label: "Audit Log", icon: "🔍" },
 ];

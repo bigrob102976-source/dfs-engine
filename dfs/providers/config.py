@@ -36,12 +36,20 @@ from config.runtime_settings import is_mock_mode_enabled
 from dfs.providers.base import DFSSalaryProvider, ProviderUnavailableError
 from dfs.providers.csv_import_pool_provider import CsvImportPoolProvider
 from dfs.providers.draftkings_csv_provider import DraftKingsCsvProvider
+from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 from dfs.providers.mock_provider import MockProvider
 
 PROVIDER_FACTORIES: Dict[str, Callable[[], DFSSalaryProvider]] = {
     "mock": MockProvider,
     "draftkings_csv": DraftKingsCsvProvider,
     "csv_import_pool": CsvImportPoolProvider,
+    # Milestone 31.2: registered ONLY for the explicit
+    # DFS_SALARY_PROVIDER=draftkings_unofficial override below --
+    # deliberately NEVER added to the automatic cascade in
+    # get_configured_provider() beneath. It also refuses to run at all
+    # unless DK_UNOFFICIAL_ENABLED=true (see that provider's own
+    # is_enabled() check) -- two independent, explicit opt-ins.
+    "draftkings_unofficial": DraftKingsUnofficialProvider,
 }
 
 NO_PROVIDER_CONFIGURED_MESSAGE = "No live DraftKings salary provider configured."

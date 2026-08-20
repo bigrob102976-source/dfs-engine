@@ -21,9 +21,19 @@ AUTHORIZED_PROVIDER = "AUTHORIZED_PROVIDER"
 DEVELOPMENT_MOCK = "DEVELOPMENT_MOCK"
 SYNTHETIC_VALIDATION = "SYNTHETIC_VALIDATION"
 UNKNOWN = "UNKNOWN"
+# Milestone 31.2: real (not synthetic/mock) data, but sourced through
+# DraftKings' unofficial/undocumented public JSON endpoints rather than
+# a credentialed/licensed provider or a user's own CSV export -- see
+# draftkings_unofficial/ and dfs/providers/draftkings_unofficial_provider.py.
+# Deliberately distinct from DEVELOPMENT_MOCK (that means fabricated
+# data; this means real data from an unofficial source) and, like
+# DEVELOPMENT_MOCK, deliberately excluded from TRUSTED_FOR_PRODUCTION
+# below -- this source is temporary/development-only by explicit design.
+UNOFFICIAL_DEVELOPMENT_SOURCE = "UNOFFICIAL_DEVELOPMENT_SOURCE"
 
 ALL_PROVENANCE_VALUES = (
     OFFICIAL_USER_UPLOAD, AUTHORIZED_PROVIDER, DEVELOPMENT_MOCK, SYNTHETIC_VALIDATION, UNKNOWN,
+    UNOFFICIAL_DEVELOPMENT_SOURCE,
 )
 
 # Provenance values a production/live player pool build may trust without

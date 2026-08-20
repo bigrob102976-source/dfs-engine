@@ -52,6 +52,11 @@ dashboard/next-env.d.ts
 # reproducible by re-fetching from a paid subscription, never source.
 /data/fantasydata/
 
+# Milestone 31.2: raw + normalized DraftKings unofficial-provider
+# snapshots -- reproducible by re-fetching from DraftKings' public
+# (unauthenticated) endpoints, never source. See draftkings_unofficial/.
+/data/draftkings_unofficial/
+
 # env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
 .env
 .env.*
