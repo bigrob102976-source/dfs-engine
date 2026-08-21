@@ -57,6 +57,11 @@ dashboard/next-env.d.ts
 # (unauthenticated) endpoints, never source. See draftkings_unofficial/.
 /data/draftkings_unofficial/
 
+# Milestone 32.0: historical MLB research/proof-of-concept output --
+# reproducible by re-running scripts/run_historical_poc_join.py against
+# live sources, never source. See historical_mlb/.
+/data/historical/
+
 # env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
 .env
 .env.*
