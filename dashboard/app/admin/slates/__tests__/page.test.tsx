@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
 
 import AdminSlatesPage from "../page";
 
@@ -23,7 +27,7 @@ afterEach(() => {
 
 describe("AdminSlatesPage", () => {
   it("renders every pipeline stage as MISSING (real state, not fabricated) when no artifacts exist", async () => {
-    render(await AdminSlatesPage());
+    render(await AdminSlatesPage({ searchParams: Promise.resolve({}) } as never));
 
     expect(screen.getByText("Slate Operations")).toBeInTheDocument();
     expect(screen.getByText("Pipeline Stages")).toBeInTheDocument();

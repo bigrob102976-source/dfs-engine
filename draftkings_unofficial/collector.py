@@ -48,6 +48,21 @@ class SportUniverseResult:
     schema_check: Optional[dict] = None
 
 
+def slate_local_date(slate: DkSlate) -> Optional[str]:
+    """DK's own StartDateEst (Eastern local time, as a bare ISO-ish
+    string) is the field its own lobby groups slates by day -- this is
+    reused everywhere a DkSlate needs to be bucketed into a calendar
+    date (the dev provider's get_slate(date=...) filter, and Milestone
+    31.2C's date-discovery script) rather than each caller converting
+    start_time (UTC) with its own hardcoded timezone offset. Falls back
+    to the UTC start_time's date portion when StartDateEst isn't present
+    (never guessed beyond that)."""
+    raw = slate.raw.get("StartDateEst") or slate.start_time
+    if not raw:
+        return None
+    return str(raw)[:10]
+
+
 @dataclass
 class SlateDetailResult:
     status: str

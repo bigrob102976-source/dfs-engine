@@ -71,14 +71,14 @@ describe("SlateManagerPage (member, read-only)", () => {
     await loginAsMember();
     await stubSlates([{ slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 }]);
     // "main" was discovered but never published -- must not appear to a member.
-    render(await SlateManagerPage());
+    render(await SlateManagerPage({ searchParams: Promise.resolve({}) } as never));
     expect(screen.getByText(/No slates have been published yet/)).toBeInTheDocument();
   });
 
   it("never renders any upload/backend-refresh/remove control -- only the read-only 'Refresh status' re-render button", async () => {
     await loginAsMember();
     await stubSlates([]);
-    render(await SlateManagerPage());
+    render(await SlateManagerPage({ searchParams: Promise.resolve({}) } as never));
     expect(screen.queryByText(/Import DraftKings Slates/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Remove Local Slate/i)).not.toBeInTheDocument();
     // "Refresh Data" (admin-only, triggers the backend pipeline -- see
@@ -103,7 +103,7 @@ describe("SlateManagerPage (member, read-only)", () => {
       vegasSnapshotPath: "game_environment_snapshots/x/e.json", researchSnapshotPath: null, sourceHash: "h1",
     });
 
-    render(await SlateManagerPage());
+    render(await SlateManagerPage({ searchParams: Promise.resolve({}) } as never));
 
     expect(screen.getByText("Main")).toBeInTheDocument();
     expect(screen.getByText("Last Updated")).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe("SlateManagerPage (member, read-only)", () => {
         vegasSnapshotPath: null, researchSnapshotPath: null, sourceHash: "h1",
       });
 
-      render(await SlateManagerPage());
+      render(await SlateManagerPage({ searchParams: Promise.resolve({}) } as never));
 
       expect(screen.getByText("Player Pool")).toBeInTheDocument();
       expect(screen.getByText("16/18 confirmed")).toBeInTheDocument(); // 9 games x 2 pitcher slots

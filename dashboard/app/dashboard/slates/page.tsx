@@ -4,6 +4,7 @@ import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getPublishedVersion } from "@/lib/db/slateStatus";
 import { safeReadJson } from "@/lib/discovery";
 import { resolveSlateContext } from "@/lib/slateContext";
+import { resolveSlateDate } from "@/lib/slateDate";
 
 export const dynamic = "force-dynamic";
 
@@ -57,8 +58,16 @@ function fmtDateTime(iso: string | null): string {
  * getPublishedVersion) so "Last Updated" and "READY" here always match
  * what a member is actually seeing elsewhere in the dashboard, not
  * whatever an admin's in-progress refresh happens to be building. */
-export default async function SlateManagerPage() {
-  const date = getTodayChicagoDate();
+export default async function SlateManagerPage(props: PageProps<"/dashboard/slates">) {
+  const searchParams = await props.searchParams;
+  const dateParam = typeof searchParams.date === "string" ? searchParams.date : undefined;
+  const dateResolution = resolveSlateDate(dateParam);
+  // Milestone 31.2C: an explicit ?date= (e.g. linked from /admin/slates
+  // after DraftKings rolls its live lobby to the next calendar day)
+  // lets a member view a slate for a date other than Chicago-today; an
+  // invalid explicit value falls back to today rather than erroring a
+  // whole-page navigation.
+  const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
   const ctx = await resolveSlateContext(date);
 
   const rows: MemberSlateRow[] = ctx.slates.map((s) => {

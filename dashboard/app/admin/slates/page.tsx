@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AdminSlateOperations } from "@/components/admin/AdminSlateOperations";
+import { SlateDateSelector } from "@/components/admin/SlateDateSelector";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard, MetricCard } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/Header";
@@ -10,6 +11,7 @@ import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { loadLatestDkMatchReport } from "@/lib/loaders";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
+import { resolveSlateDate } from "@/lib/slateDate";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +32,15 @@ function fmtDateTime(iso: string | null): string {
  * requireAdminApi() call. This is now the ONLY place these actions live
  * -- the member dashboard's Slate Manager (/dashboard/slates) is a
  * read-only status view with no upload/refresh/publish controls. */
-export default async function AdminSlatesPage() {
-  const date = getTodayChicagoDate();
+export default async function AdminSlatesPage(props: PageProps<"/admin/slates">) {
+  const searchParams = await props.searchParams;
+  const dateParam = typeof searchParams.date === "string" ? searchParams.date : undefined;
+  const dateResolution = resolveSlateDate(dateParam);
+  // An invalid explicit ?date= falls back to today rather than showing a
+  // hard error on a whole-page navigation -- the date input itself only
+  // ever produces valid YYYY-MM-DD values, so this only guards a
+  // hand-edited URL.
+  const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
   const summary = buildSlateSummary(date);
   const statuses = buildPipelineStatuses(date);
   const environmentReport = loadLatestEnvironmentReport(date);
@@ -51,6 +60,8 @@ export default async function AdminSlatesPage() {
           </Link>
         }
       />
+
+      <SlateDateSelector date={date} basePath="/admin/slates" />
 
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard label="Games (Research)" value={summary.gamesOnResearch} />

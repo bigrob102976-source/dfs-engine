@@ -41,18 +41,6 @@ def is_enabled() -> bool:
     return os.environ.get("DK_UNOFFICIAL_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
-def _slate_local_date(slate) -> Optional[str]:
-    """DK's own StartDateEst (Eastern local time, as a bare ISO-ish
-    string) is the field its own lobby groups slates by day -- reused
-    here rather than converting start_time (UTC) with a hardcoded
-    timezone offset. Falls back to the UTC start_time's date portion
-    when StartDateEst isn't present (never guessed beyond that)."""
-    raw = slate.raw.get("StartDateEst") or slate.start_time
-    if not raw:
-        return None
-    return str(raw)[:10]
-
-
 class DraftKingsUnofficialProvider(DFSSalaryProvider):
     name = "draftkings_unofficial"
     requires_api_key = False
@@ -72,7 +60,7 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
         if universe.status != collector.STATUS_OK:
             raise ProviderUnavailableError(f"DraftKings unofficial contest discovery failed for sport={sport!r}: {universe.status} ({universe.error}).")
 
-        day_slates = [s for s in universe.slates if _slate_local_date(s) == date]
+        day_slates = [s for s in universe.slates if collector.slate_local_date(s) == date]
         if not day_slates:
             raise ProviderNoSlateError(f"DraftKings unofficial: no DraftGroups found for sport={sport!r} on {date}.")
 

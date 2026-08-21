@@ -1,4 +1,4 @@
-import { getTodayChicagoDate } from "../currentDate";
+import { resolveSlateDate } from "../slateDate";
 import { isValidSlateId } from "./validateSlateId";
 import type { OptimizerBuildRequest } from "./types";
 
@@ -16,8 +16,12 @@ function isStringArray(value: unknown): value is string[] {
  * ones scripts/optimize_dk_lineups.py's own CLI already accepts (see
  * lib/optimizerWorkspace/buildRunner.ts::buildArgv); nothing here can
  * smuggle an arbitrary flag, path, or shell content into the Python
- * subprocess. Date is always resolved server-side, never trusted from
- * the client. */
+ * subprocess. Date is always resolved server-side (via
+ * lib/slateDate.ts): an optional explicit `date` field is validated and
+ * used as-is (Milestone 31.2C -- keeps Build/Validate loading the SAME
+ * slate the client just browsed via /api/optimizer/pool, instead of
+ * silently reverting to Chicago-today mid-workflow); omitted/invalid
+ * falls back to today exactly as before M31.2C. */
 export function parseBuildRequest(body: unknown): ParseResult {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Request body must be a JSON object." };
@@ -26,6 +30,10 @@ export function parseBuildRequest(body: unknown): ParseResult {
 
   if (!isValidSlateId(b.slateId)) {
     return { ok: false, error: "\"slateId\" (string) is required." };
+  }
+  const dateResolution = resolveSlateDate(b.date);
+  if (!dateResolution.ok) {
+    return { ok: false, error: dateResolution.error };
   }
 
   const lineups = Number(b.lineups);
@@ -92,7 +100,7 @@ export function parseBuildRequest(body: unknown): ParseResult {
   return {
     ok: true,
     request: {
-      date: getTodayChicagoDate(),
+      date: dateResolution.date,
       slateId: b.slateId,
       lineups,
       objective: objective as OptimizerBuildRequest["objective"],

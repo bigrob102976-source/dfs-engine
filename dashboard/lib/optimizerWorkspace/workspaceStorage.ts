@@ -10,6 +10,10 @@ const STORAGE_KEY = "mlb-dfs-optimizer-workspace-v1";
 
 export interface PersistedWorkspaceState {
   selectedSlateId: string | null;
+  // Milestone 31.2C. Optional so state persisted before this milestone
+  // still loads cleanly -- absent means "no explicit date," which
+  // resolves to Chicago-today exactly like before this milestone.
+  selectedDate?: string | null;
   locks: string[];
   exclusions: string[];
   maxExposure: Record<string, number>;

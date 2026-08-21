@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // to sync with the global slate selector -- an empty URL (no slate=)
 // here matches every existing test's assumption that the Optimizer's
 // own dropdown/localStorage-persisted selection is authoritative.
+// Milestone 31.2C: also reads `?date=` via the same useSearchParams()
+// (empty URL here means "no explicit date" too) and calls useRouter()
+// to commit an explicit date-input change to the URL.
+const mockRouterPush = vi.fn();
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: mockRouterPush }),
 }));
 
 import { OptimizerWorkspace } from "../OptimizerWorkspace";

@@ -2,6 +2,7 @@ import { OptimizerView } from "@/components/OptimizerView";
 import { OptimizerWorkspace } from "@/components/optimizer/OptimizerWorkspace";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { listLineupSets } from "@/lib/loaders";
+import { isValidSlateDateString } from "@/lib/slateDate";
 import type { LineupSet } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,24 @@ export const dynamic = "force-dynamic";
  * configure stacking/objective, click Build, inspect results. Every
  * past run saved today (including ones built through this same
  * workspace, since every Build persists an immutable lineup set exactly
- * like the CLI always has) remains browsable below for reference. */
-export default function OptimizerPage() {
-  const date = getTodayChicagoDate();
-  const loaded = listLineupSets(date);
+ * like the CLI always has) remains browsable below for reference.
+ * Milestone 31.2C: an explicit ?date= param (e.g. linked from
+ * /admin/slates when DraftKings' live lobby has rolled to the next
+ * calendar day ahead of Chicago-today) seeds OptimizerWorkspace's own
+ * date selector; "Past Runs" below always stays scoped to Chicago-today
+ * specifically, since past lineup builds are inherently a same-day
+ * concept, not per-selected-date. */
+export default async function OptimizerPage(props: PageProps<"/dashboard/optimizer">) {
+  const searchParams = await props.searchParams;
+  const dateParam = typeof searchParams.date === "string" ? searchParams.date : undefined;
+  // null (not today's date) when no explicit, valid ?date= was given --
+  // OptimizerWorkspace then falls through to its own priority order
+  // (persisted selection, then the server's own today-default), exactly
+  // preserving pre-M31.2C behavior for a bare /dashboard/optimizer visit.
+  const initialDate = isValidSlateDateString(dateParam) ? dateParam : null;
+
+  const today = getTodayChicagoDate();
+  const loaded = listLineupSets(today);
   const runs = loaded
     .filter((r): r is typeof r & { data: LineupSet } => r.data !== null)
     .map((r) => ({ filename: r.filename, data: r.data }));
@@ -22,9 +37,9 @@ export default function OptimizerPage() {
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Optimizer</h1>
-      <p className="mb-4 text-xs text-text-faint">Select today&apos;s DFS slate, configure constraints, and build lineups.</p>
+      <p className="mb-4 text-xs text-text-faint">Select a DFS slate date, configure constraints, and build lineups.</p>
 
-      <OptimizerWorkspace />
+      <OptimizerWorkspace initialDate={initialDate} />
 
       {runs.length > 0 && (
         <div className="mt-8">

@@ -6,6 +6,7 @@ import { effectiveDisplayStatus, listSlateStatuses } from "@/lib/db/slateStatus"
 import { listJobsForSlate } from "@/lib/jobs/queue";
 import { loadLatestDkMatchReport } from "@/lib/loaders";
 import { listSlates } from "@/lib/optimizerWorkspace/poolCache";
+import { isValidSlateDateString } from "@/lib/slateDate";
 import { evaluatePublishReadiness } from "@/lib/slatePublishReadiness";
 
 // Milestone 30.1: the eligibility breakdown dfs/eligibility.py computes
@@ -26,7 +27,6 @@ interface EligibilityCounts {
 
 export const dynamic = "force-dynamic";
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SLATE_AUDIT_ACTIONS = new Set([
   "slate_process_started", "slate_process_completed", "slate_process_failed",
   "slate_refresh_started", "slate_refresh_completed", "slate_refresh_failed",
@@ -46,8 +46,8 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const date = searchParams.get("date") ?? "";
-  if (!DATE_RE.test(date)) {
-    return NextResponse.json({ error: "`date` (YYYY-MM-DD) query param is required." }, { status: 400 });
+  if (!isValidSlateDateString(date)) {
+    return NextResponse.json({ error: "`date` (YYYY-MM-DD, a valid calendar date) query param is required." }, { status: 400 });
   }
 
   const discovered = await listSlates(date);

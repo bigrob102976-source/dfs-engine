@@ -6,10 +6,9 @@ import { getSlateStatus } from "@/lib/db/slateStatus";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { ensureSlateJobHandlersRegistered } from "@/lib/jobs/slateJobHandlers";
 import { runOneQueuedJob } from "@/lib/jobs/worker";
+import { isValidSlateDateString } from "@/lib/slateDate";
 
 export const dynamic = "force-dynamic";
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Admin-only "Refresh Data": identical underlying pipeline to Process
  * (lib/slatePipeline.ts::runSlatePipeline -- see that module's docstring
@@ -35,8 +34,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
   }
   const { date, slateId, slateLabel } = (body as { date?: unknown; slateId?: unknown; slateLabel?: unknown }) ?? {};
-  if (typeof date !== "string" || !DATE_RE.test(date)) {
-    return NextResponse.json({ error: "`date` (YYYY-MM-DD) is required." }, { status: 400 });
+  if (!isValidSlateDateString(date)) {
+    return NextResponse.json({ error: "`date` (YYYY-MM-DD, a valid calendar date) is required." }, { status: 400 });
   }
   if (typeof slateId !== "string" || !slateId) {
     return NextResponse.json({ error: "`slateId` is required." }, { status: 400 });

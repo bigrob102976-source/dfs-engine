@@ -1,6 +1,6 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { MissingDataState } from "@/components/MissingDataState";
@@ -10,6 +10,7 @@ import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile
 import { resolveExternalSourceLabel } from "@/lib/projectionLabels";
 import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
 import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
+import { isValidSlateDateString } from "@/lib/slateDate";
 
 import { ConstraintsPanel } from "./ConstraintsPanel";
 import { LineupsPanel } from "./LineupsPanel";
@@ -40,10 +41,23 @@ function formatTime(iso: string | null): string {
  * BUILD action that runs the real CP-SAT optimizer server-side and
  * displays the resulting lineups + exposure summaries. Every server call
  * goes through /api/optimizer/* -- nothing here talks to Python
- * directly or invents projections/salaries/ownership. */
-export function OptimizerWorkspace() {
+ * directly or invents projections/salaries/ownership.
+ *
+ * Milestone 31.2C: `initialDate` (from the page's own `?date=` -- see
+ * app/dashboard/optimizer/page.tsx) seeds which calendar date's slates
+ * to browse, since DraftKings' live lobby can roll to the next day
+ * before Chicago midnight (lib/slateDate.ts). `null` means "no explicit
+ * date" -- selectedDate then falls back to whatever was persisted from
+ * a previous session, or stays null (server APIs default to Chicago-
+ * today themselves, exactly matching this component's pre-M31.2C
+ * behavior when selectedDate is never set at all). */
+export function OptimizerWorkspace({ initialDate = null }: { initialDate?: string | null }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
+
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [dateInputValue, setDateInputValue] = useState("");
 
   const [slates, setSlates] = useState<SlateOption[]>([]);
   const [slateStatus, setSlateStatus] = useState<string | null>(null);
@@ -52,6 +66,7 @@ export function OptimizerWorkspace() {
   const [slatesLoading, setSlatesLoading] = useState(true);
 
   const [selectedSlateId, setSelectedSlateId] = useState<string | null>(null);
+  const [slateUnavailableMessage, setSlateUnavailableMessage] = useState<string | null>(null);
   const [pool, setPool] = useState<OptimizerPoolResult | null>(null);
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolError, setPoolError] = useState<string | null>(null);
@@ -89,6 +104,15 @@ export function OptimizerWorkspace() {
   useEffect(() => {
     Promise.resolve().then(() => {
       const persisted = loadWorkspaceState();
+      // Milestone 31.2C: an explicit ?date= (initialDate, resolved
+      // server-side from the URL) wins over whatever date was persisted
+      // from a previous session; with neither, selectedDate stays null
+      // and every /api/optimizer/* call below simply omits `date`,
+      // which the server resolves to Chicago-today -- identical to this
+      // component's behavior before M31.2C.
+      const initialSelectedDate = initialDate ?? persisted?.selectedDate ?? null;
+      setSelectedDate(initialSelectedDate);
+      setDateInputValue(initialSelectedDate ?? "");
       if (persisted) {
         setSelectedSlateId(persisted.selectedSlateId);
         setLocks(persisted.locks);
@@ -106,6 +130,11 @@ export function OptimizerWorkspace() {
       }
       setHydrated(true);
     });
+    // Deliberately mount-once: initialDate comes from the server-rendered
+    // page and is only meant to seed the very first hydration -- live
+    // ?date= changes after mount are handled reactively by 1c below,
+    // exactly mirroring how 1b handles ?slate= separately from any prop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 1b. Milestone 26: the global slate selector (top nav) drives every
@@ -132,12 +161,29 @@ export function OptimizerWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, searchParams]);
 
+  // 1c. Milestone 31.2C: same pattern as 1b, but for `?date=` -- lets a
+  // link from /admin/slates' date selector (or a manual URL edit) drive
+  // the Optimizer's selected date reactively after mount, not just on
+  // first load.
+  useEffect(() => {
+    if (!hydrated) return;
+    const urlDate = searchParams?.get("date");
+    Promise.resolve().then(() => {
+      if (urlDate && isValidSlateDateString(urlDate) && urlDate !== selectedDate) {
+        setSelectedDate(urlDate);
+        setDateInputValue(urlDate);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, searchParams]);
+
   // 2. Persist on every relevant change, once hydrated (never before --
   // that would clobber a saved session with fresh-mount defaults).
   useEffect(() => {
     if (!hydrated) return;
     saveWorkspaceState({
       selectedSlateId,
+      selectedDate,
       locks,
       exclusions,
       maxExposure,
@@ -152,18 +198,23 @@ export function OptimizerWorkspace() {
       showProjectionComparison,
     });
   }, [
-    hydrated, selectedSlateId, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, lineups,
-    objective, projectionSource, showProjectionComparison,
+    hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique,
+    lineups, objective, projectionSource, showProjectionComparison,
   ]);
 
-  // 3. Discover today's slates once, right after hydration (so we know
-  // whether a persisted selection still exists among them).
+  // 3. Discover the selected date's slates (Chicago-today when
+  // selectedDate is null -- the server default, Milestone 31.2C's Part
+  // 2 backward-compat contract) once, right after hydration and again
+  // whenever selectedDate changes, so we know whether a persisted slate
+  // selection still exists among them.
   useEffect(() => {
     if (!hydrated) return;
     Promise.resolve()
       .then(() => {
         setSlatesLoading(true);
-        return fetch("/api/optimizer/slates");
+        setSlateUnavailableMessage(null);
+        const url = selectedDate ? `/api/optimizer/slates?date=${encodeURIComponent(selectedDate)}` : "/api/optimizer/slates";
+        return fetch(url);
       })
       .then((res) => res.json())
       .then((data) => {
@@ -175,7 +226,14 @@ export function OptimizerWorkspace() {
         setSlatesLoading(false);
         setSelectedSlateId((current) => {
           if (list.length === 1) return list[0].slateId;
-          if (current && !list.some((s) => s.slateId === current)) return null;
+          // Milestone 31.2C, Part 18: a previously selected/persisted
+          // DraftGroup can genuinely disappear (DraftKings rolls its
+          // live lobby, or the date changed) -- surface this explicitly
+          // rather than silently clearing the selection.
+          if (current && !list.some((s) => s.slateId === current)) {
+            setSlateUnavailableMessage("Previously selected slate is no longer available for this date. Please select another live slate below.");
+            return null;
+          }
           return current;
         });
       })
@@ -183,9 +241,10 @@ export function OptimizerWorkspace() {
         setSlatesLoading(false);
         setSlateStatus("unavailable");
       });
-    // Runs once, right after hydration -- deliberately not re-run on every
-    // selectedSlateId change (that's handled by the selectedSlateId effect below).
-  }, [hydrated]);
+    // Runs right after hydration, and again whenever selectedDate changes
+    // -- deliberately not re-run on every selectedSlateId change (that's
+    // handled by the selectedSlateId effect below).
+  }, [hydrated, selectedDate]);
 
   // 4. Load the selected slate's player pool. Reconciles existing
   // locks/exclusions/exposures/stackTeam against the new pool (Milestone
@@ -203,7 +262,7 @@ export function OptimizerWorkspace() {
         return fetch("/api/optimizer/pool", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slateId }),
+          body: JSON.stringify({ slateId, date: selectedDate }),
         });
       })
       .then((res) => res.json())
@@ -250,13 +309,13 @@ export function OptimizerWorkspace() {
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
-  }, [locks, exclusions, maxExposure, pool]);
+  }, [locks, exclusions, maxExposure, pool, selectedDate]);
 
   useEffect(() => {
     if (!hydrated || !selectedSlateId) return;
     loadPool(selectedSlateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, selectedSlateId]);
+  }, [hydrated, selectedSlateId, selectedDate]);
 
   const buildRequestBody = useCallback(() => {
     const byId = new Map((pool?.players ?? []).map((p) => [p.dkPlayerId, p]));
@@ -269,6 +328,7 @@ export function OptimizerWorkspace() {
     }
     return {
       slateId: selectedSlateId,
+      date: selectedDate,
       lineups,
       objective,
       locks: lockNames,
@@ -282,8 +342,8 @@ export function OptimizerWorkspace() {
       projectionSource,
     };
   }, [
-    pool, locks, exclusions, maxExposure, selectedSlateId, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique,
-    projectionSource,
+    pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary,
+    minUnique, projectionSource,
   ]);
 
   // Milestone 17/20/23: if the newly-selected slate has no data for the
@@ -369,6 +429,15 @@ export function OptimizerWorkspace() {
   const selectedSlate = slates.find((s) => s.slateId === selectedSlateId) ?? null;
   const externalSourceLabel = resolveExternalSourceLabel(pool?.externalProviderName ?? null);
 
+  // Milestone 31.2C, Part 4/7: committing a date navigates to
+  // ?date=... (persists across a page refresh, Part 7) -- 1c above then
+  // picks up the URL change and updates selectedDate, which in turn
+  // re-fetches the slate list for that date (effect 3).
+  function commitDateChange(nextDate: string) {
+    if (!isValidSlateDateString(nextDate) || nextDate === selectedDate) return;
+    router.push(`/dashboard/optimizer?date=${encodeURIComponent(nextDate)}`);
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* TOP CONTROL BAR */}
@@ -381,10 +450,28 @@ export function OptimizerWorkspace() {
         </div>
 
         <label className="flex items-center gap-2 text-xs text-text-muted">
+          Slate Date:
+          <input
+            type="date"
+            value={dateInputValue}
+            onChange={(e) => setDateInputValue(e.target.value)}
+            onBlur={() => dateInputValue && commitDateChange(dateInputValue)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && dateInputValue) commitDateChange(dateInputValue);
+            }}
+            title="Defaults to today's America/Chicago date -- set explicitly if DraftKings' live lobby has already rolled to the next calendar day"
+            className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-text"
+          />
+        </label>
+
+        <label className="flex items-center gap-2 text-xs text-text-muted">
           Slate:
           <select
             value={selectedSlateId ?? ""}
-            onChange={(e) => setSelectedSlateId(e.target.value || null)}
+            onChange={(e) => {
+              setSelectedSlateId(e.target.value || null);
+              setSlateUnavailableMessage(null);
+            }}
             disabled={slatesLoading || slates.length === 0}
             className="min-w-[220px] rounded border border-border bg-bg-panel-raised px-2 py-1 text-text disabled:opacity-40"
           >
@@ -412,6 +499,11 @@ export function OptimizerWorkspace() {
           </span>
         )}
 
+        {pool && (
+          <span className="rounded bg-bg-panel-raised px-2 py-1 text-[11px] font-medium text-text" title="The slate/date this player pool and any lineups you build will use">
+            Active Slate: MLB -- {pool.slateName ?? pool.slateId} -- {pool.date} -- {pool.slateGames} Games
+          </span>
+        )}
         <span className="text-[11px] text-text-faint">Updated: {pool ? formatTime(pool.generatedAt) : "--"}</span>
 
         <div className="ml-auto flex items-center gap-3">
@@ -507,6 +599,9 @@ export function OptimizerWorkspace() {
         </label>
       </div>
 
+      {slateUnavailableMessage && (
+        <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{slateUnavailableMessage}</div>
+      )}
       {slateStatus && slateStatus !== "ready" && (
         <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
           {SLATE_STATUS_MESSAGES[slateStatus] ?? slateReason ?? `Slate status: ${slateStatus}`}
