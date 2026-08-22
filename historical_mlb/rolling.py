@@ -27,7 +27,7 @@ from historical_mlb.leakage import filter_pregame_observations
 WINDOWS = {"last_7d": 7, "last_14d": 14, "last_30d": 30}  # days; season-to-date has no day limit
 
 
-def _days_between(earlier: str, later: str) -> int:
+def days_between(earlier: str, later: str) -> int:
     from datetime import date
     y1, m1, d1 = (int(x) for x in earlier.split("-"))
     y2, m2, d2 = (int(x) for x in later.split("-"))
@@ -50,6 +50,8 @@ class RollingHitterStats:
     sac_fly: int = 0
     strikeouts: int = 0
     stolen_bases: int = 0
+    runs: int = 0
+    rbi: int = 0
 
     @property
     def total_bases(self) -> int:
@@ -112,7 +114,7 @@ def build_rolling_hitter_stats(
     for entry in game_log_entries:
         if entry["date"] not in safe_dates:
             continue
-        if window_days is not None and _days_between(entry["date"], target_game_date) > window_days:
+        if window_days is not None and days_between(entry["date"], target_game_date) > window_days:
             continue
         stat = entry.get("stat", {})
         d, t, hr = int(stat.get("doubles") or 0), int(stat.get("triples") or 0), int(stat.get("homeRuns") or 0)
@@ -130,6 +132,8 @@ def build_rolling_hitter_stats(
         result.sac_fly += int(stat.get("sacFlies") or 0)
         result.strikeouts += int(stat.get("strikeOuts") or 0)
         result.stolen_bases += int(stat.get("stolenBases") or 0)
+        result.runs += int(stat.get("runs") or 0)
+        result.rbi += int(stat.get("rbi") or 0)
     return result
 
 
@@ -144,6 +148,7 @@ class RollingPitcherStats:
     hits_allowed: int = 0
     earned_runs: int = 0
     home_runs_allowed: int = 0
+    pitch_count: int = 0
 
     @property
     def innings_pitched(self) -> Optional[float]:
@@ -181,7 +186,7 @@ def build_rolling_pitcher_stats(
     for entry in game_log_entries:
         if entry["date"] not in safe_dates:
             continue
-        if window_days is not None and _days_between(entry["date"], target_game_date) > window_days:
+        if window_days is not None and days_between(entry["date"], target_game_date) > window_days:
             continue
         stat = entry.get("stat", {})
         ip_str = stat.get("inningsPitched")
@@ -194,6 +199,7 @@ def build_rolling_pitcher_stats(
         result.hits_allowed += int(stat.get("hits") or 0)
         result.earned_runs += int(stat.get("earnedRuns") or 0)
         result.home_runs_allowed += int(stat.get("homeRuns") or 0)
+        result.pitch_count += int(stat.get("numberOfPitches") or 0)
     return result
 
 
@@ -211,7 +217,10 @@ def aggregate_statcast_rates(pitch_rows: List[dict], player_id_column: str, play
     barrel-rate-approximation precedent elsewhere in the codebase)."""
     batted_balls = [r for r in pitch_rows if r.get(player_id_column) == str(player_id) and r.get("launch_speed") not in (None, "")]
     if not batted_balls:
-        return {"hard_hit_rate": None, "barrel_rate_proxy": None, "avg_xwoba_contribution": None, "batted_ball_events": 0}
+        return {
+            "hard_hit_rate": None, "barrel_rate_proxy": None, "avg_xwoba_contribution": None,
+            "avg_exit_velocity": None, "avg_launch_angle": None, "xslg": None, "batted_ball_events": 0,
+        }
 
     def _f(v):
         try:
@@ -219,9 +228,14 @@ def aggregate_statcast_rates(pitch_rows: List[dict], player_id_column: str, play
         except (TypeError, ValueError):
             return None
 
+    def _mean(values):
+        clean = [v for v in values if v is not None]
+        return round(sum(clean) / len(clean), 4) if clean else None
+
     speeds = [_f(r.get("launch_speed")) for r in batted_balls]
     angles = [_f(r.get("launch_angle")) for r in batted_balls]
     xwobas = [_f(r.get("estimated_woba_using_speedangle")) for r in batted_balls if r.get("estimated_woba_using_speedangle") not in (None, "")]
+    xslgs = [_f(r.get("estimated_slg_using_speedangle")) for r in batted_balls if r.get("estimated_slg_using_speedangle") not in (None, "")]
 
     hard_hit = sum(1 for s in speeds if s is not None and s >= 95)
     barrels = sum(1 for s, a in zip(speeds, angles) if s is not None and a is not None and s >= 98 and 26 <= a <= 30)
@@ -229,6 +243,9 @@ def aggregate_statcast_rates(pitch_rows: List[dict], player_id_column: str, play
     return {
         "hard_hit_rate": round(hard_hit / len(batted_balls), 4),
         "barrel_rate_proxy": round(barrels / len(batted_balls), 4),
-        "avg_xwoba_contribution": round(sum(xwobas) / len(xwobas), 4) if xwobas else None,
+        "avg_xwoba_contribution": _mean(xwobas),
+        "avg_exit_velocity": _mean(speeds),
+        "avg_launch_angle": _mean(angles),
+        "xslg": _mean(xslgs),
         "batted_ball_events": len(batted_balls),
     }

@@ -27,20 +27,26 @@ its mock provider, so this is not a new gap introduced by this module.
 
 import json
 import urllib.parse
-import urllib.request
 from typing import Optional
 
 from config.game_environment_config import TEAM_LOCATIONS
+
+from historical_mlb.cache import RawCache
+from historical_mlb.http import fetch_url
+from historical_mlb.paths import RAW_WEATHER_DIR
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 HOURLY_FIELDS = ["temperature_2m", "wind_speed_10m", "wind_direction_10m", "precipitation", "relative_humidity_2m"]
 
+_cache = RawCache(RAW_WEATHER_DIR)
+
 
 def fetch_historical_weather_json(team_abbr: str, date: str, timeout: int = 20) -> Optional[dict]:
-    """One live network call for one team's home coordinates + one date.
-    Returns None (never raises) if the team isn't in TEAM_LOCATIONS --
-    an unknown abbreviation is a data problem to report, not a crash."""
+    """One live network call (shared retry/backoff/pacing helper) for
+    one team's home coordinates + one date. Returns None (never raises)
+    if the team isn't in TEAM_LOCATIONS -- an unknown abbreviation is a
+    data problem to report, not a crash."""
     location = TEAM_LOCATIONS.get(team_abbr)
     if not location:
         return None
@@ -51,9 +57,22 @@ def fetch_historical_weather_json(team_abbr: str, date: str, timeout: int = 20) 
         "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
     }
     url = f"{ARCHIVE_URL}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "BigMoneyDFS-Research/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+    return json.loads(fetch_url(url, timeout=timeout))
+
+
+def fetch_cached_weather_json(team_abbr: str, date: str, force: bool = False) -> Optional[dict]:
+    """Milestone 32.1, Part 4/20: cached once per (home team, date) --
+    NOT once per player, per Part 20's explicit instruction. Every
+    hitter/pitcher playing at that venue on that date shares this one
+    cached fetch. Uses RawCache.get_or_fetch_json, which self-heals a
+    corrupted cache entry (treats a JSONDecodeError as a cache miss)
+    rather than crashing -- see that method's docstring for the real
+    corrupted-weather-cache defect this was written to fix."""
+    key = f"weather_{team_abbr}_{date}"
+    return _cache.get_or_fetch_json(
+        key, fetch_fn=lambda: fetch_historical_weather_json(team_abbr, date),
+        meta={"source": "open_meteo", "team": team_abbr, "date": date}, force=force,
+    )
 
 
 def weather_at_hour(payload: Optional[dict], hour_iso: str) -> Optional[dict]:

@@ -26,6 +26,30 @@ def test_check_duplicate_player_game_rows_allows_same_player_different_games():
     assert check_duplicate_player_game_rows(rows) == []
 
 
+def test_check_duplicate_player_game_rows_allows_the_danny_jansen_case():
+    """Regression guard for a real historical event caught live during
+    Milestone 32.1's full warehouse build: 2024-06-26 (game_pk 746942)
+    was suspended mid-game and resumed after Danny Jansen was traded
+    from TOR to BOS -- making him the first player in MLB history to
+    legitimately appear on BOTH teams' rosters in the same game_pk,
+    with two real, different stat lines. Same player + same game_id but
+    DIFFERENT team must not be flagged as a duplicate."""
+    rows = [
+        {"player_id": "643376", "game_id": "746942", "team": "TOR"},
+        {"player_id": "643376", "game_id": "746942", "team": "BOS"},
+    ]
+    assert check_duplicate_player_game_rows(rows) == []
+
+
+def test_check_duplicate_player_game_rows_still_flags_same_team_duplicate():
+    rows = [
+        {"player_id": "1", "game_id": "g1", "team": "NYY"},
+        {"player_id": "1", "game_id": "g1", "team": "NYY"},
+    ]
+    findings = check_duplicate_player_game_rows(rows)
+    assert len(findings) == 1
+
+
 def test_check_duplicate_game_ids():
     games = [{"canonical_game_id": "g1"}, {"canonical_game_id": "g1"}]
     findings = check_duplicate_game_ids(games)

@@ -18,6 +18,7 @@ evaluation/hitter_results_enrichment.py's own docstring), which the
 historical warehouse needs to build a complete game's worth of rows.
 """
 
+import json
 from typing import Dict, List, Optional, Tuple
 
 from evaluation.results_collector import fetch_boxscore
@@ -29,6 +30,10 @@ from research.collector import (
     fetch_schedule,
 )
 
+from historical_mlb.cache import RawCache
+from historical_mlb.http import fetch_url
+from historical_mlb.paths import RAW_MLB_DIR
+
 __all__ = [
     "MLB_STATS_BASE",
     "fetch_schedule",
@@ -38,7 +43,72 @@ __all__ = [
     "fetch_batter_game_log",
     "extract_all_boxscore_players",
     "games_from_schedule",
+    "fetch_schedule_range",
+    "fetch_cached_person",
+    "fetch_cached_boxscore",
+    "fetch_cached_season_game_log",
 ]
+
+_cache = RawCache(RAW_MLB_DIR)
+
+
+def fetch_schedule_range(start_date: str, end_date: str) -> dict:
+    """Milestone 32.1, Part 6: ONE call covers an entire date range
+    (MLB Stats API's own startDate/endDate params, live-confirmed to
+    work) instead of one call per day -- the single biggest request-
+    count reduction available for building the game universe over 18
+    months. Uses the shared retry/backoff helper (this is a NEW call
+    this package owns, unlike fetch_schedule() above)."""
+    url = f"{MLB_STATS_BASE}/schedule?sportId=1&startDate={start_date}&endDate={end_date}&hydrate=team,probablePitcher,venue"
+    return json.loads(fetch_url(url))
+
+
+def fetch_cached_person(player_id: str, force: bool = False) -> Optional[dict]:
+    """Cached wrapper around fetch_person() -- a player's bio/handedness
+    never changes retroactively for historical purposes, so this is
+    fetched at most once ever per player, not once per game. Uses
+    RawCache.get_or_fetch_json, which self-heals a corrupted cache
+    entry rather than crashing -- see that method's docstring."""
+    key = f"person_{player_id}"
+    return _cache.get_or_fetch_json(
+        key, fetch_fn=lambda: fetch_person(player_id),
+        meta={"source": "mlb_stats_api", "endpoint": "people", "player_id": player_id}, force=force,
+    )
+
+
+def fetch_cached_boxscore(game_pk, force: bool = False) -> Optional[dict]:
+    key = f"boxscore_{game_pk}"
+    return _cache.get_or_fetch_json(
+        key, fetch_fn=lambda: fetch_boxscore(game_pk),
+        meta={"source": "mlb_stats_api", "endpoint": "game/boxscore", "game_pk": game_pk}, force=force,
+    )
+
+
+def fetch_cached_season_game_log(player_id: str, season: str, group: str, force: bool = False) -> List[dict]:
+    """Milestone 32.1's key scalability decision: fetch a player's
+    FULL-SEASON game log ONCE (cached), then every game's rolling
+    window is computed by slicing this same cached list by date --
+    never a fresh per-game-per-player fetch (M32.0's POC did that,
+    which does not scale past ~75 players; a 150-game full-season
+    player would otherwise need 150 near-identical fetches instead of
+    one). `group` is "pitching" or "hitting". Returns a flat list of
+    {"date": ..., "stat": {...}} entries (empty list, never None, on a
+    genuine no-data response -- a player with zero games this season is
+    a valid, cacheable outcome, not a failure)."""
+    key = f"gamelog_{group}_{player_id}_{season}"
+
+    def _fetch() -> List[dict]:
+        fetch_fn = fetch_pitcher_game_log if group == "pitching" else fetch_batter_game_log
+        raw = fetch_fn(player_id, season)
+        splits = (raw or {}).get("stats", [{}])[0].get("splits", []) if raw else []
+        return [{"date": s.get("date"), "stat": s.get("stat", {})} for s in splits if s.get("date")]
+
+    entries = _cache.get_or_fetch_json(
+        key, fetch_fn=_fetch,
+        meta={"source": "mlb_stats_api", "endpoint": f"people/stats(gameLog,{group})", "player_id": player_id, "season": season},
+        force=force,
+    )
+    return entries or []
 
 
 def games_from_schedule(schedule: dict) -> List[dict]:

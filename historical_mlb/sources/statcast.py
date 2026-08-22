@@ -25,10 +25,15 @@ pitch). This module fetches; historical_mlb/rolling.py aggregates.
 import csv
 import io
 import urllib.parse
-import urllib.request
 from typing import List, Optional
 
+from historical_mlb.cache import RawCache
+from historical_mlb.http import fetch_url
+from historical_mlb.paths import RAW_STATCAST_DIR
+
 STATCAST_SEARCH_URL = "https://baseballsavant.mlb.com/statcast_search/csv"
+
+_cache = RawCache(RAW_STATCAST_DIR)
 
 # Fixed search parameters that make the query "all regular-season pitches
 # for the given date range, both player types" -- the same defaults
@@ -52,15 +57,25 @@ def _build_url(start_date: str, end_date: str) -> str:
 
 
 def fetch_statcast_csv_text(start_date: str, end_date: Optional[str] = None, timeout: int = 60) -> str:
-    """One live network call. Returns the raw CSV text (UTF-8, may carry
-    a BOM). Never raises for an HTTP-level failure without context --
-    lets urllib's own HTTPError/URLError propagate with the real cause,
-    since (unlike the DK unofficial provider) this is research-only
-    code with no production caller expecting a specific exception type."""
+    """One live network call (via the shared retry/backoff/pacing
+    helper -- Part 6). Returns the raw CSV text (UTF-8, may carry a
+    BOM)."""
     end_date = end_date or start_date
-    req = urllib.request.Request(_build_url(start_date, end_date), headers={"User-Agent": "BigMoneyDFS-Research/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8-sig", errors="replace")
+    raw = fetch_url(_build_url(start_date, end_date), timeout=timeout)
+    return raw.decode("utf-8-sig", errors="replace")
+
+
+def fetch_cached_statcast_csv_text(date: str, force: bool = False) -> str:
+    """Milestone 32.1, Part 4: one cached fetch per DATE (Statcast is
+    queried single-day at a time for the warehouse build, one row per
+    pitch that day across every game) -- never re-downloaded on a
+    resumed/rerun build unless --force."""
+    key = f"statcast_{date}"
+    return _cache.get_or_fetch_text(
+        key, "csv", fetch_fn=lambda: fetch_statcast_csv_text(date, date),
+        build_meta_fn=lambda text: {"source": "baseball_savant", "date": date, "record_count": max(text.count("\n") - 1, 0)},
+        force=force,
+    )
 
 
 def parse_statcast_csv(csv_text: str) -> List[dict]:

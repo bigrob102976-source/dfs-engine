@@ -62,6 +62,12 @@ class PlayerCrosswalkRow:
     team: Optional[str] = None
     match_method: str = "mlbam_direct"  # "mlbam_direct" | "chadwick_register" | "name_fallback"
     match_confidence: float = 1.0
+    # Milestone 32.1, Part 8 additions -- optional so M32.0-era callers
+    # that never set these still construct a valid row.
+    bat_side: Optional[str] = None
+    throw_side: Optional[str] = None
+    first_seen: Optional[str] = None  # earliest game_date this player was observed in the warehouse build
+    last_seen: Optional[str] = None
 
 
 def crosswalk_row_from_mlbam(mlbam_id: str, name: str, team: Optional[str] = None) -> PlayerCrosswalkRow:

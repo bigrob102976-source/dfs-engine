@@ -17,13 +17,33 @@ def _finding(check: str, severity: str, detail: str) -> Dict[str, str]:
     return {"check": check, "severity": severity, "detail": detail}
 
 
+def _game_id_of(row: dict):
+    """Milestone 32.0's POC-era rows used "game_id"; Milestone 32.1's
+    real warehouse rows use "game_pk" (this project's canonical MLB
+    game identifier -- see historical_mlb.game_universe's module
+    docstring). Both are accepted so this module works unchanged
+    against either row shape."""
+    return row.get("game_id") if row.get("game_id") is not None else row.get("game_pk")
+
+
 def check_duplicate_player_game_rows(rows: List[dict]) -> List[dict]:
+    """Milestone 32.1 regression guard: keyed by (player_id, game_id,
+    team), NOT just (player_id, game_id). Discovered live during the
+    full warehouse build -- 2024-06-26, Blue Jays @ Red Sox (game_pk
+    746942) was suspended mid-game and resumed after Danny Jansen was
+    traded from TOR to BOS, making him the first player in MLB history
+    to legitimately appear on BOTH teams' rosters in the same game_pk
+    with two real, different stat lines. Keying by team alone (not
+    dropping game_id, not merging the two lines) is the smallest change
+    that both preserves catching a REAL duplicate (same player, same
+    team, same game -- still an error) and stops flagging this one
+    genuine, historically unique exception as corruption."""
     seen = {}
     findings = []
     for row in rows:
-        key = (row.get("player_id"), row.get("game_id"))
+        key = (row.get("player_id"), _game_id_of(row), row.get("team"))
         if key in seen:
-            findings.append(_finding("duplicate_player_game_row", "error", f"player_id={key[0]} game_id={key[1]} appears more than once."))
+            findings.append(_finding("duplicate_player_game_row", "error", f"player_id={key[0]} game_id={key[1]} team={key[2]} appears more than once."))
         seen[key] = True
     return findings
 
@@ -32,7 +52,7 @@ def check_duplicate_game_ids(games: List[dict]) -> List[dict]:
     seen = {}
     findings = []
     for g in games:
-        gid = g.get("canonical_game_id") or g.get("game_id")
+        gid = g.get("canonical_game_id") or _game_id_of(g)
         if gid in seen:
             findings.append(_finding("duplicate_game_id", "error", f"canonical_game_id={gid} appears more than once."))
         seen[gid] = True
