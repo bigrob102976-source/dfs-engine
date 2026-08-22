@@ -1,6 +1,9 @@
 from dfs.models import DKSalaryRow
 from dfs.providers.source_realism import (
     BLOCK,
+    INFO,
+    PROVIDER_KIND_CSV,
+    PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL,
     WARN,
     check_source_realism,
 )
@@ -73,12 +76,28 @@ def test_team_count_inconsistent_with_game_count_warns():
     assert any(f.level == WARN and "team" in f.message.lower() for f in report.findings)
 
 
-def test_name_appearing_under_two_teams_is_flagged_as_a_warning():
-    # Modeled on the real Max Muncy case: same name, two different teams.
+def test_same_name_different_dk_player_id_is_informational_not_a_warning():
+    # Modeled on the real Max Muncy case (M32.2B, DraftGroup 152543):
+    # two different real players share a display name, but have
+    # different DK player IDs -- SAME_NAME_DIFFERENT_PLAYER, informational
+    # only, must never be a WARN or BLOCK.
     rows = _small_realistic_slate()
-    rows.append(_row("AAA Ace", "BBB", ["SP"], dk_id="different-id"))  # same name as an AAA row, different team
+    rows.append(_row("AAA Ace", "BBB", ["SP"], dk_id="different-id"))  # same name as an AAA row, different DK id
     report = check_source_realism(rows, game_count=1)
-    assert any(f.level == WARN and "AAA Ace" in f.message for f in report.findings)
+    assert any(f.level == INFO and "SAME_NAME_DIFFERENT_PLAYER" in f.message and "AAA Ace" in f.message for f in report.findings)
+    assert not any(f.level in (WARN, BLOCK) and "AAA Ace" in f.message for f in report.findings)
+    assert report.blocked is False
+
+
+def test_same_dk_player_id_under_two_teams_blocks():
+    # The genuine bug case this check exists to catch: the SAME stable DK
+    # player ID appearing under two different teams -- identity
+    # conflated, never just a same-name collision.
+    rows = _small_realistic_slate()
+    rows.append(_row("AAA Ace", "BBB", ["SP"], dk_id="id-AAA Ace-AAA"))  # SAME dk_id as the real "AAA Ace" row
+    report = check_source_realism(rows, game_count=1)
+    assert any(f.level == BLOCK and "SAME DK player ID" in f.message and "AAA Ace" in f.message for f in report.findings)
+    assert report.blocked is True
 
 
 def test_tarik_skubal_style_impossible_source_fixture_is_clearly_synthetic():
@@ -96,3 +115,73 @@ def test_tarik_skubal_style_impossible_source_fixture_is_clearly_synthetic():
     report = check_source_realism(rows, game_count=1)
     assert report.blocked is True
     assert any("LAD" in f.message and f.level == BLOCK for f in report.findings)
+
+
+def test_default_provider_kind_is_csv_and_unchanged():
+    """Backward compatibility: a caller that doesn't pass provider_kind
+    at all gets the exact original CSV-calibrated behavior."""
+    rows = _small_realistic_slate()
+    for i in range(20):
+        rows.append(_row(f"AAA Extra Pitcher {i}", "AAA", ["RP"]))
+    default_report = check_source_realism(rows, game_count=1)
+    explicit_csv_report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_CSV)
+    assert default_report.blocked is True
+    assert [f.to_dict() for f in default_report.findings] == [f.to_dict() for f in explicit_csv_report.findings]
+
+
+def test_large_legitimate_pitcher_pool_does_not_block_for_draftkings_unofficial():
+    """Milestone 32.2B: live-proven real DraftKings Classic behavior
+    (~20-34 pitchers/team) must never BLOCK for this provider -- the
+    finding is retained for observability, capped at WARN."""
+    rows = _small_realistic_slate()
+    for i in range(20):
+        rows.append(_row(f"AAA Extra Pitcher {i}", "AAA", ["RP"]))
+    report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL)
+    assert report.blocked is False
+    assert any(f.level == WARN and "AAA" in f.message and "pitcher" in f.message.lower() for f in report.findings)
+    assert not any(f.level == BLOCK for f in report.findings)
+
+
+def test_pitcher_fraction_warning_does_not_block_for_draftkings_unofficial():
+    rows = []
+    for i in range(30):
+        rows.append(_row(f"Ace Pitcher {i}", "LAD", ["SP" if i < 15 else "RP"]))
+    for i in range(22):
+        rows.append(_row(f"Hitter {i}", "LAD", ["OF"]))
+    report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL)
+    assert report.blocked is False
+    assert any(f.level == WARN and "pitcher-eligible" in f.message for f in report.findings)
+
+
+def test_rows_per_game_does_not_block_for_draftkings_unofficial():
+    rows = []
+    for i in range(60):
+        rows.append(_row(f"Hitter {i}", "AAA", ["OF"]))
+        rows.append(_row(f"Hitter B {i}", "BBB", ["OF"]))
+    report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL)
+    assert report.blocked is False
+
+
+def test_csv_provider_kind_still_blocks_on_the_same_impossible_shape():
+    """The CSV/import path must retain its original BLOCK-capable
+    behavior unchanged -- only draftkings_unofficial's pitcher-pool-shape
+    checks are capped."""
+    rows = []
+    for i in range(30):
+        rows.append(_row(f"Ace Pitcher {i}", "LAD", ["SP" if i < 15 else "RP"]))
+    for i in range(22):
+        rows.append(_row(f"Hitter {i}", "LAD", ["OF"]))
+    for i in range(20):
+        rows.append(_row(f"COL Player {i}", "COL", ["OF"] if i % 2 else ["RP"]))
+    report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_CSV)
+    assert report.blocked is True
+
+
+def test_identity_conflation_still_blocks_regardless_of_provider_kind():
+    """The same-DK-id-under-two-teams bug check is a universal
+    correctness signal, never softened by provider_kind."""
+    rows = _small_realistic_slate()
+    rows.append(_row("AAA Ace", "BBB", ["SP"], dk_id="id-AAA Ace-AAA"))
+    report = check_source_realism(rows, game_count=1, provider_kind=PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL)
+    assert report.blocked is True
+    assert any(f.level == BLOCK and "SAME DK player ID" in f.message for f in report.findings)

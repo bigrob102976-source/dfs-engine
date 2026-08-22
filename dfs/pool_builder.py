@@ -22,7 +22,7 @@ from dfs.player_integrity import PlayerIntegrityResult, summarize as summarize_i
 from dfs.player_pool import build_dfs_players, build_match_report
 from dfs.player_resolver import build_canonical_by_id, build_canonical_index, build_name_only_index, resolve_all
 from dfs.providers.source_provenance import TRUSTED_FOR_PRODUCTION, UNKNOWN, classify_source_provenance
-from dfs.providers.source_realism import check_source_realism
+from dfs.providers.source_realism import PROVIDER_KIND_CSV, check_source_realism
 from dfs.roster_feasibility import check_roster_feasibility
 from dfs.slate_validation import validate_slate
 from dfs.snapshot_selection import select_snapshot
@@ -95,6 +95,7 @@ def build_pool(
     source_provenance_claim: Optional[str] = None, dev_mode: Optional[bool] = None,
     slate_id: Optional[str] = None, dfs_input_root: str = "dfs_input",
     exclude_il: bool = True, exclude_zero_avg_points: bool = True,
+    provider_kind: str = PROVIDER_KIND_CSV,
 ) -> PoolBuildResult:
     """Runs identity matching, slate validation, player-pool assembly,
     and roster-feasibility checking -- identical to what
@@ -119,7 +120,14 @@ def build_pool(
     toggleable DK Status/AvgPointsPerGame exclusion rules -- see
     dfs/availability_filter.py. Both default True. DTD is always only
     flagged, never excluded, and has no on/off switch since it never
-    removes anyone from the pool."""
+    removes anyone from the pool.
+
+    `provider_kind` (Milestone 32.2B): which dfs/providers/source_realism.py
+    PROVIDER_KIND_* the content-realism check should apply -- defaults to
+    PROVIDER_KIND_CSV (the original, unchanged behavior) so every
+    pre-M32.2B caller is fully backward compatible. Pass
+    PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL when `dk_rows` came from that
+    provider, so its live-proven-real pitcher-pool shape never BLOCKs."""
     package = ensure_research_package(date, research_output_root)
     pitcher_snapshot, pitcher_snapshot_path = load_snapshot_arg(
         pitcher_snapshot_path, date, predictions_root, "pitcher_board", "Pitcher")
@@ -134,7 +142,7 @@ def build_pool(
     pitcher_raw_by_id = {str(r["player_id"]): r for r in package["pitchers"]}
 
     game_count = len({row.game_info for row in dk_rows if row.game_info})
-    realism = check_source_realism(dk_rows, game_count=game_count)
+    realism = check_source_realism(dk_rows, game_count=game_count, provider_kind=provider_kind)
     resolved_provenance = classify_source_provenance(source_provenance_claim or UNKNOWN, realism)
     if source_provenance_claim is not None:
         effective_dev_mode = is_mock_mode_enabled() if dev_mode is None else dev_mode

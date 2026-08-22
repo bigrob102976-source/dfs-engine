@@ -31,17 +31,40 @@ UNKNOWN = "UNKNOWN"
 # below -- this source is temporary/development-only by explicit design.
 UNOFFICIAL_DEVELOPMENT_SOURCE = "UNOFFICIAL_DEVELOPMENT_SOURCE"
 
+# Milestone 32.2B: real DraftKings data from the unofficial endpoints
+# that has ADDITIONALLY passed draftkings_unofficial's own structural
+# validation (see draftkings_unofficial/structural_validation.py --
+# correct DraftGroup/game-type/roster-template/salary-cap shape, no
+# unresolved player/team/game inconsistency) AND provider-aware content
+# realism (dfs/providers/source_realism.py's PROVIDER_KIND_DRAFTKINGS_
+# UNOFFICIAL rules -- which still BLOCK on identity conflation, invalid
+# salaries/positions/teams, and any structural inconsistency; only the
+# live-proven-legitimate broad pitcher-pool shape is exempted). Distinct
+# from the bare UNOFFICIAL_DEVELOPMENT_SOURCE claim above (structural
+# validation not yet run/passed) and from SYNTHETIC_VALIDATION (never
+# used for data that failed a BLOCK-level check). Still explicitly
+# unofficial/undocumented data -- never presented as an official
+# DraftKings API -- but per the explicit M32.2B architecture decision
+# (DraftKings Unofficial Provider is the sole DK slate source going
+# forward, no manual CSV step in the production pipeline), IS trusted
+# for production once it has earned that trust through the two
+# validation layers above.
+DRAFTKINGS_UNOFFICIAL_LIVE = "DRAFTKINGS_UNOFFICIAL_LIVE"
+
 ALL_PROVENANCE_VALUES = (
     OFFICIAL_USER_UPLOAD, AUTHORIZED_PROVIDER, DEVELOPMENT_MOCK, SYNTHETIC_VALIDATION, UNKNOWN,
-    UNOFFICIAL_DEVELOPMENT_SOURCE,
+    UNOFFICIAL_DEVELOPMENT_SOURCE, DRAFTKINGS_UNOFFICIAL_LIVE,
 )
 
 # Provenance values a production/live player pool build may trust without
 # an explicit dev-mode override -- see dfs/pool_builder.py's
-# require_trusted_source(). Deliberately does NOT include DEVELOPMENT_MOCK:
-# mock data is clearly labeled and fine for local dev, but a "production"
-# pool build should still require an explicit override to use it.
-TRUSTED_FOR_PRODUCTION = frozenset({OFFICIAL_USER_UPLOAD, AUTHORIZED_PROVIDER})
+# require_trusted_source(). Deliberately does NOT include DEVELOPMENT_MOCK
+# or the bare UNOFFICIAL_DEVELOPMENT_SOURCE (unvalidated) claim: mock/
+# unvalidated data is fine for local dev, but a "production" pool build
+# should still require an explicit override to use it. DRAFTKINGS_
+# UNOFFICIAL_LIVE IS included -- see that constant's own docstring for
+# why it has earned production trust.
+TRUSTED_FOR_PRODUCTION = frozenset({OFFICIAL_USER_UPLOAD, AUTHORIZED_PROVIDER, DRAFTKINGS_UNOFFICIAL_LIVE})
 
 
 def classify_source_provenance(mechanism_claim: str, realism: RealismReport) -> str:

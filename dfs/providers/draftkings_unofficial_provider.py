@@ -31,10 +31,11 @@ from typing import Dict, List, Optional
 
 from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.models import ProviderPlayer, ProviderSlateInfo, ProviderSlateResult
-from dfs.providers.source_provenance import UNOFFICIAL_DEVELOPMENT_SOURCE
+from dfs.providers.source_provenance import DRAFTKINGS_UNOFFICIAL_LIVE, UNOFFICIAL_DEVELOPMENT_SOURCE
 from dfs.slate_validation import resolve_game_ids
 from draftkings_unofficial import collector
 from draftkings_unofficial.client import DraftKingsUnofficialError
+from draftkings_unofficial.structural_validation import validate_classic_draftgroup
 
 
 def is_enabled() -> bool:
@@ -79,6 +80,29 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
             if detail.status != collector.STATUS_OK:
                 warnings.append(f"Skipped DraftGroup {slate.draft_group_id} ({slate.label or slate.tag}): {detail.status} ({detail.error}).")
                 continue
+
+            # Milestone 32.2B: structural validation (correct game type,
+            # roster template, salary cap, player/team/game identity
+            # consistency -- see draftkings_unofficial/structural_
+            # validation.py) determines whether this DraftGroup is
+            # genuinely a well-formed MLB Classic Salary Cap slate,
+            # independent of how many pitchers/hitters it lists (that's
+            # a content-plausibility question for source_realism.py's
+            # provider-aware rules, never a structural one). Only run for
+            # MLB -- the Classic roster-template check is MLB-specific by
+            # design; other sports keep the original UNOFFICIAL_
+            # DEVELOPMENT_SOURCE claim unchanged, out of scope here.
+            structural_result = None
+            if sport.upper() == "MLB":
+                structural_result = validate_classic_draftgroup(
+                    slate.draft_group_id, universe.contests, detail.games, detail.draftables, detail.roster_rules,
+                )
+                if not structural_result.passed:
+                    warnings.append(
+                        f"Skipped DraftGroup {slate.draft_group_id} ({slate.label or slate.tag}): failed structural "
+                        f"validation -- {[f.message for f in structural_result.findings if f.level == 'BLOCK']}."
+                    )
+                    continue
 
             game_strings = [f"{g.away_team.abbreviation}@{g.home_team.abbreviation}" for g in detail.games if g.away_team and g.home_team]
             game_ids = resolve_game_ids(game_strings, research_games) if research_games else []
@@ -134,6 +158,19 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                 ))
             players_by_slate[slate_id] = players
 
+            # Milestone 32.2B: structural validation passing upgrades the
+            # provenance claim from the generic UNOFFICIAL_DEVELOPMENT_
+            # SOURCE to DRAFTKINGS_UNOFFICIAL_LIVE -- still explicitly
+            # UNOFFICIAL (never claimed to be an official DraftKings API,
+            # never added to TRUSTED_FOR_PRODUCTION), but no longer
+            # indistinguishable from "unverified." Content-realism
+            # findings (dfs/providers/source_realism.py, run later by
+            # dfs/pool_builder.py::build_pool() with provider_kind=
+            # PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL) can still downgrade
+            # this to SYNTHETIC_VALIDATION if something is genuinely
+            # BLOCK-level wrong at the row-content layer.
+            provenance_claim = DRAFTKINGS_UNOFFICIAL_LIVE if (structural_result and structural_result.passed) else UNOFFICIAL_DEVELOPMENT_SOURCE
+
             slates.append(ProviderSlateInfo(
                 slate_id=slate_id, slate_name=slate.label or slate.tag or f"DraftGroup {slate.draft_group_id}",
                 site=site, sport=sport, start_time=slate.start_time, game_count=len(detail.games),
@@ -141,7 +178,9 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                 # returned in players_by_slate (unique real players), not
                 # DraftKings' raw per-roster-slot draftable row count.
                 game_ids=game_ids, player_count=len(players),
-                source_provenance=UNOFFICIAL_DEVELOPMENT_SOURCE, realism_blocked=False, realism_findings=[],
+                source_provenance=provenance_claim,
+                realism_blocked=False,
+                realism_findings=[f.message for f in structural_result.findings] if structural_result else [],
             ))
 
         if not slates:

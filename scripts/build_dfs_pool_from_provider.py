@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dfs.pool_builder import UnsafeSourceProvenanceError, build_pool, print_pool_report, save_pool
 from dfs.providers.adapter import provider_players_to_dk_rows
+from dfs.providers.source_realism import PROVIDER_KIND_CSV, PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL
 
 
 def _find_latest_provider_slate(date: str, dfs_input_root: str) -> Path:
@@ -90,17 +91,33 @@ def main() -> None:
     )
     source_provenance_claim = (chosen_slate or {}).get("source_provenance", "UNKNOWN")
 
+    # Milestone 32.2B: content-realism rules must be evaluated
+    # provider-aware -- draftkings_unofficial's real Classic draftables
+    # endpoint has a live-proven-legitimate broad pitcher pool that must
+    # never BLOCK; every other provider (CSV, mock) keeps the original
+    # CSV-calibrated behavior unchanged.
+    is_draftkings_unofficial = slate_doc.get("provider_name") == "draftkings_unofficial"
+    provider_kind = PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL if is_draftkings_unofficial else PROVIDER_KIND_CSV
+
     try:
         result = build_pool(
             dk_rows, args.date, args.output, args.predictions_root, args.pitcher_snapshot, args.batter_snapshot,
             source_provenance_claim=source_provenance_claim,
             slate_id=slate_doc.get("selected_slate_id"), dfs_input_root=args.dfs_input_root,
+            provider_kind=provider_kind,
         )
     except UnsafeSourceProvenanceError as e:
         print(f"\nDFS SALARIES: SOURCE PROVENANCE BLOCKED\n{e}")
-        print("\nThis is TEST / SYNTHETIC DATA, not a genuine DraftKings export. "
-              "Enable Mock Mode to build a pool from it anyway (dev/testing only), "
-              "or upload a real DraftKings salary CSV for this date.")
+        if is_draftkings_unofficial:
+            # Milestone 32.2B: manual CSV upload is not a fallback for
+            # this provider -- report the outage plainly and wait for the
+            # provider to recover, never silently substitute CSV/mock/
+            # synthetic/a stale slate from another date.
+            print("\nDK LIVE PROVIDER UNAVAILABLE")
+        else:
+            print("\nThis is TEST / SYNTHETIC DATA, not a genuine DraftKings export. "
+                  "Enable Mock Mode to build a pool from it anyway (dev/testing only), "
+                  "or upload a real DraftKings salary CSV for this date.")
         sys.exit(1)
     print()
 
