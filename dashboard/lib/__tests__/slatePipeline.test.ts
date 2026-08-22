@@ -87,6 +87,8 @@ function defaultHandlers(): Record<string, Handler> {
     // Milestone 32.2B: Big Money ML shadow inference -- same non-blocking,
     // always-exit-0-for-expected-outcomes contract as FantasyPros above.
     "scripts/run_ml_shadow_inference.py": () => ok(JSON.stringify({ status: "no_eligible_pitchers" })),
+    // Milestone 32.3B: hitter side of the same shadow inference.
+    "scripts/run_ml_hitter_shadow_inference.py": () => ok(JSON.stringify({ status: "no_eligible_hitters" })),
   };
 }
 
@@ -135,6 +137,7 @@ describe("runSlatePipeline", () => {
       "scripts/run_ai_projection_engine.py",
       "scripts/fetch_fantasypros_projections.py",
       "scripts/run_ml_shadow_inference.py",
+      "scripts/run_ml_hitter_shadow_inference.py",
     ]);
 
     const { getSlateStatus } = await import("../db/slateStatus");

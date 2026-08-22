@@ -100,10 +100,10 @@ describe("PlayerDetailModal -- Big Money ML (Shadow) section", () => {
     expect(screen.getByText(/NO VALID PREGAME ML PROJECTION/)).toBeInTheDocument();
   });
 
-  it("shows the ML projection, data quality, model version, and status when available", () => {
+  it("shows the ML projection, data quality, model version, and status when available (pitcher)", () => {
     render(
       <PlayerDetailModal
-        player={player({ mlProjection: 14.3, mlDataQualityScore: 0.95, mlProjectionStatus: "LIVE_PREGAME" })}
+        player={player({ playerType: "pitcher", mlProjection: 14.3, mlDataQualityScore: 0.95, mlProjectionStatus: "LIVE_PREGAME" })}
         onClose={vi.fn()}
       />,
     );
@@ -111,6 +111,17 @@ describe("PlayerDetailModal -- Big Money ML (Shadow) section", () => {
     expect(screen.getByText("95%")).toBeInTheDocument();
     expect(screen.getByText("Pitcher Model v1.0.0")).toBeInTheDocument();
     expect(screen.getByText("Live pregame")).toBeInTheDocument();
+  });
+
+  it("shows the Hitter Model version (not the Pitcher label) for a hitter row", () => {
+    render(
+      <PlayerDetailModal
+        player={player({ playerType: "hitter", mlProjection: 10.8, mlDataQualityScore: 0.98, mlProjectionStatus: "LIVE_PREGAME" })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("10.8")).toBeInTheDocument();
+    expect(screen.getByText("Hitter Model v1.0.0")).toBeInTheDocument();
   });
 
   it("shows Frozen (pregame) status for a PREGAME_FROZEN projection, never re-labeled as live", () => {

@@ -81,12 +81,27 @@ export const PITCHER_COLUMNS: PlayerColumn[] = [
   REASON_COLUMN,
 ];
 
+// Milestone 32.3B: Big Money ML -- independent SHADOW comparison
+// column, hitters only. Never sorted into overall/power/matchup/risk/
+// confidence/ownership/leverage; comparison-only, same as
+// ProjectionLabTable's mlProjection column. Shows "SHADOW" as the
+// unit label since this is never an optimizer-selectable projection
+// source (see lib/optimizerWorkspace/types.ts's ProjectionSource).
+const ML_COLUMN: PlayerColumn = {
+  key: "mlProjection",
+  label: "Big Money ML",
+  sortKey: "mlProjection",
+  align: "right",
+  render: (row) => (row.mlProjection === null ? "--" : row.mlProjection.toFixed(1)),
+};
+
 export const HITTER_COLUMNS: PlayerColumn[] = [
   { key: "name", label: "Player", sortKey: "name", render: (row) => row.name },
   { key: "team", label: "Team", sortKey: "team", render: (row) => row.team },
   { key: "battingOrder", label: "Order", sortKey: "battingOrder", align: "right", render: (row) => row.battingOrder ?? "--" },
   numericColumn("salary", "Salary", 0),
   numericColumn("projection", "Projection"),
+  ML_COLUMN,
   numericColumn("power", "Power"),
   numericColumn("matchup", "Matchup"),
   numericColumn("risk", "Risk"),

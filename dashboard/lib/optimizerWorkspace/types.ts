@@ -102,9 +102,10 @@ export interface PoolPlayerRow {
   fantasyProsProjection: number | null;
   fantasyProsMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
 
-  // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only, joined
-  // in from the latest ml_projection_snapshots/<date>/*.json snapshot by
-  // mlbPlayerId. Pitchers/starters only (see lib/mlProjections.ts).
+  // Milestone 32.2B/32.3B: Big Money ML -- SHADOW MODE, comparison-only,
+  // joined in from the unified (pitcher + hitter) ml_projection_snapshots/
+  // <date>/*.json snapshot streams by mlbPlayerId (see
+  // lib/mlProjections.ts's getMlProjectionByPlayerId). Starters only.
   // `projection` above is still ALWAYS the independent value; Big Money
   // ML is never a selectable ProjectionSource and never feeds the
   // optimizer build (see writeProjectionOverridesFile, which has no

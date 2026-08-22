@@ -542,16 +542,29 @@ export function lowestNativeConfidence(rows: NativeRankedPlayer[], limit = 10): 
 export interface MlCoverageSummary {
   eligiblePitchers: number;
   projectedPitchers: number;
+  // Milestone 32.3B: hitter side of the same coverage card. Optional
+  // (defaulted below) so callers that only ever pass pitcher rows
+  // (none today, but keeps this additive) don't need to change.
+  eligibleHitters: number;
+  projectedHitters: number;
 }
 
 /** Coverage only -- "N / M projected" for an informational card. Never
- * ranks players, never feeds Top Pitchers or any other recommendation
- * list on this page. */
+ * ranks players, never feeds Top Pitchers/Top Hitters or any other
+ * recommendation list on this page. `rows` may contain both pitchers
+ * and hitters (or either alone) -- each player_type is counted against
+ * its own eligible/projected bucket independently. */
 export function buildMlCoverageSummary(rows: PlayerRow[], mlByPlayerId: Map<string, { projection_status: string }>): MlCoverageSummary {
-  const eligiblePitchers = rows.filter((r) => r.playerType === "pitcher" && r.optimizerEligible);
-  const projectedPitchers = eligiblePitchers.filter((r) => {
+  const isProjected = (r: PlayerRow) => {
     const ml = mlByPlayerId.get(r.id);
     return ml?.projection_status === "LIVE_PREGAME" || ml?.projection_status === "PREGAME_FROZEN";
-  });
-  return { eligiblePitchers: eligiblePitchers.length, projectedPitchers: projectedPitchers.length };
+  };
+  const eligiblePitchers = rows.filter((r) => r.playerType === "pitcher" && r.optimizerEligible);
+  const eligibleHitters = rows.filter((r) => r.playerType === "hitter" && r.optimizerEligible);
+  return {
+    eligiblePitchers: eligiblePitchers.length,
+    projectedPitchers: eligiblePitchers.filter(isProjected).length,
+    eligibleHitters: eligibleHitters.length,
+    projectedHitters: eligibleHitters.filter(isProjected).length,
+  };
 }

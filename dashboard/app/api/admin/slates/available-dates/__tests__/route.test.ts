@@ -70,13 +70,23 @@ describe("GET /api/admin/slates/available-dates -- Milestone 31.2C", () => {
   it("smart default is the nearest future usable date when today has none (the exact scenario this milestone fixes)", async () => {
     await loginAsAdmin();
     const today = getTodayChicagoDate();
+    // Computed relative to "today" (never hardcoded absolute dates) so
+    // this test stays correct regardless of which real calendar date it
+    // runs on -- a hardcoded future date eventually becomes the past.
+    const offsetDate = (days: number) => {
+      const d = new Date(`${today}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+    const nearDate = offsetDate(2);
+    const farDate = offsetDate(6);
     mockRunPythonScript.mockResolvedValue({
       exitCode: 0,
       stdout: JSON.stringify({
         status: "ok", provider_name: "draftkings_unofficial",
         dates: [
-          { date: "2026-08-25", slate_count: 1, salary_cap_slate_count: 1, has_usable_slate: true, best_slate_id: "dkunofficial-far", best_slate_label: "Featured", best_game_count: 12 },
-          { date: "2026-08-21", slate_count: 15, salary_cap_slate_count: 11, has_usable_slate: true, best_slate_id: "dkunofficial-152400", best_slate_label: "Featured", best_game_count: 13 },
+          { date: farDate, slate_count: 1, salary_cap_slate_count: 1, has_usable_slate: true, best_slate_id: "dkunofficial-far", best_slate_label: "Featured", best_game_count: 12 },
+          { date: nearDate, slate_count: 15, salary_cap_slate_count: 11, has_usable_slate: true, best_slate_id: "dkunofficial-152400", best_slate_label: "Featured", best_game_count: 13 },
         ],
       }),
       stderr: "",
@@ -86,7 +96,7 @@ describe("GET /api/admin/slates/available-dates -- Milestone 31.2C", () => {
     expect(body.today).toBe(today);
     // Nearest future usable date wins over a farther-out one, even
     // though the farther one appears first in the unsorted fixture.
-    expect(body.smartDefaultDate).toBe("2026-08-21");
+    expect(body.smartDefaultDate).toBe(nearDate);
   });
 
   it("smart default falls back to today (normal empty-state) when no date has a usable slate", async () => {

@@ -138,13 +138,27 @@ export async function runSlatePipeline(
   // a trailing JSON line. A shadow-model failure must never make an
   // entire slate unpublishable -- `status` below is still computed from
   // readiness/pool presence alone, never from this step.
-  onProgress(90, "Running Big Money ML shadow inference");
+  onProgress(90, "Running Big Money ML shadow inference (pitchers)");
   const mlShadowResult = await runPythonScript("scripts/run_ml_shadow_inference.py", ["--date", date]);
   const mlShadowStatus = parseLastJsonLine(mlShadowResult.stdout)?.status;
   if (mlShadowResult.exitCode !== 0) {
     errors.push(`Big Money ML shadow inference failed: ${tail(mlShadowResult.stdout + mlShadowResult.stderr, 800)}`);
   } else if (mlShadowStatus === "error" || mlShadowStatus === "feature_parity_error") {
     errors.push(`Big Money ML shadow inference: ${mlShadowStatus} -- ${tail(mlShadowResult.stdout, 400)}`);
+  }
+
+  // Milestone 32.3B: hitter side of the same shadow inference, run
+  // AFTER identity/eligibility/lineup confirmation (pool build already
+  // happened above) and before final admin status display. Same
+  // non-blocking contract as the pitcher step above -- a shadow-model
+  // failure must never make an entire slate unpublishable.
+  onProgress(92, "Running Big Money ML shadow inference (hitters)");
+  const mlHitterShadowResult = await runPythonScript("scripts/run_ml_hitter_shadow_inference.py", ["--date", date]);
+  const mlHitterShadowStatus = parseLastJsonLine(mlHitterShadowResult.stdout)?.status;
+  if (mlHitterShadowResult.exitCode !== 0) {
+    errors.push(`Big Money ML hitter shadow inference failed: ${tail(mlHitterShadowResult.stdout + mlHitterShadowResult.stderr, 800)}`);
+  } else if (mlHitterShadowStatus === "error" || mlHitterShadowStatus === "feature_parity_error") {
+    errors.push(`Big Money ML hitter shadow inference: ${mlHitterShadowStatus} -- ${tail(mlHitterShadowResult.stdout, 400)}`);
   }
 
   onProgress(95, "Finalizing slate status");

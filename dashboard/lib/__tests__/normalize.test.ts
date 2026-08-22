@@ -160,6 +160,30 @@ describe("buildHitterRows", () => {
     const rows = buildHitterRows([hitter({ batting_order: 2 })], null, null);
     expect(rows[0].battingOrder).toBe(2);
   });
+
+  it("defaults mlProjection/mlProjectionStatus to null when no ML map is passed", () => {
+    const rows = buildHitterRows([hitter()], null, null);
+    expect(rows[0].mlProjection).toBeNull();
+    expect(rows[0].mlProjectionStatus).toBeNull();
+  });
+
+  it("joins a valid pregame ML projection by player_id", () => {
+    const mlByPlayerId = new Map([
+      ["2001", { player_id: "2001", dk_player_id: null, name: "Test Hitter", team: "PHI", opponent: "STL", game_id: null, salary: null, projection: 10.8, model_version: "1.0.0", data_quality_score: 0.98, feature_coverage: 0.99, missing_features: [], projection_status: "LIVE_PREGAME" as const, feature_timestamp: null, game_scheduled_start_utc: null, warnings: [] }],
+    ]);
+    const rows = buildHitterRows([hitter()], null, null, mlByPlayerId);
+    expect(rows[0].mlProjection).toBe(10.8);
+    expect(rows[0].mlProjectionStatus).toBe("LIVE_PREGAME");
+  });
+
+  it("never surfaces a MISSING/INVALID_FEATURE_PARITY ML projection value, only the status", () => {
+    const mlByPlayerId = new Map([
+      ["2001", { player_id: "2001", dk_player_id: null, name: "Test Hitter", team: "PHI", opponent: "STL", game_id: null, salary: null, projection: null, model_version: "1.0.0", data_quality_score: null, feature_coverage: null, missing_features: [], projection_status: "MISSING" as const, feature_timestamp: null, game_scheduled_start_utc: null, warnings: [] }],
+    ]);
+    const rows = buildHitterRows([hitter()], null, null, mlByPlayerId);
+    expect(rows[0].mlProjection).toBeNull();
+    expect(rows[0].mlProjectionStatus).toBe("MISSING");
+  });
 });
 
 // ----------------------------------------------------------------------------

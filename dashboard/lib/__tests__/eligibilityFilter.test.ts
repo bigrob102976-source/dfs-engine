@@ -16,7 +16,7 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     position: "P", positions: ["P"], battingOrder: null, salary: 8000, projection: 20, ceiling: 32, floor: 8,
     overall: null, power: null, matchup: null, risk: null, confidence: null, ownership: null, ownershipTier: null,
     chalkScore: null, leverage: null, tags: [], reasons: [], lineupStatus: null, matchStatus: "matched",
-    eligibilityStatus: null, optimizerEligible: false, raw: { snapshot: {}, ownership: null, pool: null },
+    eligibilityStatus: null, optimizerEligible: false, mlProjection: null, mlProjectionStatus: null, raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };
 }

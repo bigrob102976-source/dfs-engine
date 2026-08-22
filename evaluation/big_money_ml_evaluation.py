@@ -19,11 +19,17 @@ Never retrains, never tunes any model based on what this module finds
 from typing import Dict, List, Optional
 
 from evaluation.projection_source_comparison import ProjectionSourceMetrics, compare_projection_sources
-from evaluation.projection_source_loader import DEFAULT_RESULTS_ROOT, build_pitcher_projection_sources, load_actual_pitcher_points
+from evaluation.projection_source_loader import (
+    DEFAULT_RESULTS_ROOT,
+    build_hitter_projection_sources,
+    build_pitcher_projection_sources,
+    load_actual_hitter_points,
+    load_actual_pitcher_points,
+)
 from fantasypros.persistence import DEFAULT_SNAPSHOT_ROOT as DEFAULT_FANTASYPROS_ROOT
 from fantasypros.persistence import load_latest_snapshot as load_latest_fantasypros_snapshot
 
-from big_money_ml.persistence import DEFAULT_ML_PROJECTION_ROOT, load_latest_ml_projection_snapshot
+from big_money_ml.persistence import DEFAULT_ML_PROJECTION_ROOT, load_latest_ml_hitter_projection_snapshot, load_latest_ml_projection_snapshot
 
 _VALID_PREGAME_STATUSES = {"LIVE_PREGAME", "PREGAME_FROZEN"}
 
@@ -179,6 +185,189 @@ def compute_disaster_start_bucket(
     errors = [p - a for p, a in zip(predicted, actual)]
     return {
         "n": len(predicted), "threshold": threshold, "dates_with_disaster_starts": dates_included,
+        "bias": round(sum(errors) / len(errors), 3),
+        "mae": round(sum(abs(e) for e in errors) / len(errors), 3),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Milestone 32.3B -- HITTER forward evaluation. Extends this module's
+# already-established pitcher pattern to hitters; never changes the
+# pitcher functions above. Same rules: only genuinely pregame-captured
+# (LIVE_PREGAME/PREGAME_FROZEN) hitter ML projections are ever compared,
+# and only against dates that already have collected actual results.
+# ---------------------------------------------------------------------------
+
+
+def load_pregame_ml_hitter_projections(slate_date: str, ml_root=DEFAULT_ML_PROJECTION_ROOT) -> Dict[str, float]:
+    """{player_id: projection} for hitters whose ML projection was
+    GENUINELY captured before their game started. A MISSING or
+    INVALID_FEATURE_PARITY row is never included here, and a game that
+    started with no valid pregame snapshot is never backfilled."""
+    doc = load_latest_ml_hitter_projection_snapshot(slate_date, output_root=ml_root)
+    if not doc:
+        return {}
+    return {
+        str(p["player_id"]): p["projection"]
+        for p in doc.get("players", [])
+        if p.get("projection_status") in _VALID_PREGAME_STATUSES and p.get("projection") is not None
+    }
+
+
+def load_fantasypros_hitter_projections(slate_date: str, fp_root=DEFAULT_FANTASYPROS_ROOT) -> Dict[str, float]:
+    """{player_id: dk_points} for hitters FantasyPros' own identity
+    resolver actually matched to an mlb_player_id."""
+    snapshot = load_latest_fantasypros_snapshot(slate_date, output_root=fp_root)
+    if not snapshot:
+        return {}
+    return {
+        str(p["mlb_player_id"]): p["dk_points"]
+        for p in snapshot.get("players", [])
+        if p.get("player_type") == "hitter" and p.get("mlb_player_id") and p.get("dk_points") is not None
+    }
+
+
+def build_all_hitter_projection_sources(
+    slate_date: str, ml_root=DEFAULT_ML_PROJECTION_ROOT, fantasypros_root=DEFAULT_FANTASYPROS_ROOT, **other_source_roots,
+) -> Dict[str, Dict[str, float]]:
+    """{source_label: {player_id: value}} across every source that
+    actually has data for this date -- native/ai/independent/external/
+    adjusted (via the existing generic loader) plus big_money_ml and
+    fantasypros. A source with nothing for this date is simply omitted."""
+    sources = build_hitter_projection_sources(slate_date, **other_source_roots)
+
+    ml = load_pregame_ml_hitter_projections(slate_date, ml_root=ml_root)
+    if ml:
+        sources["big_money_ml"] = ml
+
+    fantasypros = load_fantasypros_hitter_projections(slate_date, fp_root=fantasypros_root)
+    if fantasypros:
+        sources["fantasypros"] = fantasypros
+
+    return sources
+
+
+def evaluate_forward_hitter_performance(slate_dates: List[str], results_root=DEFAULT_RESULTS_ROOT, ml_root=DEFAULT_ML_PROJECTION_ROOT) -> dict:
+    """Hitter equivalent of evaluate_forward_performance() -- same
+    pooling/weighting discipline, same SHARED SAMPLE N reporting per
+    source. Never pools across pitchers and hitters."""
+    per_source_metrics: Dict[str, List[ProjectionSourceMetrics]] = {}
+    dates_evaluated = 0
+    dates_with_ml_pregame_data = 0
+
+    for date in slate_dates:
+        actual = load_actual_hitter_points(date, results_root=results_root)
+        if not actual:
+            continue  # no results collected yet for this date -- skip, never invent
+        dates_evaluated += 1
+
+        sources = build_all_hitter_projection_sources(date, ml_root=ml_root)
+        if "big_money_ml" in sources:
+            dates_with_ml_pregame_data += 1
+
+        for metrics in compare_projection_sources(sources, actual):
+            per_source_metrics.setdefault(metrics.source, []).append(metrics)
+
+    source_results = []
+    for source, metric_list in sorted(per_source_metrics.items()):
+        valid = [m for m in metric_list if m.n > 0]
+        if not valid:
+            continue
+        source_results.append({
+            "source": source,
+            "shared_sample_n": sum(m.n for m in valid),
+            "dates_included": len(valid),
+            "mae": _weighted_mean([m.mae for m in valid], [m.n for m in valid]),
+            "rmse": _weighted_mean([m.rmse for m in valid], [m.n for m in valid]),
+            "pearson": _weighted_mean([m.correlation for m in valid], [m.n for m in valid]),
+            "spearman": _weighted_mean([m.rank_correlation for m in valid], [m.n for m in valid]),
+            "avg_top5_hit_rate": _simple_mean([m.top5_hit_rate for m in valid]),
+            "avg_top10_hit_rate": _simple_mean([m.top10_hit_rate for m in valid]),
+            "avg_top20_hit_rate": _simple_mean([m.top20_hit_rate for m in valid]),
+        })
+
+    return {
+        "slates_requested": len(slate_dates),
+        "slates_with_actual_results": dates_evaluated,
+        "slates_with_ml_pregame_data": dates_with_ml_pregame_data,
+        "source_metrics": source_results,
+    }
+
+
+def compute_ceiling_magnitude_monitor(
+    slate_dates: List[str], thresholds=(20.0, 25.0, 30.0), results_root=DEFAULT_RESULTS_ROOT, ml_root=DEFAULT_ML_PROJECTION_ROOT,
+) -> dict:
+    """Milestone 32.3 found excellent ceiling RANKING but systematic
+    under-projection of extreme DK point MAGNITUDE (bias around -8.66
+    for actual 20+ games on the historical test set). This tracks
+    whether that pattern persists on genuinely FORWARD (2026+) hitter
+    results -- an evaluation-only bucket, never used to alter the model
+    in this milestone."""
+    ml = {}
+    actual_all = {}
+    dates_included = 0
+    buckets = {t: {"predicted": [], "actual": []} for t in thresholds}
+
+    for date in slate_dates:
+        ml_for_date = load_pregame_ml_hitter_projections(date, ml_root=ml_root)
+        actual_for_date = load_actual_hitter_points(date, results_root=results_root)
+        if not ml_for_date or not actual_for_date:
+            continue
+        found_this_date = False
+        for player_id, actual_points in actual_for_date.items():
+            if player_id not in ml_for_date:
+                continue
+            found_this_date = True
+            for t in thresholds:
+                if actual_points >= t:
+                    buckets[t]["predicted"].append(ml_for_date[player_id])
+                    buckets[t]["actual"].append(actual_points)
+        if found_this_date:
+            dates_included += 1
+
+    results = {}
+    for t in thresholds:
+        predicted, actual = buckets[t]["predicted"], buckets[t]["actual"]
+        if not predicted:
+            results[str(t)] = {"n": 0, "avg_predicted": None, "avg_actual": None, "bias": None}
+            continue
+        avg_predicted = round(sum(predicted) / len(predicted), 3)
+        avg_actual = round(sum(actual) / len(actual), 3)
+        results[str(t)] = {"n": len(predicted), "avg_predicted": avg_predicted, "avg_actual": avg_actual, "bias": round(avg_predicted - avg_actual, 3)}
+
+    return {"dates_with_ceiling_events": dates_included, "thresholds": results}
+
+
+def compute_zero_game_monitor(slate_dates: List[str], results_root=DEFAULT_RESULTS_ROOT, ml_root=DEFAULT_ML_PROJECTION_ROOT) -> dict:
+    """Milestone 32.3 found systematic OVER-projection of actual
+    zero-point games (bias around +3.33 on the historical test set).
+    Tracks whether that persists forward -- evaluation only, never used
+    to tune the model in this milestone."""
+    predicted: List[float] = []
+    actual: List[float] = []
+    dates_included = 0
+
+    for date in slate_dates:
+        ml_for_date = load_pregame_ml_hitter_projections(date, ml_root=ml_root)
+        actual_for_date = load_actual_hitter_points(date, results_root=results_root)
+        if not ml_for_date or not actual_for_date:
+            continue
+        found_this_date = False
+        for player_id, actual_points in actual_for_date.items():
+            if actual_points == 0 and player_id in ml_for_date:
+                predicted.append(ml_for_date[player_id])
+                actual.append(actual_points)
+                found_this_date = True
+        if found_this_date:
+            dates_included += 1
+
+    if not predicted:
+        return {"n": 0, "dates_with_zero_games": 0, "avg_predicted": None, "bias": None, "mae": None}
+
+    avg_predicted = round(sum(predicted) / len(predicted), 3)
+    errors = [p - a for p, a in zip(predicted, actual)]
+    return {
+        "n": len(predicted), "dates_with_zero_games": dates_included, "avg_predicted": avg_predicted,
         "bias": round(sum(errors) / len(errors), 3),
         "mae": round(sum(abs(e) for e in errors) / len(errors), 3),
     }

@@ -303,7 +303,7 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
             <dt className="text-text-faint">ML Data Quality</dt>
             <dd className="text-right text-text">{player.mlDataQualityScore === null ? "--" : `${Math.round(player.mlDataQualityScore * 100)}%`}</dd>
             <dt className="text-text-faint">ML Model Version</dt>
-            <dd className="text-right text-text">Pitcher Model v1.0.0</dd>
+            <dd className="text-right text-text">{player.playerType === "hitter" ? "Hitter Model v1.0.0" : "Pitcher Model v1.0.0"}</dd>
             <dt className="text-text-faint">Status</dt>
             <dd className="text-right text-text">{player.mlProjectionStatus === "PREGAME_FROZEN" ? "Frozen (pregame)" : "Live pregame"}</dd>
             <dt className="text-text-faint">Projected At</dt>
@@ -316,7 +316,7 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
           <p className="text-xs text-text-faint">
             {player.mlProjectionStatus === "MISSING"
               ? "NO VALID PREGAME ML PROJECTION for this player."
-              : "Big Money ML: NOT AVAILABLE for this player (pitchers/starters only)."}
+              : "Big Money ML: NOT AVAILABLE for this player (starters only)."}
           </p>
         </div>
       )}

@@ -34,6 +34,8 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     matchStatus: null,
     eligibilityStatus: null,
     optimizerEligible: false,
+    mlProjection: null,
+    mlProjectionStatus: null,
     raw: {
       snapshot: {
         season_metrics: { xwoba: 0.4, barrel_percent: 30.0 },

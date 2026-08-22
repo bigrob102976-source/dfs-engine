@@ -133,11 +133,13 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const highestNativeConfidence10 = highestNativeConfidence(nativeAllRows, 10);
   const lowestNativeConfidence10 = lowestNativeConfidence(nativeAllRows, 10);
 
-  // Milestone 32.2B: Big Money ML -- SHADOW MODE, informational coverage
-  // only. Never influences Top Pitchers or any other Command Center
-  // recommendation (see buildMlCoverageSummary's own docstring).
+  // Milestone 32.2B/32.3B: Big Money ML -- SHADOW MODE, informational
+  // coverage only. Never influences Top Pitchers/Top Hitters or any
+  // other Command Center recommendation (see buildMlCoverageSummary's
+  // own docstring). Passing both rows lets the summary bucket pitchers
+  // and hitters independently in one pass.
   const mlByPlayerId = getMlProjectionByPlayerId(date);
-  const mlCoverage = buildMlCoverageSummary(pitcherRows, mlByPlayerId);
+  const mlCoverage = buildMlCoverageSummary([...pitcherRows, ...hitterRows], mlByPlayerId);
 
   const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);

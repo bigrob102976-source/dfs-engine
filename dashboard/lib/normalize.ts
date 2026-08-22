@@ -1,3 +1,4 @@
+import type { MlPitcherProjection } from "./mlProjections";
 import type {
   BatterRecord,
   DFSPlayer,
@@ -7,6 +8,8 @@ import type {
   PitcherRecord,
   PlayerRow,
 } from "./types";
+
+const ML_VALID_PREGAME_STATUSES = new Set(["LIVE_PREGAME", "PREGAME_FROZEN"]);
 
 function indexByMlbId<T extends { mlb_player_id?: string | null }>(
   rows: T[] | undefined,
@@ -89,6 +92,8 @@ export function buildPitcherRows(
       matchStatus: poolPlayer?.match_status ?? null,
       eligibilityStatus: poolPlayer?.eligibility_status ?? null,
       optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
+      mlProjection: null,
+      mlProjectionStatus: null,
       raw: { snapshot: p, ownership: own, pool: poolPlayer },
     };
   });
@@ -129,6 +134,8 @@ export function buildPitcherRows(
       matchStatus: p.match_status,
       eligibilityStatus: p.eligibility_status ?? null,
       optimizerEligible: p.optimizer_eligible ?? false,
+      mlProjection: null,
+      mlProjectionStatus: null,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }
@@ -140,6 +147,10 @@ export function buildHitterRows(
   hitters: BatterRecord[],
   ownership: OwnershipSnapshot | null,
   pool: DKPlayerPool | null,
+  // Milestone 32.3B: Big Money ML -- optional, comparison-only join.
+  // Omitted/empty for every existing caller that hasn't wired it up yet
+  // (see app/dashboard/hitters/page.tsx for the one caller that does).
+  mlByPlayerId: Map<string, MlPitcherProjection> = new Map(),
 ): PlayerRow[] {
   const ownershipById = indexByMlbId<OwnershipPlayer>(ownership?.players);
   const poolById = indexByMlbId<DFSPlayer>(pool?.players);
@@ -148,6 +159,8 @@ export function buildHitterRows(
     const own = ownershipById.get(String(h.player_id)) ?? null;
     const poolPlayer = poolById.get(String(h.player_id)) ?? null;
     const positions = poolPlayer?.dk_positions ?? (h.position ? [h.position] : []);
+    const ml = mlByPlayerId.get(String(h.player_id)) ?? null;
+    const mlValid = ml !== null && ML_VALID_PREGAME_STATUSES.has(ml.projection_status);
     return {
       id: String(h.player_id),
       playerType: "hitter",
@@ -177,6 +190,8 @@ export function buildHitterRows(
       matchStatus: poolPlayer?.match_status ?? null,
       eligibilityStatus: poolPlayer?.eligibility_status ?? null,
       optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
+      mlProjection: mlValid ? (ml?.projection ?? null) : null,
+      mlProjectionStatus: ml?.projection_status ?? null,
       raw: { snapshot: h, ownership: own, pool: poolPlayer },
     };
   });
@@ -188,6 +203,8 @@ export function buildHitterRows(
     if (covered.has(id)) continue;
     covered.add(id);
     const own = p.mlb_player_id ? (ownershipById.get(p.mlb_player_id) ?? null) : null;
+    const ml = p.mlb_player_id ? (mlByPlayerId.get(p.mlb_player_id) ?? null) : null;
+    const mlValid = ml !== null && ML_VALID_PREGAME_STATUSES.has(ml.projection_status);
     rows.push({
       id,
       playerType: "hitter",
@@ -217,6 +234,8 @@ export function buildHitterRows(
       matchStatus: p.match_status,
       eligibilityStatus: p.eligibility_status ?? null,
       optimizerEligible: p.optimizer_eligible ?? false,
+      mlProjection: mlValid ? (ml?.projection ?? null) : null,
+      mlProjectionStatus: ml?.projection_status ?? null,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }

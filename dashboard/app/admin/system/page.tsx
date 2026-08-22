@@ -7,7 +7,7 @@ import { computeDbStats } from "@/lib/db/systemStats";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getFantasyProsStatus } from "@/lib/fantasyProsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
-import { getMlShadowStatus } from "@/lib/mlShadowStatus";
+import { getMlHitterShadowStatus, getMlShadowStatus } from "@/lib/mlShadowStatus";
 import { getMockModeEnabled } from "@/lib/mockMode";
 import { getDatabaseReadiness, getJobQueueReadiness, getObjectStorageReadiness, getWorkerReadiness } from "@/lib/systemReadiness";
 
@@ -36,6 +36,7 @@ export default async function AdminSystemPage() {
     getObjectStorageReadiness(),
   ]);
   const mlShadowStatus = getMlShadowStatus(date);
+  const mlHitterShadowStatus = getMlHitterShadowStatus(date);
   const jobQueueReadiness = getJobQueueReadiness();
   const workerReadiness = getWorkerReadiness();
   const dbStats = computeDbStats();
@@ -178,7 +179,7 @@ export default async function AdminSystemPage() {
 
       <DataCard title="Big Money ML (Shadow)" className="mb-4">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm text-text">Status</span>
+          <span className="text-sm text-text">Pitchers</span>
           <span
             className={`text-xs font-semibold ${
               mlShadowStatus.status === "READY" ? "text-green" : mlShadowStatus.status === "PARTIAL" ? "text-yellow" : "text-text-faint"
@@ -187,16 +188,35 @@ export default async function AdminSystemPage() {
             {mlShadowStatus.status === "NO_SNAPSHOT" && "Big Money ML: NO SNAPSHOT"}
             {mlShadowStatus.status === "NO_ELIGIBLE_PITCHERS" && "Big Money ML: NO ELIGIBLE PITCHERS"}
             {mlShadowStatus.status === "READY" &&
-              `Big Money ML: ${mlShadowStatus.ml_projections_generated} / ${mlShadowStatus.ml_eligible_pitcher_count} Starting Pitchers`}
+              `Big Money ML / PITCHERS ${mlShadowStatus.ml_projections_generated}/${mlShadowStatus.ml_eligible_pitcher_count}`}
             {mlShadowStatus.status === "PARTIAL" &&
-              `Big Money ML: ${mlShadowStatus.ml_projections_generated} / ${mlShadowStatus.ml_eligible_pitcher_count} -- PARTIAL`}
+              `Big Money ML / PITCHERS ${mlShadowStatus.ml_projections_generated}/${mlShadowStatus.ml_eligible_pitcher_count} -- PARTIAL`}
+          </span>
+        </div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm text-text">Hitters</span>
+          <span
+            className={`text-xs font-semibold ${
+              mlHitterShadowStatus.status === "READY" ? "text-green" : mlHitterShadowStatus.status === "PARTIAL" ? "text-yellow" : "text-text-faint"
+            }`}
+          >
+            {mlHitterShadowStatus.status === "NO_SNAPSHOT" && "Big Money ML: NO SNAPSHOT"}
+            {mlHitterShadowStatus.status === "NO_ELIGIBLE_HITTERS" && "Big Money ML: NO ELIGIBLE HITTERS"}
+            {mlHitterShadowStatus.status === "READY" &&
+              `Big Money ML / HITTERS ${mlHitterShadowStatus.ml_projections_generated}/${mlHitterShadowStatus.ml_eligible_hitter_count}`}
+            {mlHitterShadowStatus.status === "PARTIAL" &&
+              `Big Money ML / HITTERS ${mlHitterShadowStatus.ml_projections_generated}/${mlHitterShadowStatus.ml_eligible_hitter_count} -- PARTIAL`}
           </span>
         </div>
         <dl className="grid grid-cols-2 gap-y-2 text-xs">
-          <dt className="text-text-faint">Model Version</dt>
-          <dd className="text-right text-text">{mlShadowStatus.model_version ?? "--"}</dd>
-          <dt className="text-text-faint">Generated At</dt>
-          <dd className="text-right text-text">{fmtDateTime(mlShadowStatus.generated_at)}</dd>
+          <dt className="text-text-faint">Model Version (Pitcher / Hitter)</dt>
+          <dd className="text-right text-text">
+            {mlShadowStatus.model_version ?? "--"} / {mlHitterShadowStatus.model_version ?? "--"}
+          </dd>
+          <dt className="text-text-faint">Generated At (Pitcher / Hitter)</dt>
+          <dd className="text-right text-text">
+            {fmtDateTime(mlShadowStatus.generated_at)} / {fmtDateTime(mlHitterShadowStatus.generated_at)}
+          </dd>
         </dl>
         <p className="mt-2 text-[11px] text-text-faint">
           A feature-parity or model-load failure during Process/Refresh appears in that run&apos;s errors, not here (never blocks slate

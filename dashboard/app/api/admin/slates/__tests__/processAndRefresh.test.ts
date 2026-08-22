@@ -147,7 +147,7 @@ describe("POST /api/admin/slates/process", () => {
     expect(listAuditLog({ action: "slate_process_started" })[0].actor_user_id).toBe(admin.id);
 
     // Let the fire-and-forget pipeline promise settle.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("READY");
     expect(listAuditLog({ action: "slate_process_completed" })).toHaveLength(1);
   });
@@ -160,7 +160,7 @@ describe("POST /api/admin/slates/process", () => {
     // Let the first call's background pipeline settle before the DB resets
     // for the next test (its own fire-and-forget audit-log write would
     // otherwise race a subsequent test's __resetDbForTests()).
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   });
 });
 
@@ -175,7 +175,7 @@ describe("POST /api/admin/slates/refresh", () => {
     await loginAsAdmin();
     const res = await refreshSlate(req({ date: DATE, slateId: SLATE_ID, slateLabel: "Main" }));
     expect(res.status).toBe(202);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("READY");
     expect(listAuditLog({ action: "slate_refresh_started" })).toHaveLength(1);
   });

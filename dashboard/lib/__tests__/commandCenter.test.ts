@@ -42,7 +42,7 @@ function playerRow(overrides: Partial<PlayerRow> = {}): PlayerRow {
     id: "p1", playerType: "hitter", name: "Test Player", team: "DET", opponent: "CLE", gameId: "824238",
     position: "OF", positions: ["OF"], battingOrder: 1, salary: 4000, projection: 10, ceiling: 18, floor: 4,
     overall: 60, power: 60, matchup: 60, risk: 30, confidence: 80, ownership: 15, ownershipTier: "mid",
-    chalkScore: 50, leverage: 5, tags: [], reasons: [], lineupStatus: null, matchStatus: null, eligibilityStatus: null, optimizerEligible: false, raw: { snapshot: {}, ownership: null, pool: null },
+    chalkScore: 50, leverage: 5, tags: [], reasons: [], lineupStatus: null, matchStatus: null, eligibilityStatus: null, optimizerEligible: false, mlProjection: null, mlProjectionStatus: null, raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };
 }

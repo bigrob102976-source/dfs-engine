@@ -31,6 +31,7 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     reasons: [],
     lineupStatus: "active", matchStatus: "matched",
     eligibilityStatus: "STARTING_HITTER", optimizerEligible: true,
+    mlProjection: null, mlProjectionStatus: null,
     raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };

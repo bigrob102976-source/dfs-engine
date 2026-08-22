@@ -278,6 +278,13 @@ export function BottomInsights({
           </div>
           <p className="mt-1 text-[11px] text-text-faint">Shadow evaluation only -- does not affect Top Pitchers or lineup construction.</p>
         </DataCard>
+        <DataCard title="Big Money ML Hitters" action={<Link href="/dashboard/projections" className="text-[11px] text-accent hover:text-accent-hover">Projection Lab →</Link>}>
+          <div className="text-xl font-semibold text-text">
+            {mlCoverage.projectedHitters} / {mlCoverage.eligibleHitters}
+            <span className="ml-1 text-xs font-normal text-text-faint">projected</span>
+          </div>
+          <p className="mt-1 text-[11px] text-text-faint">Shadow evaluation only -- does not affect Top Hitters or lineup construction.</p>
+        </DataCard>
       </div>
 
       <SectionHeader title="Upcoming Lock Times" />

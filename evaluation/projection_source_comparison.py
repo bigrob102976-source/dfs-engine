@@ -87,6 +87,7 @@ class ProjectionSourceMetrics:
     rank_correlation: Optional[float]
     top5_hit_rate: Optional[float]
     top10_hit_rate: Optional[float]
+    top20_hit_rate: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -99,13 +100,15 @@ def evaluate_projection_source(source: str, predicted_by_id: Dict[str, float], a
     a caller actually has both sides of data for the same slate."""
     shared_ids = [pid for pid in predicted_by_id if pid in actual_by_id]
     if not shared_ids:
-        return ProjectionSourceMetrics(source=source, n=0, mae=None, rmse=None, correlation=None, rank_correlation=None, top5_hit_rate=None, top10_hit_rate=None)
+        return ProjectionSourceMetrics(source=source, n=0, mae=None, rmse=None, correlation=None, rank_correlation=None, top5_hit_rate=None, top10_hit_rate=None, top20_hit_rate=None)
 
     predicted = [predicted_by_id[pid] for pid in shared_ids]
     actual = [actual_by_id[pid] for pid in shared_ids]
     errors = [a - p for p, a in zip(predicted, actual)]
     abs_errors = [abs(e) for e in errors]
     n = len(shared_ids)
+    predicted_map = {pid: predicted_by_id[pid] for pid in shared_ids}
+    actual_map = {pid: actual_by_id[pid] for pid in shared_ids}
 
     return ProjectionSourceMetrics(
         source=source,
@@ -114,8 +117,9 @@ def evaluate_projection_source(source: str, predicted_by_id: Dict[str, float], a
         rmse=round((sum(e * e for e in errors) / n) ** 0.5, 3),
         correlation=_pearson_correlation(predicted, actual),
         rank_correlation=_spearman_rank_correlation(predicted, actual),
-        top5_hit_rate=_hit_rate({pid: predicted_by_id[pid] for pid in shared_ids}, {pid: actual_by_id[pid] for pid in shared_ids}, 5),
-        top10_hit_rate=_hit_rate({pid: predicted_by_id[pid] for pid in shared_ids}, {pid: actual_by_id[pid] for pid in shared_ids}, 10),
+        top5_hit_rate=_hit_rate(predicted_map, actual_map, 5),
+        top10_hit_rate=_hit_rate(predicted_map, actual_map, 10),
+        top20_hit_rate=_hit_rate(predicted_map, actual_map, 20),
     )
 
 

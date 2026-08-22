@@ -395,6 +395,15 @@ export interface PlayerRow {
   // tests) or the pool predates this milestone.
   eligibilityStatus: string | null;
   optimizerEligible: boolean;
+  // Milestone 32.3B: Big Money ML -- independent SHADOW comparison
+  // column only (see lib/mlProjections.ts). null for every pitcher row
+  // today (Top Pitchers board doesn't join this yet) and for any hitter
+  // whose ML projection wasn't a genuinely captured pregame value.
+  // Never influences overall/power/matchup/risk/confidence/ownership/
+  // leverage or the default ranking -- comparison-only, same discipline
+  // as ProjectionLabTable's mlProjection field.
+  mlProjection: number | null;
+  mlProjectionStatus: string | null;
   raw: {
     snapshot: JsonRecord;
     ownership: OwnershipPlayer | null;

@@ -70,3 +70,70 @@ class MLProjectionDocument:
             "players": [p.to_dict() for p in self.players],
             "warnings": list(self.warnings),
         }
+
+
+@dataclass
+class MLHitterProjection:
+    """Milestone 32.3B -- one hitter's Big Money ML shadow projection.
+    A SIBLING of MLPitcherProjection (never a subclass/replacement) --
+    same canonical "BIG MONEY ML" source concept, hitter-specific
+    fields (batting_order) added rather than overloading the pitcher
+    dataclass with an unused field."""
+
+    player_id: str  # mlb_player_id -- the authoritative join key, never name-only
+    dk_player_id: Optional[str]
+    name: str
+    team: str
+    opponent: str
+    game_id: Optional[str]
+    salary: Optional[int]
+    batting_order: Optional[int]
+
+    projection: Optional[float]
+    model_version: str
+    data_quality_score: Optional[float]
+    feature_coverage: Optional[float]
+    missing_features: List[str] = field(default_factory=list)
+
+    projection_status: str = MISSING
+    feature_timestamp: Optional[str] = None
+    game_scheduled_start_utc: Optional[str] = None
+
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class MLHitterProjectionDocument:
+    slate_date: str
+    generated_at: str
+    model_version: str
+    warehouse_version: str
+
+    raw_dk_hitter_count: int
+    confirmed_starting_hitter_count: int
+    ml_eligible_hitter_count: int
+    ml_projections_generated: int
+    ml_projections_missing: int
+
+    feature_parity_summary: dict
+    players: List[MLHitterProjection] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "slate_date": self.slate_date,
+            "generated_at": self.generated_at,
+            "model_version": self.model_version,
+            "warehouse_version": self.warehouse_version,
+            "raw_dk_hitter_count": self.raw_dk_hitter_count,
+            "confirmed_starting_hitter_count": self.confirmed_starting_hitter_count,
+            "ml_eligible_hitter_count": self.ml_eligible_hitter_count,
+            "ml_projections_generated": self.ml_projections_generated,
+            "ml_projections_missing": self.ml_projections_missing,
+            "feature_parity_summary": self.feature_parity_summary,
+            "players": [p.to_dict() for p in self.players],
+            "warnings": list(self.warnings),
+        }

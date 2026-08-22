@@ -45,6 +45,7 @@ PREGAME_EXTRA_FILES = [
     "config/native_projection_config.py",
     "scripts/run_native_projection_engine.py",
     "scripts/run_ml_shadow_inference.py",
+    "scripts/run_ml_hitter_shadow_inference.py",
 ]
 
 
@@ -303,6 +304,7 @@ def test_big_money_ml_never_imports_ownership_optimizer_native_or_ai_projections
         _check(path)
 
     _check(PROJECT_ROOT / "scripts" / "run_ml_shadow_inference.py")
+    _check(PROJECT_ROOT / "scripts" / "run_ml_hitter_shadow_inference.py")
 
 
 def test_big_money_ml_never_references_ai_projection_snapshot_loader():
@@ -356,3 +358,59 @@ def test_big_money_ml_source_key_never_appears_in_optimizer_projection_source_ty
     assert match is not None, "Could not find the ProjectionSource type union in types.ts -- check this test still matches its shape."
     union = match.group(1)
     assert "big_money_ml" not in union, "big_money_ml must not appear in the ProjectionSource union -- the optimizer must not be able to select the ML shadow source yet."
+
+
+# ---------------------------------------------------------------------------
+# Milestone 32.3B -- Big Money ML HITTER shadow inference isolation.
+#
+# All the generic big_money_ml/ checks above already cover every file in
+# this package by directory scan (eligible_hitters.py, hitter_artifact.py,
+# hitter_feature_parity.py, live_hitter_features.py,
+# hitter_shadow_inference.py) -- these tests add narrower, hitter-specific
+# assertions the generic scans don't already express.
+# ---------------------------------------------------------------------------
+
+
+def test_big_money_ml_hitter_persistence_uses_a_separate_filename_stream_from_pitcher():
+    """Hitter and pitcher ML snapshots share the SAME
+    ml_projection_snapshots/<date>/ root by design, but must never be
+    able to collide/overwrite each other -- proven by distinct filename
+    prefixes, not just convention."""
+    from big_money_ml.persistence import _FILENAME_PREFIX, _HITTER_FILENAME_PREFIX
+
+    assert _FILENAME_PREFIX != _HITTER_FILENAME_PREFIX
+    assert not _HITTER_FILENAME_PREFIX.startswith(_FILENAME_PREFIX + "_")
+
+
+def test_big_money_ml_hitter_modules_never_import_research_prediction_snapshot_save_functions():
+    """big_money_ml (hitter or pitcher) must never write into Native's
+    or AI's own snapshot streams -- it has its own persistence.py and
+    never touches research.prediction_snapshot's save path."""
+    hitter_files = [
+        PROJECT_ROOT / "big_money_ml" / "hitter_shadow_inference.py",
+        PROJECT_ROOT / "big_money_ml" / "live_hitter_features.py",
+        PROJECT_ROOT / "big_money_ml" / "eligible_hitters.py",
+        PROJECT_ROOT / "big_money_ml" / "hitter_artifact.py",
+        PROJECT_ROOT / "big_money_ml" / "hitter_feature_parity.py",
+    ]
+    for path in hitter_files:
+        text = path.read_text(encoding="utf-8")
+        assert "save_snapshot" not in text, f"{path.relative_to(PROJECT_ROOT)} must never call research.prediction_snapshot.save_snapshot (Native/AI's own snapshot writer)."
+
+
+def test_big_money_ml_hitter_never_retrains_or_refits_the_frozen_model():
+    """M32.3B's explicit 'do not retrain' constraint, structurally
+    enforced: no hitter-side big_money_ml file may call .fit(/
+    fit_transform( or import the training-only historical_models.
+    hitter_v1.train module."""
+    hitter_files = [
+        PROJECT_ROOT / "big_money_ml" / "hitter_shadow_inference.py",
+        PROJECT_ROOT / "big_money_ml" / "live_hitter_features.py",
+        PROJECT_ROOT / "big_money_ml" / "hitter_artifact.py",
+    ]
+    for path in hitter_files:
+        text = path.read_text(encoding="utf-8")
+        for forbidden in ("fit(", "fit_transform"):
+            assert forbidden not in text, f"{path.relative_to(PROJECT_ROOT)} contains {forbidden!r} -- the frozen hitter model must never be retrained/refit live."
+        imported = _imported_module_names(path)
+        assert "historical_models.hitter_v1.train" not in imported, f"{path.relative_to(PROJECT_ROOT)} imports the training-only historical_models.hitter_v1.train module."
