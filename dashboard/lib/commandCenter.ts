@@ -530,3 +530,28 @@ export function lowestNativeConfidence(rows: NativeRankedPlayer[], limit = 10): 
     .sort((a, b) => (a.nativeConfidence ?? 0) - (b.nativeConfidence ?? 0))
     .slice(0, limit);
 }
+
+// ---------------------------------------------------------------------------
+// Milestone 32.2B: Big Money ML -- SHADOW MODE ONLY. Deliberately does
+// NOT mirror the AI/Native sections above: this milestone's explicit
+// instruction is "do NOT make Big Money ML affect existing Command
+// Center recommendations yet" -- a small informational coverage card
+// only, no ranked-player joins, no Top Pitchers influence.
+// ---------------------------------------------------------------------------
+
+export interface MlCoverageSummary {
+  eligiblePitchers: number;
+  projectedPitchers: number;
+}
+
+/** Coverage only -- "N / M projected" for an informational card. Never
+ * ranks players, never feeds Top Pitchers or any other recommendation
+ * list on this page. */
+export function buildMlCoverageSummary(rows: PlayerRow[], mlByPlayerId: Map<string, { projection_status: string }>): MlCoverageSummary {
+  const eligiblePitchers = rows.filter((r) => r.playerType === "pitcher" && r.optimizerEligible);
+  const projectedPitchers = eligiblePitchers.filter((r) => {
+    const ml = mlByPlayerId.get(r.id);
+    return ml?.projection_status === "LIVE_PREGAME" || ml?.projection_status === "PREGAME_FROZEN";
+  });
+  return { eligiblePitchers: eligiblePitchers.length, projectedPitchers: projectedPitchers.length };
+}

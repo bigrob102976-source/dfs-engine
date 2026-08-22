@@ -39,6 +39,11 @@ dashboard/next-env.d.ts
 /native_projection_snapshots/
 /fantasypros_snapshots/
 
+# Milestone 32.2B: Big Money ML SHADOW pitcher projection snapshots --
+# reproducible by re-running scripts/run_ml_shadow_inference.py, never
+# source. See big_money_ml/.
+/ml_projection_snapshots/
+
 # Live, mutable dashboard-controlled settings (Milestone 19's Mock Mode
 # toggle) -- local runtime state, not a reproducible artifact or source.
 /runtime_settings/

@@ -290,6 +290,36 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
           <p className="text-xs text-text-faint">No AI Projection generated yet for this player -- run scripts/run_ai_projection_engine.py.</p>
         </div>
       )}
+
+      {/* Milestone 32.2B: Big Money ML -- SHADOW MODE evaluation
+          competitor, comparison-only. Data Quality is model-input
+          completeness, never a calibrated confidence. */}
+      {player.mlProjection !== null ? (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Big Money ML (Shadow)</h3>
+          <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+            <dt className="text-text-faint">Projection</dt>
+            <dd className="text-right font-semibold text-purple">{fmt(player.mlProjection)}</dd>
+            <dt className="text-text-faint">ML Data Quality</dt>
+            <dd className="text-right text-text">{player.mlDataQualityScore === null ? "--" : `${Math.round(player.mlDataQualityScore * 100)}%`}</dd>
+            <dt className="text-text-faint">ML Model Version</dt>
+            <dd className="text-right text-text">Pitcher Model v1.0.0</dd>
+            <dt className="text-text-faint">Status</dt>
+            <dd className="text-right text-text">{player.mlProjectionStatus === "PREGAME_FROZEN" ? "Frozen (pregame)" : "Live pregame"}</dd>
+            <dt className="text-text-faint">Projected At</dt>
+            <dd className="text-right text-text">{player.mlFeatureTimestamp ? new Date(player.mlFeatureTimestamp).toLocaleString() : "--"}</dd>
+          </dl>
+        </div>
+      ) : (
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-faint">Big Money ML (Shadow)</h3>
+          <p className="text-xs text-text-faint">
+            {player.mlProjectionStatus === "MISSING"
+              ? "NO VALID PREGAME ML PROJECTION for this player."
+              : "Big Money ML: NOT AVAILABLE for this player (pitchers/starters only)."}
+          </p>
+        </div>
+      )}
     </Modal>
   );
 }

@@ -84,6 +84,9 @@ function defaultHandlers(): Record<string, Handler> {
     // is "not_configured" (exit 0, JSON status line) -- never a Python
     // exception -- see fantasypros/build.py::build_fantasypros_snapshot.
     "scripts/fetch_fantasypros_projections.py": () => ok(JSON.stringify({ status: "not_configured" })),
+    // Milestone 32.2B: Big Money ML shadow inference -- same non-blocking,
+    // always-exit-0-for-expected-outcomes contract as FantasyPros above.
+    "scripts/run_ml_shadow_inference.py": () => ok(JSON.stringify({ status: "no_eligible_pitchers" })),
   };
 }
 
@@ -131,6 +134,7 @@ describe("runSlatePipeline", () => {
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
       "scripts/fetch_fantasypros_projections.py",
+      "scripts/run_ml_shadow_inference.py",
     ]);
 
     const { getSlateStatus } = await import("../db/slateStatus");

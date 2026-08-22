@@ -2,6 +2,7 @@ import type { AiPlayerProjection } from "./aiProjections";
 import { joinAiProjections, joinNativeProjections } from "./commandCenter";
 import type { ProjectionComparisonRow } from "./externalProjections";
 import type { FantasyProsPlayerProjection } from "./fantasyProsProjections";
+import type { MlPitcherProjection, MlProjectionStatus } from "./mlProjections";
 import type { NativePlayerProjection } from "./nativeProjections";
 import type { PlayerRow } from "./types";
 
@@ -37,11 +38,22 @@ export interface ProjectionLabRow {
   fantasyProsProjection: number | null;
   fantasyProsMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
 
+  // Milestone 32.2B: Big Money ML -- an independent SHADOW evaluation
+  // competitor (pitchers only, starters only). Comparison-only: never
+  // fed into Native/AI's own computation, never an optimizer projection
+  // source (see lib/optimizerWorkspace/types.ts's ProjectionSource).
+  mlProjection: number | null;
+  mlDataQualityScore: number | null;
+  mlProjectionStatus: MlProjectionStatus | null;
+
   aiVsNativeDelta: number | null; // Big Money AI - Big Money Native
   bigMoneyVsBlueCollarDelta: number | null; // Big Money AI (or Native if AI unavailable) - BlueCollar
   fpVsNativeDelta: number | null; // FantasyPros - Big Money Native
   fpVsAiDelta: number | null; // FantasyPros - Big Money AI
   bigMoneyVsFantasyProsDelta: number | null; // Big Money AI (or Native if AI unavailable) - FantasyPros
+  mlVsNativeDelta: number | null; // Big Money ML - Big Money Native
+  mlVsAiDelta: number | null; // Big Money ML - Big Money AI
+  mlVsFantasyProsDelta: number | null; // Big Money ML - FantasyPros
 
   actualDkPoints: number | null; // null until postgame results exist
 
@@ -64,6 +76,7 @@ export function buildProjectionLabRows(
   aiByPlayerId: Map<string, AiPlayerProjection>,
   actualByPlayerId: Map<string, number>,
   fantasyProsByPlayerId: Map<string, FantasyProsPlayerProjection> = new Map(),
+  mlByPlayerId: Map<string, MlPitcherProjection> = new Map(),
 ): ProjectionLabRow[] {
   const nativeById = new Map(joinNativeProjections(rows, nativeByPlayerId).map((r) => [r.id, r]));
   const aiById = new Map(joinAiProjections(rows, aiByPlayerId).map((r) => [r.id, r]));
@@ -77,6 +90,11 @@ export function buildProjectionLabRows(
     const fantasyPros = fantasyProsByPlayerId.get(r.id) ?? null;
     const fantasyProsProjection = fantasyPros?.dk_points ?? null;
     const bigMoneyFinal = aiProjection ?? nativeProjection;
+    // ML only ever projects PITCHERS whose value was genuinely captured
+    // pregame -- a MISSING/INVALID_FEATURE_PARITY row shows as unavailable,
+    // never substituted.
+    const ml = mlByPlayerId.get(r.id) ?? null;
+    const mlProjection = ml && (ml.projection_status === "LIVE_PREGAME" || ml.projection_status === "PREGAME_FROZEN") ? ml.projection : null;
     return {
       id: r.id,
       name: r.name,
@@ -95,11 +113,17 @@ export function buildProjectionLabRows(
       aiConfidence: ai?.aiConfidence ?? null,
       fantasyProsProjection,
       fantasyProsMatchStatus: fantasyPros?.match_status ?? null,
+      mlProjection,
+      mlDataQualityScore: ml?.data_quality_score ?? null,
+      mlProjectionStatus: ml?.projection_status ?? null,
       aiVsNativeDelta: delta(aiProjection, nativeProjection),
       bigMoneyVsBlueCollarDelta: delta(bigMoneyFinal, blueCollarProjection),
       fpVsNativeDelta: delta(fantasyProsProjection, nativeProjection),
       fpVsAiDelta: delta(fantasyProsProjection, aiProjection),
       bigMoneyVsFantasyProsDelta: delta(bigMoneyFinal, fantasyProsProjection),
+      mlVsNativeDelta: delta(mlProjection, nativeProjection),
+      mlVsAiDelta: delta(mlProjection, aiProjection),
+      mlVsFantasyProsDelta: delta(mlProjection, fantasyProsProjection),
       actualDkPoints: actualByPlayerId.get(r.id) ?? null,
       eligibilityStatus: r.eligibilityStatus,
       optimizerEligible: r.optimizerEligible,
@@ -124,9 +148,13 @@ export interface ProjectionLabSummary {
   // instruction) -- there is no separate "all preserved rows" FantasyPros
   // coverage figure, unlike blueCollarCoverage/nativeCoverage/aiCoverage.
   fantasyProsCoverage: number;
+  // Milestone 32.2B: pitchers only, measured against eligiblePlayers
+  // (same discipline as fantasyProsCoverage) -- ML never projects hitters.
+  mlCoverage: number;
   averageNativeProjection: number | null;
   averageAiProjection: number | null;
   averageFantasyProsProjection: number | null;
+  averageMlProjection: number | null;
   averageAiAdjustment: number | null; // average (aiProjection - nativeProjection) where both exist
   largestAiUpgrade: ProjectionLabRow | null;
   largestAiDowngrade: ProjectionLabRow | null;
@@ -144,11 +172,13 @@ export function buildProjectionLabSummary(rows: ProjectionLabRow[]): ProjectionL
   const nativeEligibleCoverage = eligibleRows.filter((r) => r.nativeProjection !== null).length;
   const aiEligibleCoverage = eligibleRows.filter((r) => r.aiProjection !== null).length;
   const fantasyProsCoverage = eligibleRows.filter((r) => r.fantasyProsProjection !== null).length;
+  const mlCoverage = eligibleRows.filter((r) => r.mlProjection !== null).length;
 
   const avg = (values: number[]): number | null => (values.length ? Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 100) / 100 : null);
   const averageNativeProjection = avg(rows.map((r) => r.nativeProjection).filter((v): v is number => v !== null));
   const averageAiProjection = avg(rows.map((r) => r.aiProjection).filter((v): v is number => v !== null));
   const averageFantasyProsProjection = avg(rows.map((r) => r.fantasyProsProjection).filter((v): v is number => v !== null));
+  const averageMlProjection = avg(rows.map((r) => r.mlProjection).filter((v): v is number => v !== null));
 
   const aiDeltas = rows.map((r) => r.aiVsNativeDelta).filter((v): v is number => v !== null);
   const averageAiAdjustment = aiDeltas.length ? Math.round((aiDeltas.reduce((s, v) => s + v, 0) / aiDeltas.length) * 100) / 100 : null;
@@ -181,9 +211,11 @@ export function buildProjectionLabSummary(rows: ProjectionLabRow[]): ProjectionL
     nativeEligibleCoverage,
     aiEligibleCoverage,
     fantasyProsCoverage,
+    mlCoverage,
     averageNativeProjection,
     averageAiProjection,
     averageFantasyProsProjection,
+    averageMlProjection,
     averageAiAdjustment,
     largestAiUpgrade: largestAiUpgrade && largestAiUpgrade.aiVsNativeDelta! > 0 ? largestAiUpgrade : null,
     largestAiDowngrade: largestAiDowngrade && largestAiDowngrade.aiVsNativeDelta! < 0 ? largestAiDowngrade : null,

@@ -130,6 +130,23 @@ export async function runSlatePipeline(
   } else if (fantasyProsStatus === "api_error") {
     errors.push(`FantasyPros API error: ${tail(fantasyProsResult.stdout, 400)}`);
   }
+
+  // Milestone 32.2B: Big Money ML -- SHADOW MODE, experimental. Same
+  // non-blocking contract as FantasyPros above: this script always
+  // exits 0 for every EXPECTED outcome (no eligible starters, feature
+  // parity insufficient, model artifact missing) and reports status via
+  // a trailing JSON line. A shadow-model failure must never make an
+  // entire slate unpublishable -- `status` below is still computed from
+  // readiness/pool presence alone, never from this step.
+  onProgress(90, "Running Big Money ML shadow inference");
+  const mlShadowResult = await runPythonScript("scripts/run_ml_shadow_inference.py", ["--date", date]);
+  const mlShadowStatus = parseLastJsonLine(mlShadowResult.stdout)?.status;
+  if (mlShadowResult.exitCode !== 0) {
+    errors.push(`Big Money ML shadow inference failed: ${tail(mlShadowResult.stdout + mlShadowResult.stderr, 800)}`);
+  } else if (mlShadowStatus === "error" || mlShadowStatus === "feature_parity_error") {
+    errors.push(`Big Money ML shadow inference: ${mlShadowStatus} -- ${tail(mlShadowResult.stdout, 400)}`);
+  }
+
   onProgress(95, "Finalizing slate status");
 
   const pool = loadLatestDKPlayerPool(date, slateId);

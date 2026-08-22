@@ -55,6 +55,10 @@ function player(overrides: Partial<PoolPlayerRow> = {}): PoolPlayerRow {
     nativePitcherComponents: null,
     fantasyProsProjection: null,
     fantasyProsMatchStatus: null,
+    mlProjection: null,
+    mlDataQualityScore: null,
+    mlProjectionStatus: null,
+    mlFeatureTimestamp: null,
     ...overrides,
   };
 }
@@ -81,5 +85,42 @@ describe("PlayerDetailModal -- FantasyPros comparison row", () => {
     render(<PlayerDetailModal player={player({ fantasyProsProjection: 5.2, fantasyProsMatchStatus: "ambiguous" })} onClose={vi.fn()} />);
     expect(screen.getByText("5.2")).toBeInTheDocument();
     expect(screen.getByText("(ambiguous)")).toBeInTheDocument();
+  });
+});
+
+describe("PlayerDetailModal -- Big Money ML (Shadow) section", () => {
+  it("shows NOT AVAILABLE when no ML projection exists for this player", () => {
+    render(<PlayerDetailModal player={player()} onClose={vi.fn()} />);
+    expect(screen.getByText("Big Money ML (Shadow)")).toBeInTheDocument();
+    expect(screen.getByText(/NOT AVAILABLE for this player/)).toBeInTheDocument();
+  });
+
+  it("shows the NO VALID PREGAME message when the projection status is MISSING", () => {
+    render(<PlayerDetailModal player={player({ mlProjection: null, mlProjectionStatus: "MISSING" })} onClose={vi.fn()} />);
+    expect(screen.getByText(/NO VALID PREGAME ML PROJECTION/)).toBeInTheDocument();
+  });
+
+  it("shows the ML projection, data quality, model version, and status when available", () => {
+    render(
+      <PlayerDetailModal
+        player={player({ mlProjection: 14.3, mlDataQualityScore: 0.95, mlProjectionStatus: "LIVE_PREGAME" })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("14.3")).toBeInTheDocument();
+    expect(screen.getByText("95%")).toBeInTheDocument();
+    expect(screen.getByText("Pitcher Model v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("Live pregame")).toBeInTheDocument();
+  });
+
+  it("shows Frozen (pregame) status for a PREGAME_FROZEN projection, never re-labeled as live", () => {
+    render(<PlayerDetailModal player={player({ mlProjection: 10.0, mlProjectionStatus: "PREGAME_FROZEN" })} onClose={vi.fn()} />);
+    expect(screen.getByText("Frozen (pregame)")).toBeInTheDocument();
+  });
+
+  it("never lets an ML value bleed into the Legacy (independent projection) row", () => {
+    render(<PlayerDetailModal player={player({ mlProjection: 999, mlProjectionStatus: "LIVE_PREGAME", projection: 8 })} onClose={vi.fn()} />);
+    expect(screen.getByText("999.0")).toBeInTheDocument(); // ML cell itself
+    expect(screen.getByText("8.0")).toBeInTheDocument(); // Legacy unaffected
   });
 });

@@ -7,6 +7,7 @@ import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId, loadLatestBaselineSnapshot } from "../externalProjections";
 import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
 import { loadLatestEnvironmentReport } from "../gameEnvironment";
+import { getMlProjectionByPlayerId } from "../mlProjections";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, ownershipFingerprint, poolFingerprint, providerSlateFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
@@ -108,6 +109,8 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
   const nativeByPlayerId = getNativeProjectionByPlayerId(entry.date);
   const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(entry.date);
+  // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only join.
+  const mlByPlayerId = getMlProjectionByPlayerId(entry.date);
   const vegasCoverage = buildDkSlateVegasCoverage(matchReport, loadLatestEnvironmentReport(entry.date));
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
@@ -116,6 +119,8 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     const ai = p.mlb_player_id ? aiByPlayerId.get(p.mlb_player_id) : undefined;
     const native = p.mlb_player_id ? nativeByPlayerId.get(p.mlb_player_id) : undefined;
     const fantasyPros = p.mlb_player_id ? fantasyProsByPlayerId.get(p.mlb_player_id) : undefined;
+    const ml = p.mlb_player_id ? mlByPlayerId.get(p.mlb_player_id) : undefined;
+    const mlIsValidPregame = ml?.projection_status === "LIVE_PREGAME" || ml?.projection_status === "PREGAME_FROZEN";
     return {
       dkPlayerId: p.dk_player_id,
       mlbPlayerId: p.mlb_player_id,
@@ -165,6 +170,10 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       nativeHitterComponents: native?.hitter_components ?? null,
       nativePitcherComponents: native?.pitcher_components ?? null,
       fantasyProsProjection: fantasyPros?.dk_points ?? null,
+      mlProjection: mlIsValidPregame ? (ml?.projection ?? null) : null,
+      mlDataQualityScore: ml?.data_quality_score ?? null,
+      mlProjectionStatus: ml?.projection_status ?? null,
+      mlFeatureTimestamp: ml?.feature_timestamp ?? null,
       fantasyProsMatchStatus: fantasyPros?.match_status ?? null,
     };
   });
@@ -206,6 +215,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     hasAiProjections: aiByPlayerId.size > 0,
     hasNativeProjections: nativeByPlayerId.size > 0,
     hasFantasyProsProjections: fantasyProsByPlayerId.size > 0,
+    hasMlProjections: mlByPlayerId.size > 0,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
     vegasCoverage,

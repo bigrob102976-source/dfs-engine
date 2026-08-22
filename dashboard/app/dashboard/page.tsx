@@ -15,6 +15,7 @@ import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import {
   buildGameRankings,
   buildLineMovementFeed,
+  buildMlCoverageSummary,
   buildSlateAiSummary,
   buildSlateKpis,
   buildUpcomingLockTimes,
@@ -32,6 +33,7 @@ import {
   topNativeValues,
 } from "@/lib/commandCenter";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
+import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getPublishedVersion } from "@/lib/db/slateStatus";
@@ -130,6 +132,12 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const largestNativeVsLegacyDifferences10 = largestNativeVsLegacyDifferences(nativeAllRows, 10);
   const highestNativeConfidence10 = highestNativeConfidence(nativeAllRows, 10);
   const lowestNativeConfidence10 = lowestNativeConfidence(nativeAllRows, 10);
+
+  // Milestone 32.2B: Big Money ML -- SHADOW MODE, informational coverage
+  // only. Never influences Top Pitchers or any other Command Center
+  // recommendation (see buildMlCoverageSummary's own docstring).
+  const mlByPlayerId = getMlProjectionByPlayerId(date);
+  const mlCoverage = buildMlCoverageSummary(pitcherRows, mlByPlayerId);
 
   const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
@@ -240,6 +248,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         largestNativeVsLegacyDifferences={largestNativeVsLegacyDifferences10}
         highestNativeConfidence={highestNativeConfidence10}
         lowestNativeConfidence={lowestNativeConfidence10}
+        mlCoverage={mlCoverage}
       />
 
       <SectionHeader title="Model Health & Pipeline" />

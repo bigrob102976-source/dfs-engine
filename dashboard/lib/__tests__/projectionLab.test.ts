@@ -87,9 +87,9 @@ describe("buildProjectionLabRows", () => {
 describe("buildProjectionLabSummary", () => {
   it("computes coverage counts and largest deltas without recomputing any projection", () => {
     const rows = [
-      { id: "p1", name: "Judge", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 6000, ownership: 20, leverage: 2, blueCollarProjection: 11.8, nativeProjection: 12.1, nativeConfidence: 80, aiProjection: 12.7, aiConfidence: 82, fantasyProsProjection: 10.9, fantasyProsMatchStatus: "matched" as const, aiVsNativeDelta: 0.6, bigMoneyVsBlueCollarDelta: 0.9, fpVsNativeDelta: -1.2, fpVsAiDelta: -1.8, bigMoneyVsFantasyProsDelta: 1.8, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
-      { id: "p2", name: "Soto", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 5800, ownership: 15, leverage: 1, blueCollarProjection: null, nativeProjection: 10.5, nativeConfidence: 70, aiProjection: 9.3, aiConfidence: 75, fantasyProsProjection: null, fantasyProsMatchStatus: null, aiVsNativeDelta: -1.2, bigMoneyVsBlueCollarDelta: null, fpVsNativeDelta: null, fpVsAiDelta: null, bigMoneyVsFantasyProsDelta: null, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
-      { id: "p3", name: "Reliever", team: "BOS", opponent: null, gameId: null, playerType: "pitcher" as const, position: "P", salary: 4200, ownership: 1, leverage: 0, blueCollarProjection: null, nativeProjection: 3.0, nativeConfidence: 40, aiProjection: null, aiConfidence: null, fantasyProsProjection: 3.5, fantasyProsMatchStatus: "matched" as const, aiVsNativeDelta: null, bigMoneyVsBlueCollarDelta: null, fpVsNativeDelta: 0.5, fpVsAiDelta: null, bigMoneyVsFantasyProsDelta: -0.5, actualDkPoints: null, eligibilityStatus: "RELIEF_PITCHER", optimizerEligible: false },
+      { id: "p1", name: "Judge", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 6000, ownership: 20, leverage: 2, blueCollarProjection: 11.8, nativeProjection: 12.1, nativeConfidence: 80, aiProjection: 12.7, aiConfidence: 82, fantasyProsProjection: 10.9, fantasyProsMatchStatus: "matched" as const, mlProjection: null, mlDataQualityScore: null, mlProjectionStatus: null, aiVsNativeDelta: 0.6, bigMoneyVsBlueCollarDelta: 0.9, fpVsNativeDelta: -1.2, fpVsAiDelta: -1.8, bigMoneyVsFantasyProsDelta: 1.8, mlVsNativeDelta: null, mlVsAiDelta: null, mlVsFantasyProsDelta: null, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
+      { id: "p2", name: "Soto", team: "NYY", opponent: null, gameId: null, playerType: "hitter" as const, position: "OF", salary: 5800, ownership: 15, leverage: 1, blueCollarProjection: null, nativeProjection: 10.5, nativeConfidence: 70, aiProjection: 9.3, aiConfidence: 75, fantasyProsProjection: null, fantasyProsMatchStatus: null, mlProjection: null, mlDataQualityScore: null, mlProjectionStatus: null, aiVsNativeDelta: -1.2, bigMoneyVsBlueCollarDelta: null, fpVsNativeDelta: null, fpVsAiDelta: null, bigMoneyVsFantasyProsDelta: null, mlVsNativeDelta: null, mlVsAiDelta: null, mlVsFantasyProsDelta: null, actualDkPoints: null, eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
+      { id: "p3", name: "Reliever", team: "BOS", opponent: null, gameId: null, playerType: "pitcher" as const, position: "P", salary: 4200, ownership: 1, leverage: 0, blueCollarProjection: null, nativeProjection: 3.0, nativeConfidence: 40, aiProjection: null, aiConfidence: null, fantasyProsProjection: 3.5, fantasyProsMatchStatus: "matched" as const, mlProjection: 4.2, mlDataQualityScore: 0.9, mlProjectionStatus: "LIVE_PREGAME" as const, aiVsNativeDelta: null, bigMoneyVsBlueCollarDelta: null, fpVsNativeDelta: 0.5, fpVsAiDelta: null, bigMoneyVsFantasyProsDelta: -0.5, mlVsNativeDelta: 1.2, mlVsAiDelta: null, mlVsFantasyProsDelta: 0.7, actualDkPoints: null, eligibilityStatus: "RELIEF_PITCHER", optimizerEligible: false },
     ];
     const summary = buildProjectionLabSummary(rows);
     expect(summary.players).toBe(3);
@@ -112,5 +112,11 @@ describe("buildProjectionLabSummary", () => {
     expect(summary.averageFantasyProsProjection).toBe(7.2); // (10.9 + 3.5) / 2
     expect(summary.largestBigMoneyOverFantasyPros?.id).toBe("p1"); // +1.8
     expect(summary.largestBigMoneyUnderFantasyPros?.id).toBe("p3"); // -0.5
+    // Milestone 32.2B: only p3 (the non-eligible reliever) has an ML
+    // value -- mlCoverage is measured against eligiblePlayers only, so
+    // it must be 0 even though a value exists, mirroring the
+    // native/AI/FantasyPros eligible-coverage rule above.
+    expect(summary.mlCoverage).toBe(0);
+    expect(summary.averageMlProjection).toBe(4.2);
   });
 });

@@ -55,6 +55,10 @@ function player(overrides: Partial<PoolPlayerRow>): PoolPlayerRow {
     nativePitcherComponents: null,
     fantasyProsProjection: null,
     fantasyProsMatchStatus: null,
+    mlProjection: null,
+    mlDataQualityScore: null,
+    mlProjectionStatus: null,
+    mlFeatureTimestamp: null,
     ...overrides,
   };
 }

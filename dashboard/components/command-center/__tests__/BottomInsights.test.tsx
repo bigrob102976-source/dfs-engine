@@ -53,6 +53,7 @@ const EMPTY_PROPS = {
   largestNativeVsLegacyDifferences: [],
   highestNativeConfidence: [],
   lowestNativeConfidence: [],
+  mlCoverage: { eligiblePitchers: 0, projectedPitchers: 0 },
 };
 
 describe("BottomInsights", () => {

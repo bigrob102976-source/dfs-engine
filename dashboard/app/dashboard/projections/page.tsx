@@ -8,6 +8,7 @@ import { getTodayChicagoDate } from "@/lib/currentDate";
 import { getProjectionComparisonByPlayerId } from "@/lib/externalProjections";
 import { getFantasyProsProjectionByPlayerId } from "@/lib/fantasyProsProjections";
 import { loadLatestBatterSnapshot, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
+import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
 import { buildProjectionLabRows, buildProjectionLabSummary } from "@/lib/projectionLab";
@@ -66,6 +67,9 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
   // above, is what actually satisfies "never show every FantasyPros
   // player" -- no slate-awareness needed inside fantasyProsProjections.ts.
   const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(date);
+  // Milestone 32.2B: Big Money ML -- SHADOW, comparison-only (pitchers,
+  // starters only). Same date-scoped join discipline as FantasyPros above.
+  const mlByPlayerId = getMlProjectionByPlayerId(date);
 
   const rows = buildProjectionLabRows(
     [...pitcherRows, ...hitterRows],
@@ -74,6 +78,7 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
     aiByPlayerId,
     actualByPlayerId,
     fantasyProsByPlayerId,
+    mlByPlayerId,
   );
   const summary = buildProjectionLabSummary(rows);
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : " -- Full Day";

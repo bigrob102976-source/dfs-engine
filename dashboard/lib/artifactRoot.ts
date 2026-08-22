@@ -30,6 +30,10 @@ export const ARTIFACT_DIRS = {
   gameEnvironmentSnapshots: "game_environment_snapshots",
   aiProjectionSnapshots: "ai_projection_snapshots",
   nativeProjectionSnapshots: "native_projection_snapshots",
+  // Milestone 32.2B: Big Money ML SHADOW pitcher projections
+  // (big_money_ml/persistence.py's output) -- evaluation-only, never
+  // consumed by the optimizer. See lib/mlProjections.ts.
+  mlProjectionSnapshots: "ml_projection_snapshots",
   fantasyProsSnapshots: "fantasypros_snapshots",
   // Milestone 27: postgame actual DK fantasy points (results/<date>/
   // {pitcher,hitter}_results.json) -- date-scoped only, by design (a

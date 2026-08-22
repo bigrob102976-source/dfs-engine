@@ -7,6 +7,7 @@ import { computeDbStats } from "@/lib/db/systemStats";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getFantasyProsStatus } from "@/lib/fantasyProsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
+import { getMlShadowStatus } from "@/lib/mlShadowStatus";
 import { getMockModeEnabled } from "@/lib/mockMode";
 import { getDatabaseReadiness, getJobQueueReadiness, getObjectStorageReadiness, getWorkerReadiness } from "@/lib/systemReadiness";
 
@@ -34,6 +35,7 @@ export default async function AdminSystemPage() {
     getDatabaseReadiness(),
     getObjectStorageReadiness(),
   ]);
+  const mlShadowStatus = getMlShadowStatus(date);
   const jobQueueReadiness = getJobQueueReadiness();
   const workerReadiness = getWorkerReadiness();
   const dbStats = computeDbStats();
@@ -172,6 +174,34 @@ export default async function AdminSystemPage() {
             </p>
           </>
         )}
+      </DataCard>
+
+      <DataCard title="Big Money ML (Shadow)" className="mb-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm text-text">Status</span>
+          <span
+            className={`text-xs font-semibold ${
+              mlShadowStatus.status === "READY" ? "text-green" : mlShadowStatus.status === "PARTIAL" ? "text-yellow" : "text-text-faint"
+            }`}
+          >
+            {mlShadowStatus.status === "NO_SNAPSHOT" && "Big Money ML: NO SNAPSHOT"}
+            {mlShadowStatus.status === "NO_ELIGIBLE_PITCHERS" && "Big Money ML: NO ELIGIBLE PITCHERS"}
+            {mlShadowStatus.status === "READY" &&
+              `Big Money ML: ${mlShadowStatus.ml_projections_generated} / ${mlShadowStatus.ml_eligible_pitcher_count} Starting Pitchers`}
+            {mlShadowStatus.status === "PARTIAL" &&
+              `Big Money ML: ${mlShadowStatus.ml_projections_generated} / ${mlShadowStatus.ml_eligible_pitcher_count} -- PARTIAL`}
+          </span>
+        </div>
+        <dl className="grid grid-cols-2 gap-y-2 text-xs">
+          <dt className="text-text-faint">Model Version</dt>
+          <dd className="text-right text-text">{mlShadowStatus.model_version ?? "--"}</dd>
+          <dt className="text-text-faint">Generated At</dt>
+          <dd className="text-right text-text">{fmtDateTime(mlShadowStatus.generated_at)}</dd>
+        </dl>
+        <p className="mt-2 text-[11px] text-text-faint">
+          A feature-parity or model-load failure during Process/Refresh appears in that run&apos;s errors, not here (never blocks slate
+          publication). Big Money ML is a SHADOW evaluation source; it never affects Native/AI, ownership, or the optimizer.
+        </p>
       </DataCard>
 
       <DataCard title="Game Environment Providers" className="mb-4">

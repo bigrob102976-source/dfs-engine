@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # are legitimately allowed to import research/models/config -- that
 # direction (postgame depending on pregame code) is fine. Only the
 # reverse is forbidden.
-PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine", "native_projections"]
+PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine", "native_projections", "big_money_ml"]
 PREGAME_EXTRA_FILES = [
     "config/scoring_config.py",
     "config/evaluation_config.py",  # config-only, no imports either way, but check anyway
@@ -44,6 +44,7 @@ PREGAME_EXTRA_FILES = [
     "scripts/run_ai_projection_engine.py",
     "config/native_projection_config.py",
     "scripts/run_native_projection_engine.py",
+    "scripts/run_ml_shadow_inference.py",
 ]
 
 
@@ -243,3 +244,115 @@ def test_optimizer_dataclasses_have_no_actual_ownership_field():
         assert not any("actual_ownership" in name for name in field_names), (
             f"{cls.__name__} has a field referencing actual_ownership: {field_names}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Milestone 32.2B -- Big Money ML (big_money_ml/) SHADOW-MODE isolation.
+#
+# big_money_ml/ is a live evaluation competitor to Native/AI, not a
+# production projection source: nothing may consume its output yet, and
+# it must never reach into any package it isn't allowed to influence.
+# ---------------------------------------------------------------------------
+
+_BIG_MONEY_ML_CONSUMER_FORBIDDEN_DIRS = ["native_projections", "projection_engine", "ownership", "optimizer"]
+
+
+@pytest.mark.parametrize("package_dir", _BIG_MONEY_ML_CONSUMER_FORBIDDEN_DIRS)
+def test_production_packages_never_import_big_money_ml(package_dir):
+    """Native, AI, Ownership, and the Optimizer must never import
+    big_money_ml -- this is what makes M32.2B genuinely shadow-only:
+    a bug or failure in the ML model can never propagate into any of
+    these production packages."""
+    for path in sorted((PROJECT_ROOT / package_dir).rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        imported = _imported_module_names(path)
+        forbidden = {name for name in imported if name == "big_money_ml" or name.startswith("big_money_ml.")}
+        assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports big_money_ml ({forbidden}) -- shadow ML must never be consumed by production code."
+
+
+def test_big_money_ml_never_imports_ownership_optimizer_native_or_ai_projections():
+    """The reverse direction: big_money_ml must never reach INTO the
+    packages it's forbidden from influencing either -- it re-derives its
+    own live features independently (big_money_ml.live_features), never
+    by reading ownership/optimizer/native/AI internals.
+
+    ONE documented, narrow exception: projection_engine.persistence.
+    load_latest_dfs_pool is a shared, read-only DK-pool-salary lookup
+    utility -- scripts/run_native_projection_engine.py already imports
+    this exact same function for the exact same purpose (see that
+    script's own `from projection_engine.persistence import
+    load_latest_dfs_pool`), and it never touches AI's own scoring/model
+    logic or AI's saved projection snapshots. Every OTHER projection_engine
+    submodule (scoring, models, the AI snapshot loaders) stays forbidden."""
+    big_money_ml_dir = PROJECT_ROOT / "big_money_ml"
+    forbidden_prefixes = ("ownership", "optimizer", "native_projections", "projection_engine")
+    allowed_exceptions = {"projection_engine.persistence"}
+
+    def _check(path: Path):
+        imported = _imported_module_names(path)
+        forbidden = {
+            name for name in imported
+            if any(name == p or name.startswith(p + ".") for p in forbidden_prefixes) and name not in allowed_exceptions
+        }
+        assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports forbidden module(s): {forbidden}"
+
+    for path in sorted(big_money_ml_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        _check(path)
+
+    _check(PROJECT_ROOT / "scripts" / "run_ml_shadow_inference.py")
+
+
+def test_big_money_ml_never_references_ai_projection_snapshot_loader():
+    """Narrower than the module-level check above: proves big_money_ml
+    never even NAMES load_latest_ai_projection_snapshot (the one AI-
+    specific symbol also living in projection_engine.persistence,
+    alongside the shared load_latest_dfs_pool utility that IS allowed)."""
+    big_money_ml_dir = PROJECT_ROOT / "big_money_ml"
+    for path in sorted(big_money_ml_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "load_latest_ai_projection_snapshot" not in text, f"{path.relative_to(PROJECT_ROOT)} references the AI projection snapshot loader."
+
+
+def test_big_money_ml_never_imports_historical_mlb_modules_that_pull_in_evaluation():
+    """big_money_ml is part of the LIVE PREGAME path and must never
+    import evaluation, even transitively. historical_mlb.pitcher_features,
+    historical_mlb.hitter_features, historical_mlb.scoring, and
+    historical_mlb.sources.mlb_stats all import evaluation.* at module
+    scope (they build POSTGAME warehouse rows) -- big_money_ml must go
+    through the evaluation-free leaf modules instead (historical_mlb.
+    rolling, historical_mlb.statcast_aggregation, historical_mlb.sources.
+    statcast, research.collector) and reimplement the handful of tiny
+    pure helpers it needs rather than importing these four."""
+    big_money_ml_dir = PROJECT_ROOT / "big_money_ml"
+    forbidden_modules = {
+        "historical_mlb.pitcher_features", "historical_mlb.hitter_features",
+        "historical_mlb.scoring", "historical_mlb.sources.mlb_stats", "historical_mlb.warehouse_builder",
+    }
+    for path in sorted(big_money_ml_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        imported = _imported_module_names(path)
+        forbidden = imported & forbidden_modules
+        assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports {forbidden}, which transitively pulls in evaluation/."
+
+
+def test_big_money_ml_source_key_never_appears_in_optimizer_projection_source_type():
+    """Python-side proxy for the TypeScript check (see
+    dashboard/lib/__tests__/architectureSeparation.test.ts): the
+    optimizer's ProjectionSource union in
+    dashboard/lib/optimizerWorkspace/types.ts must never list
+    "big_money_ml" as a selectable value -- shadow mode means the
+    optimizer cannot select this source yet."""
+    import re
+
+    types_ts = PROJECT_ROOT / "dashboard" / "lib" / "optimizerWorkspace" / "types.ts"
+    text = types_ts.read_text(encoding="utf-8")
+    match = re.search(r"export type ProjectionSource\s*=\s*([^;]+);", text)
+    assert match is not None, "Could not find the ProjectionSource type union in types.ts -- check this test still matches its shape."
+    union = match.group(1)
+    assert "big_money_ml" not in union, "big_money_ml must not appear in the ProjectionSource union -- the optimizer must not be able to select the ML shadow source yet."

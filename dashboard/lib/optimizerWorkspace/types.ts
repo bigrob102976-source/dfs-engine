@@ -101,6 +101,19 @@ export interface PoolPlayerRow {
   // computation (see lib/fantasyProsProjections.ts's module docstring).
   fantasyProsProjection: number | null;
   fantasyProsMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
+
+  // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only, joined
+  // in from the latest ml_projection_snapshots/<date>/*.json snapshot by
+  // mlbPlayerId. Pitchers/starters only (see lib/mlProjections.ts).
+  // `projection` above is still ALWAYS the independent value; Big Money
+  // ML is never a selectable ProjectionSource and never feeds the
+  // optimizer build (see writeProjectionOverridesFile, which has no
+  // "ml" branch, and the ProjectionSource union below, which never
+  // lists "big_money_ml").
+  mlProjection: number | null;
+  mlDataQualityScore: number | null;
+  mlProjectionStatus: "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID_FEATURE_PARITY" | null;
+  mlFeatureTimestamp: string | null;
 }
 
 export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros";
@@ -133,6 +146,7 @@ export interface OptimizerPoolResult {
   hasAiProjections: boolean;
   hasNativeProjections: boolean;
   hasFantasyProsProjections: boolean;
+  hasMlProjections: boolean;
   vegasCoverage: DkSlateVegasCoverage;
 }
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
 import type { GameEnvironmentReport } from "@/lib/gameEnvironment";
-import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry, NativeRankedPlayer, NativeValuedPlayer } from "@/lib/commandCenter";
+import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry, MlCoverageSummary, NativeRankedPlayer, NativeValuedPlayer } from "@/lib/commandCenter";
 import type { PlayerRow } from "@/lib/types";
 import type { StackSummary } from "@/lib/stacks";
 
@@ -147,6 +147,7 @@ export function BottomInsights({
   largestNativeVsLegacyDifferences,
   highestNativeConfidence,
   lowestNativeConfidence,
+  mlCoverage,
 }: {
   topHitters: PlayerRow[];
   topPitchers: PlayerRow[];
@@ -166,6 +167,7 @@ export function BottomInsights({
   largestNativeVsLegacyDifferences: NativeRankedPlayer[];
   highestNativeConfidence: NativeRankedPlayer[];
   lowestNativeConfidence: NativeRankedPlayer[];
+  mlCoverage: MlCoverageSummary;
 }) {
   return (
     <div>
@@ -261,6 +263,20 @@ export function BottomInsights({
         </DataCard>
         <DataCard title="Lowest Confidence">
           <NativePlayerList rows={lowestNativeConfidence} metric="confidence" />
+        </DataCard>
+      </div>
+
+      {/* Milestone 32.2B: Big Money ML -- SHADOW MODE, informational
+          coverage only. Never affects Top Pitchers or any recommendation
+          above; comparison lives in the Projection Lab / Pitcher Board. */}
+      <SectionHeader title="Big Money ML (Shadow)" />
+      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <DataCard title="Big Money ML Pitchers" action={<Link href="/dashboard/projections" className="text-[11px] text-accent hover:text-accent-hover">Projection Lab →</Link>}>
+          <div className="text-xl font-semibold text-text">
+            {mlCoverage.projectedPitchers} / {mlCoverage.eligiblePitchers}
+            <span className="ml-1 text-xs font-normal text-text-faint">projected</span>
+          </div>
+          <p className="mt-1 text-[11px] text-text-faint">Shadow evaluation only -- does not affect Top Pitchers or lineup construction.</p>
         </DataCard>
       </div>
 
