@@ -112,6 +112,50 @@ def test_enabled_provider_builds_provider_slate_result(monkeypatch):
     assert players[0].opponent == "TOR"
 
 
+def _detail_with_multi_slot_player():
+    """M32.2B live finding: DraftKings' draftables endpoint returns one
+    row per player PER ROSTER-SLOT ELIGIBILITY -- confirmed live for
+    DraftGroup 152543 (Shohei Ohtani, player_id 727378, two rows:
+    rosterSlotId 112 and 116, both position "1B/OF"). This fixture
+    mirrors that shape with two different positions to also prove
+    eligibility is unioned, not just deduped."""
+    game = DkSlateGame(competition_id=100, sport_id=2, name="TOR @ BOS", start_time="2026-08-20T18:00:00Z",
+                        home_team=DkTeam(team_id=1, abbreviation="BOS"), away_team=DkTeam(team_id=2, abbreviation="TOR"))
+    row_a = DkDraftable(draftable_id=101, draft_group_id=10, player_id=999, player_dk_id=999, display_name="Flex Player",
+                         first_name=None, last_name=None, position="1B", roster_slot_id=112, salary=4500,
+                         status="None", team_id=1, team_abbreviation="BOS", competition_id=100)
+    row_b = DkDraftable(draftable_id=102, draft_group_id=10, player_id=999, player_dk_id=999, display_name="Flex Player",
+                         first_name=None, last_name=None, position="OF", roster_slot_id=116, salary=4500,
+                         status="None", team_id=1, team_abbreviation="BOS", competition_id=100)
+    other = DkDraftable(draftable_id=201, draft_group_id=10, player_id=555, player_dk_id=555, display_name="Other Player",
+                         first_name=None, last_name=None, position="SS", roster_slot_id=113, salary=3800,
+                         status="None", team_id=2, team_abbreviation="TOR", competition_id=100)
+    return collector.SlateDetailResult(status=collector.STATUS_OK, draft_group_id=10, games=[game], draftables=[row_a, row_b, other])
+
+
+def test_multi_roster_slot_rows_for_the_same_player_are_merged_not_duplicated(monkeypatch):
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_with_multi_slot_player())
+
+    provider = DraftKingsUnofficialProvider()
+    result = provider.get_slate("2026-08-20", sport="MLB")
+    players = result.players_by_slate[result.slates[0].slate_id]
+
+    # 3 raw draftable rows, 2 real players -- must produce exactly 2 ProviderPlayer entries.
+    assert len(players) == 2
+    flex_player = next(p for p in players if p.name == "Flex Player")
+    assert flex_player.external_player_id == "999"  # DK's stable player_id, never the per-roster-slot draftableId
+    assert flex_player.position_eligibility == ["1B", "OF"]  # unioned across both raw rows, order preserved
+
+    # slates[0].player_count must reflect the deduped list actually
+    # returned, not DraftKings' raw 3-row draftable count.
+    assert result.slates[0].player_count == 2
+
+
 def test_no_active_slate_raises_provider_no_slate_error(monkeypatch):
     monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider

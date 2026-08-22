@@ -83,15 +83,23 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
             game_strings = [f"{g.away_team.abbreviation}@{g.home_team.abbreviation}" for g in detail.games if g.away_team and g.home_team]
             game_ids = resolve_game_ids(game_strings, research_games) if research_games else []
 
-            slates.append(ProviderSlateInfo(
-                slate_id=slate_id, slate_name=slate.label or slate.tag or f"DraftGroup {slate.draft_group_id}",
-                site=site, sport=sport, start_time=slate.start_time, game_count=len(detail.games),
-                game_ids=game_ids, player_count=len(detail.draftables),
-                source_provenance=UNOFFICIAL_DEVELOPMENT_SOURCE, realism_blocked=False, realism_findings=[],
-            ))
-
             competition_by_id = {g.competition_id: g for g in detail.games}
-            players: List[ProviderPlayer] = []
+            # DraftKings' draftables endpoint returns one row per player PER
+            # ROSTER-SLOT ELIGIBILITY, not one row per player -- a player
+            # eligible for more than one roster slot in this game type
+            # (e.g. a primary-position slot AND a flex/UTIL slot) appears
+            # as two-plus rows sharing the same player_id but different
+            # draftableId/rosterSlotId (confirmed live, M32.2B: Shohei
+            # Ohtani appeared twice for DraftGroup 152543, same player_id
+            # 727378, rosterSlotId 112 vs 116). Using draftableId as
+            # external_player_id silently duplicated that real person into
+            # two ProviderPlayer rows. player_id is DK's own documented
+            # stable cross-slate player identity (see DkDraftable's field
+            # docstring) -- dedup on it, unioning position eligibility
+            # across the merged rows, rather than on the per-roster-slot
+            # draftableId.
+            merged_by_player_id: Dict[str, dict] = {}
+            player_order: List[str] = []
             for d in detail.draftables:
                 game = competition_by_id.get(d.competition_id)
                 opponent = None
@@ -102,14 +110,39 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                     elif d.team_abbreviation == game.home_team.abbreviation:
                         opponent = game.away_team.abbreviation
                     game_str = f"{game.away_team.abbreviation}@{game.home_team.abbreviation}"
+
+                canonical_id = d.player_id if d.player_id is not None else (d.player_dk_id if d.player_dk_id is not None else d.draftable_id)
+                key = str(canonical_id)
+                if key not in merged_by_player_id:
+                    merged_by_player_id[key] = {
+                        "name": d.display_name, "team": d.team_abbreviation or "", "opponent": opponent,
+                        "game": game_str, "salary": d.salary or 0, "position_eligibility": [],
+                        "start_time": game.start_time if game else None,
+                    }
+                    player_order.append(key)
+                if d.position and d.position not in merged_by_player_id[key]["position_eligibility"]:
+                    merged_by_player_id[key]["position_eligibility"].append(d.position)
+
+            players: List[ProviderPlayer] = []
+            for key in player_order:
+                r = merged_by_player_id[key]
                 players.append(ProviderPlayer(
-                    external_player_id=str(d.draftable_id), name=d.display_name, team=d.team_abbreviation or "",
-                    opponent=opponent, game=game_str, salary=d.salary or 0,
-                    position_eligibility=[d.position] if d.position else [], slate_id=slate_id,
-                    slate_name=slate.label or slate.tag, start_time=game.start_time if game else None,
+                    external_player_id=key, name=r["name"], team=r["team"], opponent=r["opponent"], game=r["game"],
+                    salary=r["salary"], position_eligibility=r["position_eligibility"], slate_id=slate_id,
+                    slate_name=slate.label or slate.tag, start_time=r["start_time"],
                     source=self.name, retrieved_at=retrieved_at,
                 ))
             players_by_slate[slate_id] = players
+
+            slates.append(ProviderSlateInfo(
+                slate_id=slate_id, slate_name=slate.label or slate.tag or f"DraftGroup {slate.draft_group_id}",
+                site=site, sport=sport, start_time=slate.start_time, game_count=len(detail.games),
+                # player_count reflects the DEDUPED player list actually
+                # returned in players_by_slate (unique real players), not
+                # DraftKings' raw per-roster-slot draftable row count.
+                game_ids=game_ids, player_count=len(players),
+                source_provenance=UNOFFICIAL_DEVELOPMENT_SOURCE, realism_blocked=False, realism_findings=[],
+            ))
 
         if not slates:
             raise ProviderUnavailableError(
