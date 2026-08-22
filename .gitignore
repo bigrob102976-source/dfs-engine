@@ -62,6 +62,12 @@ dashboard/next-env.d.ts
 # live sources, never source. See historical_mlb/.
 /data/historical/
 
+# Milestone 32.2: trained model artifacts (model.joblib, metrics,
+# feature importance, etc.) -- reproducible by re-running
+# `python -m historical_models.pitcher_v1.train` against the warehouse,
+# never source. See historical_models/.
+/data/models/
+
 # env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
 .env
 .env.*
