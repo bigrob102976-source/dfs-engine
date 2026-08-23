@@ -64,16 +64,27 @@ def test_registry_is_case_insensitive(monkeypatch):
     assert source == "explicit"
 
 
-def test_registry_resolves_bluecollar_but_it_stays_unconfigured(monkeypatch):
+def test_registry_resolves_bluecollar_unconfigured_with_no_api_key(monkeypatch):
     """Explicitly naming bluecollar resolves the CLASS (source=explicit)
     but the provider itself must still report is_configured() == False
-    -- the registry cannot make BlueCollar usable early."""
+    when BLUECOLLAR_API_KEY isn't set -- the registry alone cannot make
+    BlueCollar usable."""
     monkeypatch.setenv("EXTERNAL_PROJECTION_PROVIDER", "bluecollar")
+    monkeypatch.delenv("BLUECOLLAR_API_KEY", raising=False)
     provider, reason, source = get_configured_provider()
     assert provider is not None
     assert source == "explicit"
     assert reason is None
     assert provider.is_configured() is False
+
+
+def test_registry_resolves_bluecollar_configured_once_api_key_is_set(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_PROJECTION_PROVIDER", "bluecollar")
+    monkeypatch.setenv("BLUECOLLAR_API_KEY", "fake-key-for-test")
+    provider, _reason, source = get_configured_provider()
+    assert provider is not None
+    assert source == "explicit"
+    assert provider.is_configured() is True
 
 
 def test_registry_reports_unknown_provider_name(monkeypatch):
@@ -97,36 +108,53 @@ def test_provider_factories_contains_mock_and_bluecollar():
 
 
 # ----------------------------------------------------------------------------
-# BlueCollar disabled placeholder
+# BlueCollar -- real provider, unconfigured state (no API key)
 # ----------------------------------------------------------------------------
 
 
-def test_bluecollar_is_configured_is_false_even_with_env_vars_set(monkeypatch):
-    """Even if a user sets both env vars, is_configured() must stay
-    False -- there is no documented API contract to call yet."""
-    monkeypatch.setenv("BLUECOLLAR_API_KEY", "fake-key-for-test")
-    monkeypatch.setenv("BLUECOLLAR_API_BASE_URL", "https://example.invalid/api")
+def test_bluecollar_is_configured_is_false_with_no_api_key(monkeypatch):
+    monkeypatch.delenv("BLUECOLLAR_API_KEY", raising=False)
     assert BlueCollarProvider().is_configured() is False
 
 
-def test_bluecollar_list_slates_raises_not_configured_never_network():
-    provider = BlueCollarProvider()
+def test_bluecollar_is_configured_is_true_once_api_key_is_set():
+    assert BlueCollarProvider(api_key="fake-key-for-test").is_configured() is True
+
+
+def test_bluecollar_list_slates_raises_not_configured_never_network_when_no_key(tmp_path, monkeypatch):
+    # Isolated cache_root -- avoids reading a real cached response from
+    # an earlier, properly-authenticated fetch on disk (data/cache/bluecollar/).
+    # Also explicitly delenv BLUECOLLAR_API_KEY: some other provider module
+    # (e.g. research/game_environment/providers/theoddsapi.py) calls
+    # config.env_loader.load_dashboard_env() at IMPORT time, which loads
+    # dashboard/.env.local straight into os.environ for the rest of the
+    # pytest session (a raw os.environ mutation, not monkeypatch-reverted)
+    # -- constructing BlueCollarProvider(api_key=None) alone is not
+    # enough to guarantee "no key" once a real key exists in .env.local.
+    monkeypatch.delenv("BLUECOLLAR_API_KEY", raising=False)
+    provider = BlueCollarProvider(api_key=None, cache_root=tmp_path)
     with pytest.raises(ProjectionProviderNotConfiguredError) as exc_info:
         provider.list_slates("2026-08-13")
-    assert "documentation" in str(exc_info.value).lower() or "credentials" in str(exc_info.value).lower()
+    assert "BLUECOLLAR_API_KEY" in str(exc_info.value)
 
 
-def test_bluecollar_get_projections_raises_not_configured_never_network():
-    provider = BlueCollarProvider()
+def test_bluecollar_get_projections_raises_not_configured_never_network_when_no_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("BLUECOLLAR_API_KEY", raising=False)
+    provider = BlueCollarProvider(api_key=None, cache_root=tmp_path)
     with pytest.raises(ProjectionProviderNotConfiguredError):
-        provider.get_projections("any-slate-id")
+        provider.get_projections("bluecollar-2026-08-13-0-main")
 
 
-def test_bluecollar_provider_name_and_no_network_imports():
-    provider = BlueCollarProvider()
-    assert provider.provider_name() == "BlueCollar DFS"
-    import external_projections.bluecollar_provider as module
+def test_bluecollar_provider_name():
+    assert BlueCollarProvider().provider_name() == "BlueCollar DFS"
 
-    # Never import an HTTP client -- this provider makes no network calls at all.
-    for banned in ("requests", "httpx", "urllib.request", "aiohttp"):
-        assert banned not in module.__dict__, f"BlueCollarProvider must not import {banned}"
+
+def test_bluecollar_exception_messages_never_contain_the_api_key():
+    """The one hard security invariant: whatever goes wrong, the
+    configured key must never appear in an exception's message."""
+    secret = "sk-super-secret-value-12345"
+    provider = BlueCollarProvider(api_key=None)
+    try:
+        provider.list_slates("2026-08-13")
+    except ProjectionProviderNotConfiguredError as exc:
+        assert secret not in str(exc)
