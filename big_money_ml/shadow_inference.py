@@ -179,7 +179,10 @@ def run_ml_shadow_inference(
 
         try:
             assert_no_leakage(list(feature_result.features.keys()))
-            prediction = predict_pitcher({**feature_result.features, "player_id": p.mlb_player_id}, artifact_dir=frozen.artifact_dir)
+            prediction = predict_pitcher(
+                {**feature_result.features, "player_id": p.mlb_player_id}, artifact_dir=frozen.artifact_dir,
+                pipeline=frozen.pipeline, metadata=frozen.metadata,
+            )
         except ValueError as exc:
             players.append(MLPitcherProjection(
                 player_id=p.mlb_player_id, dk_player_id=p.dk_player_id, name=p.name, team=p.team, opponent=p.opponent,

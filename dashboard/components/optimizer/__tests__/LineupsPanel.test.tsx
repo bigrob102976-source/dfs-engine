@@ -57,6 +57,7 @@ function result(overrides: Partial<OptimizerBuildResult> = {}): OptimizerBuildRe
     stoppedReason: null,
     lineups: [lineup()],
     elapsedMs: 1234,
+    excludedMissingProjectionSource: [],
     ...overrides,
   };
 }

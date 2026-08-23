@@ -102,22 +102,30 @@ export interface PoolPlayerRow {
   fantasyProsProjection: number | null;
   fantasyProsMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
 
-  // Milestone 32.2B/32.3B: Big Money ML -- SHADOW MODE, comparison-only,
-  // joined in from the unified (pitcher + hitter) ml_projection_snapshots/
-  // <date>/*.json snapshot streams by mlbPlayerId (see
-  // lib/mlProjections.ts's getMlProjectionByPlayerId). Starters only.
-  // `projection` above is still ALWAYS the independent value; Big Money
-  // ML is never a selectable ProjectionSource and never feeds the
-  // optimizer build (see writeProjectionOverridesFile, which has no
-  // "ml" branch, and the ProjectionSource union below, which never
-  // lists "big_money_ml").
+  // Milestone 32.2B/32.3B: Big Money ML -- comparison column, joined in
+  // from the unified (pitcher + hitter) ml_projection_snapshots/<date>/
+  // *.json snapshot streams by mlbPlayerId (see lib/mlProjections.ts's
+  // getMlProjectionByPlayerId). Starters only. `projection` above is
+  // still ALWAYS the independent value.
+  //
+  // Milestone 32.4: "big_money_ml" IS now a selectable ProjectionSource
+  // (see below) -- but ADMIN/OWNER-only, gated by the
+  // 'mlb.big_money_ml_optimizer' feature flag (default ADMIN_ONLY, see
+  // lib/entitlements/featureVisibility.ts) both in the UI selector
+  // (OptimizerWorkspace.tsx) AND server-side in the build API route
+  // (never trust client-side hiding alone). When selected,
+  // writeProjectionOverridesFile's "big_money_ml" branch AND
+  // scripts/optimize_dk_lineups.py's --strict-projection-source flag
+  // together enforce NO FALLBACK to another source for a player missing
+  // an ML projection -- they are excluded from the build entirely
+  // rather than silently reverting to native/ai/independent.
   mlProjection: number | null;
   mlDataQualityScore: number | null;
   mlProjectionStatus: "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID_FEATURE_PARITY" | null;
   mlFeatureTimestamp: string | null;
 }
 
-export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros";
+export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros" | "big_money_ml";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -179,6 +187,10 @@ export interface OptimizerBuildResult {
   stoppedReason: string | null;
   lineups: Lineup[];
   elapsedMs: number;
+  // Milestone 32.4 -- surfaced straight from the persisted lineup set so
+  // the UI can show "N players excluded (no ML projection)" immediately
+  // after a strict-source build without a second fetch.
+  excludedMissingProjectionSource: string[];
 }
 
 export interface ExposureRow {

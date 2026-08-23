@@ -539,5 +539,108 @@ describe("buildLineups", () => {
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");
     });
+
+    describe("Milestone 32.4: big_money_ml -- strict source, no mixed-source fallback", () => {
+      function writeMlSnapshots() {
+        writeJson(`ml_projection_snapshots/${DATE}/ml_projection_20260812T180000.json`, {
+          slate_date: DATE, generated_at: `${DATE}T18:00:00+00:00`, model_version: "1.0.0", warehouse_version: "v1",
+          raw_dk_pitcher_count: 1, starting_pitcher_count: 1, ml_eligible_pitcher_count: 1,
+          ml_projections_generated: 1, ml_projections_missing: 0, feature_parity_summary: {}, warnings: [],
+          players: [
+            { player_id: "p1", dk_player_id: "dp1", name: "Test Pitcher", team: "NYY", opponent: "BOS", game_id: "g1", salary: 9000, projection: 22.4, model_version: "1.0.0", data_quality_score: 0.97, feature_coverage: 0.97, missing_features: [], projection_status: "LIVE_PREGAME", feature_timestamp: `${DATE}T18:00:00+00:00`, game_scheduled_start_utc: `${DATE}T23:00:00Z`, warnings: [] },
+            { player_id: "p2", dk_player_id: "dp2", name: "Missing ML Pitcher", team: "BOS", opponent: "NYY", game_id: "g1", salary: 8000, projection: null, model_version: "1.0.0", data_quality_score: null, feature_coverage: null, missing_features: [], projection_status: "MISSING", feature_timestamp: null, game_scheduled_start_utc: `${DATE}T23:00:00Z`, warnings: [] },
+          ],
+        });
+        writeJson(`ml_projection_snapshots/${DATE}/ml_hitter_projection_20260812T181200.json`, {
+          slate_date: DATE, generated_at: `${DATE}T18:12:00+00:00`, model_version: "1.0.0", warehouse_version: "v1",
+          raw_dk_hitter_count: 2, confirmed_starting_hitter_count: 2, ml_eligible_hitter_count: 2,
+          ml_projections_generated: 1, ml_projections_missing: 1, feature_parity_summary: {}, warnings: [],
+          players: [
+            { player_id: "h1", dk_player_id: "dh1", name: "Test Hitter", team: "NYY", opponent: "BOS", game_id: "g1", salary: 4500, batting_order: 1, projection: 9.6, model_version: "1.0.0", data_quality_score: 0.98, feature_coverage: 0.98, missing_features: [], projection_status: "LIVE_PREGAME", feature_timestamp: `${DATE}T18:12:00+00:00`, game_scheduled_start_utc: `${DATE}T23:00:00Z`, warnings: [] },
+            { player_id: "h2", dk_player_id: "dh2", name: "Invalid Parity Hitter", team: "BOS", opponent: "NYY", game_id: "g1", salary: 4200, batting_order: 2, projection: null, model_version: "1.0.0", data_quality_score: null, feature_coverage: null, missing_features: [], projection_status: "INVALID_FEATURE_PARITY", feature_timestamp: null, game_scheduled_start_utc: `${DATE}T23:00:00Z`, warnings: [] },
+          ],
+        });
+      }
+
+      it("writes a --projection-overrides file with only valid pregame ML projections, ceiling/floor left null", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeMlSnapshots();
+        let capturedOverrides: Record<string, { projection: number; ceiling: number | null; floor: number | null }> | null = null;
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(
+          makeFakeRunner(
+            {
+              "scripts/optimize_dk_lineups.py": (args) => {
+                const overridesPath = argValue(args, "--projection-overrides");
+                if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+                return ok(JSON.stringify({ errors: [] }));
+              },
+            },
+            calls,
+          ),
+        );
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "big_money_ml" }));
+
+        expect(capturedOverrides).not.toBeNull();
+        expect(capturedOverrides!.p1.projection).toBe(22.4);
+        expect(capturedOverrides!.p1.ceiling).toBeNull();
+        expect(capturedOverrides!.h1.projection).toBe(9.6);
+        // MISSING/INVALID_FEATURE_PARITY players must NEVER appear here at all.
+        expect(capturedOverrides!.p2).toBeUndefined();
+        expect(capturedOverrides!.h2).toBeUndefined();
+      });
+
+      it("passes --strict-projection-source only for big_money_ml, never for any other source", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeMlSnapshots();
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+
+        await validateBuildRequest(baseRequest({ projectionSource: "big_money_ml" }));
+        const mlCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(mlCall.args).toContain("--strict-projection-source");
+        expect(argValue(mlCall.args, "--projection-source")).toBe("big_money_ml");
+
+        calls.length = 0;
+        await validateBuildRequest(baseRequest({ projectionSource: "native" }));
+        const nativeCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(nativeCall.args).not.toContain("--strict-projection-source");
+        expect(argValue(nativeCall.args, "--projection-source")).toBe("native");
+      });
+
+      it("passes pitcher/hitter model version and snapshot generated_at provenance for big_money_ml", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeMlSnapshots();
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "big_money_ml" }));
+
+        const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(argValue(call.args, "--pitcher-model-version")).toBe("1.0.0");
+        expect(argValue(call.args, "--hitter-model-version")).toBe("1.0.0");
+        expect(argValue(call.args, "--pitcher-projection-snapshot-generated-at")).toBe(`${DATE}T18:00:00+00:00`);
+        expect(argValue(call.args, "--hitter-projection-snapshot-generated-at")).toBe(`${DATE}T18:12:00+00:00`);
+      });
+
+      it("still passes --projection-overrides (an empty file) and --strict-projection-source even with zero ML coverage, never silently reverting to non-strict", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        // Deliberately no ML snapshots written at all.
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "big_money_ml" }));
+
+        const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(call.args).toContain("--strict-projection-source");
+        expect(call.args).toContain("--projection-overrides");
+      });
+    });
   });
 });

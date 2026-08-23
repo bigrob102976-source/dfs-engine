@@ -183,3 +183,25 @@ export function getMlProjectionByPlayerId(date: string): Map<string, MlPitcherPr
   }
   return map;
 }
+
+export interface BigMoneyMlProvenance {
+  pitcherModelVersion: string | null;
+  hitterModelVersion: string | null;
+  pitcherSnapshotGeneratedAt: string | null;
+  hitterSnapshotGeneratedAt: string | null;
+}
+
+/** Milestone 32.4: provenance metadata for a lineup built with Big
+ * Money ML as the projection source -- read from the latest persisted
+ * snapshot of each stream (never invented, never defaulted to "current
+ * time"). All null when no snapshot exists yet for that player type. */
+export function getBigMoneyMlProvenance(date: string): BigMoneyMlProvenance {
+  const pitcherDoc = loadLatestMlProjectionSnapshot(date);
+  const hitterDoc = loadLatestMlHitterProjectionSnapshot(date);
+  return {
+    pitcherModelVersion: pitcherDoc?.model_version ?? null,
+    hitterModelVersion: hitterDoc?.model_version ?? null,
+    pitcherSnapshotGeneratedAt: pitcherDoc?.generated_at ?? null,
+    hitterSnapshotGeneratedAt: hitterDoc?.generated_at ?? null,
+  };
+}

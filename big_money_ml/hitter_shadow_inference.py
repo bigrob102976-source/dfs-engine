@@ -136,6 +136,10 @@ def run_ml_hitter_shadow_inference(
     probable_starters = _load_probable_starters_by_team_and_game(slate_date, research_output_root=research_output_root)
     existing_by_player = _existing_player_records(slate_date, output_root=ml_projection_root)
     statcast_buffer = build_live_statcast_buffer(slate_date)
+    # Milestone 32.4 performance optimization: shared across every
+    # hitter in this run so hitters facing the same opposing starter
+    # (up to 8-9 per game) reuse one fetch instead of refetching per hitter.
+    opposing_pitcher_cache: Dict[str, dict] = {}
 
     players: List[MLHitterProjection] = []
     warnings: List[str] = []
@@ -186,11 +190,15 @@ def run_ml_hitter_shadow_inference(
             player_id=p.mlb_player_id, team=p.team, opponent=p.opponent, home_away=home_away,
             as_of_date=slate_date, venue_id=game.venue_id, statcast_buffer=statcast_buffer,
             opposing_starter_id=opposing_starter_id, batting_order_actual=p.batting_order,
+            opposing_pitcher_cache=opposing_pitcher_cache,
         )
 
         try:
             assert_no_leakage(list(feature_result.features.keys()))
-            prediction = predict_hitter({**feature_result.features, "player_id": p.mlb_player_id}, artifact_dir=frozen.artifact_dir)
+            prediction = predict_hitter(
+                {**feature_result.features, "player_id": p.mlb_player_id}, artifact_dir=frozen.artifact_dir,
+                pipeline=frozen.pipeline, feature_list=frozen.feature_list, metadata=frozen.metadata,
+            )
         except ValueError as exc:
             players.append(MLHitterProjection(
                 player_id=p.mlb_player_id, dk_player_id=p.dk_player_id, name=p.name, team=p.team, opponent=p.opponent,

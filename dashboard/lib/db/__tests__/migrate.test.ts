@@ -12,7 +12,7 @@ describe("migrations", () => {
     const rows = db.prepare("SELECT filename FROM schema_migrations ORDER BY filename").all() as Array<{ filename: string }>;
     expect(rows.map((r) => r.filename)).toEqual([
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
-      "0005_production_infrastructure.sql",
+      "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql",
     ]);
   });
 
@@ -23,7 +23,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(5);
+    expect(rows.c).toBe(6);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {
@@ -53,12 +53,16 @@ describe("migrations", () => {
     expect(entitlementKeys).toEqual(featureKeys);
     expect(entitlementKeys).toContain("mlb.optimizer");
     expect(entitlementKeys).toContain("mlb.ai_projections");
+    expect(entitlementKeys).toContain("mlb.big_money_ml_optimizer");
   });
 
-  it("every seeded feature flag starts PRODUCTION", () => {
+  it("every 0002-seeded (page-level) feature flag starts PRODUCTION; the M32.4 Big Money ML optimizer capability starts ADMIN_ONLY", () => {
     const db = getDb();
-    const states = db.prepare("SELECT DISTINCT state FROM feature_flags").all() as Array<{ state: string }>;
+    const states = db.prepare("SELECT DISTINCT state FROM feature_flags WHERE key != 'mlb.big_money_ml_optimizer'").all() as Array<{ state: string }>;
     expect(states).toEqual([{ state: "PRODUCTION" }]);
+
+    const mlFlag = db.prepare("SELECT state FROM feature_flags WHERE key = 'mlb.big_money_ml_optimizer'").get() as { state: string };
+    expect(mlFlag.state).toBe("ADMIN_ONLY");
   });
 
   it("enforces foreign keys (rejects an orphaned subscription)", () => {

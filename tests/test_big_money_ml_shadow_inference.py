@@ -4,6 +4,7 @@ model artifact and fake research_output/dfs_input/ml_projection_snapshots
 directories are built under tmp_path for full isolation."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -63,7 +64,13 @@ def _pitcher_row(mlb_player_id, **overrides):
     return row
 
 
-def _game(game_id="g1", home="NYY", away="BOS", start_utc="2026-08-22T23:00:00Z", status="Scheduled"):
+def _game(game_id="g1", home="NYY", away="BOS", start_utc=None, status="Scheduled"):
+    # Default computed relative to "now" (never a hardcoded date) so
+    # tests that don't pass their own now_utc stay correct regardless of
+    # which real calendar moment the suite runs at -- a hardcoded future
+    # start_utc eventually becomes the past.
+    if start_utc is None:
+        start_utc = (datetime.now(timezone.utc) + timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {"game_id": game_id, "home_team_abbr": home, "away_team_abbr": away, "venue_id": 15, "game_datetime_utc": start_utc, "status": status}
 
 

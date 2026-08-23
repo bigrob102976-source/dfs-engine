@@ -157,10 +157,15 @@ function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit)
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const impl = vi.fn((url: string, init?: RequestInit) => {
     calls.push({ url, init });
-    if (overrides[url]) return overrides[url]!(init);
+    // Milestone 32.4: /api/optimizer/ml-coverage is called with a query
+    // string (?slateId=...&date=...) -- matched by prefix so an override
+    // keyed by the bare path still applies regardless of query params.
+    const overrideKey = Object.keys(overrides).find((k) => url === k || url.startsWith(k));
+    if (overrideKey) return overrides[overrideKey]!(init);
     if (url === "/api/optimizer/slates") return jsonResponse(SLATES_READY);
     if (url === "/api/optimizer/pool") return jsonResponse({ pool: POOL_RESULT });
     if (url === "/api/optimizer/validate") return jsonResponse({ errors: [] });
+    if (url.startsWith("/api/optimizer/ml-coverage")) return jsonResponse({ coverage: null });
     throw new Error(`Unexpected fetch: ${url}`);
   });
   vi.stubGlobal("fetch", impl);
@@ -606,6 +611,112 @@ describe("OptimizerWorkspace", () => {
       fireEvent.click(screen.getByRole("button", { name: "Big Money Native" }));
       expect(screen.getByRole("button", { name: "Big Money Native" })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: "Legacy" })).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  describe("Milestone 32.4: Big Money ML admin gating", () => {
+    const POOL_WITH_ML = {
+      ...POOL_RESULT,
+      hasMlProjections: true,
+      players: [
+        { ...POOL_RESULT.players[0] },
+        { ...POOL_RESULT.players[1] },
+      ],
+    };
+    const ML_COVERAGE = {
+      coverage: {
+        pitchers: { generated: 22, eligible: 22 },
+        hitters: { generated: 81, eligible: 81 },
+        combined: { generated: 103, eligible: 103 },
+        gamesWaitingForLineups: 0,
+        pitcherModelVersion: "1.0.0",
+        hitterModelVersion: "1.0.0",
+        pitcherSnapshotGeneratedAt: "2026-08-22T20:18:43+00:00",
+        hitterSnapshotGeneratedAt: "2026-08-22T22:11:56+00:00",
+      },
+    };
+
+    it("never renders the Big Money ML button when canUseBigMoneyMl is false (the default)", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_ML }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.queryByRole("button", { name: "Big Money ML" })).not.toBeInTheDocument();
+    });
+
+    it("renders the Big Money ML button when canUseBigMoneyMl is true, disabled until the pool has ML coverage", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBigMoneyMl />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByRole("button", { name: "Big Money ML" })).toBeDisabled();
+    });
+
+    it("enables Big Money ML once the pool has ML coverage, and selecting it shows the EXPERIMENTAL/OWNER TEST coverage gate", async () => {
+      installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_ML }),
+        "/api/optimizer/ml-coverage": () => jsonResponse(ML_COVERAGE),
+      });
+      render(<OptimizerWorkspace canUseBigMoneyMl />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "Big Money ML" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Big Money ML" }));
+      expect(screen.getByRole("button", { name: "Big Money ML" })).toHaveAttribute("aria-pressed", "true");
+
+      expect(screen.getByText("Experimental")).toBeInTheDocument();
+      expect(screen.getByText("Owner Test")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("103/103")).toBeInTheDocument(), { timeout: 8000 });
+    }, 12000);
+
+    it("selecting Big Money ML is reflected in the validate request", async () => {
+      const { calls } = installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_ML }),
+        "/api/optimizer/ml-coverage": () => jsonResponse(ML_COVERAGE),
+      });
+      render(<OptimizerWorkspace canUseBigMoneyMl />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByRole("button", { name: "Big Money ML" }));
+
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).toBe("big_money_ml");
+      });
+    });
+
+    it("falls back to Legacy if the selected slate has no ML coverage", async () => {
+      installFetchMock(); // default POOL_RESULT -- no hasMlProjections
+      render(<OptimizerWorkspace canUseBigMoneyMl />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      // The button starts disabled since this slate has no ML coverage;
+      // projectionSource stays whatever it was (native, the default),
+      // never lands on the unreachable big_money_ml option.
+      expect(screen.getByRole("button", { name: "Big Money ML" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Big Money ML" })).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("a big_money_ml value persisted in localStorage while ADMIN never sticks once canUseBigMoneyMl is false", async () => {
+      window.localStorage.setItem(
+        "mlb-dfs-optimizer-workspace-v1",
+        JSON.stringify({
+          selectedSlateId: "mock-main", locks: [], exclusions: [], maxExposure: {}, stackSize: null, stackTeam: null,
+          allowPitcherVsHitter: false, minSalary: null, minUnique: 2, lineups: 20, objective: "projection",
+          projectionSource: "big_money_ml",
+        }),
+      );
+      const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_ML }) });
+      render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      // No "Big Money ML" button at all (canUseBigMoneyMl=false) -- and
+      // the persisted value must have fallen back to native, not stuck.
+      expect(screen.queryByRole("button", { name: "Big Money ML" })).not.toBeInTheDocument();
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).not.toBe("big_money_ml");
+      });
     });
   });
 });

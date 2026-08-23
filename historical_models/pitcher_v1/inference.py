@@ -48,11 +48,24 @@ def _family_coverage(row: Dict[str, Any], prefix: str) -> Optional[float]:
     return available / len(cols)
 
 
-def predict_pitcher(features: Dict[str, Any], artifact_dir: Optional[Path] = None) -> PitcherModelPrediction:
+def predict_pitcher(
+    features: Dict[str, Any], artifact_dir: Optional[Path] = None,
+    pipeline: Optional[Any] = None, metadata: Optional[dict] = None,
+) -> PitcherModelPrediction:
+    """Milestone 32.4 -- `pipeline`/`metadata` are an OPTIONAL performance
+    escape hatch: a caller running many predictions in one process (e.g.
+    big_money_ml/shadow_inference.py's per-slate loop) may load the
+    artifact ONCE and pass it in here on every call, instead of this
+    function re-reading model.joblib/metadata.json from disk on every
+    single player. Omitting them preserves the exact prior behavior
+    (load fresh every call) -- purely additive, output is byte-identical
+    either way since it's the same fitted pipeline object either way."""
     assert_no_leakage(list(features.keys()))
     artifact_dir = Path(artifact_dir or DEFAULT_ARTIFACT_DIR)
-    pipeline = load_model(artifact_dir)
-    metadata = load_json(artifact_dir, METADATA_FILENAME) or {}
+    if pipeline is None:
+        pipeline = load_model(artifact_dir)
+    if metadata is None:
+        metadata = load_json(artifact_dir, METADATA_FILENAME) or {}
 
     row = {col: features.get(col) for col in FEATURE_COLUMNS}
     missing_features = [col for col, value in row.items() if value is None]

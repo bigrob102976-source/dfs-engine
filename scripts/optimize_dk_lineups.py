@@ -56,10 +56,25 @@ def _load_projection_overrides(path: str):
         return json.load(f)
 
 
-def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None):
+def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None, strict_source: bool = False):
+    """`strict_source=True` (Milestone 32.4 -- Big Money ML) enforces
+    SOURCE PURITY: a player with no entry in `projection_overrides` (or
+    whose override has no projection value) is excluded from the
+    optimizer pool entirely, rather than silently falling back to the
+    pool's own independent projection like every other Projection
+    Source selector (native/ai/fantasypros/external/adjusted) does.
+    "ML-only means ML-only" -- a lineup built with strict_source=True
+    can never contain a hidden mixture of projection sources for the
+    PROJECTION value itself. Ceiling/floor still fall back to the pool's
+    own independent value in strict mode too (same as the existing
+    FantasyPros precedent) -- the frozen Big Money ML models don't
+    estimate ceiling/floor, only a point projection, so there is no ML
+    ceiling/floor to be strict about; this is a documented, deliberate
+    choice, not an oversight."""
     projection_overrides = projection_overrides or {}
     players = []
     skipped = []
+    excluded_missing_source = []
     for record in pool_doc.get("players", []):
         # Milestone 30.1: optimizer_eligible (confirmed starting pitcher /
         # confirmed starting hitter, see dfs/eligibility.py) is now the
@@ -70,7 +85,15 @@ def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None):
             continue
 
         override = projection_overrides.get(record.get("mlb_player_id")) if record.get("mlb_player_id") else None
-        projection = override.get("projection") if override and override.get("projection") is not None else record.get("projection")
+
+        if strict_source:
+            if override is None or override.get("projection") is None:
+                excluded_missing_source.append(record["name"])
+                continue
+            projection = override.get("projection")
+        else:
+            projection = override.get("projection") if override and override.get("projection") is not None else record.get("projection")
+
         ceiling = override.get("ceiling") if override and override.get("ceiling") is not None else record.get("ceiling")
         floor = override.get("floor") if override and override.get("floor") is not None else record.get("floor")
 
@@ -85,7 +108,7 @@ def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None):
             floor=floor, risk_score=record.get("risk_score"), confidence=record.get("confidence"),
             season_sample_size=record.get("season_sample_size"),
         ))
-    return players, skipped
+    return players, skipped, excluded_missing_source
 
 
 def _load_ownership(ownership_path: str):
@@ -158,6 +181,17 @@ def main() -> None:
              "Source selector) -- substitutes these values for matching players for THIS solve only; never "
              "modifies the pool file on disk.",
     )
+    parser.add_argument(
+        "--strict-projection-source", action="store_true",
+        help="Milestone 32.4 (Big Money ML): a player with no --projection-overrides entry is EXCLUDED from the "
+             "optimizer pool entirely instead of falling back to the pool's own independent projection. Never "
+             "used by the existing native/ai/fantasypros/external/adjusted sources -- ML-only.",
+    )
+    parser.add_argument("--projection-source", default="independent", help="Provenance label persisted on the saved lineup set (e.g. 'big_money_ml', 'native', 'ai', 'independent').")
+    parser.add_argument("--pitcher-model-version", default=None, help="Provenance only -- Big Money ML Pitcher Model version used, if --projection-source=big_money_ml.")
+    parser.add_argument("--hitter-model-version", default=None, help="Provenance only -- Big Money ML Hitter Model version used, if --projection-source=big_money_ml.")
+    parser.add_argument("--pitcher-projection-snapshot-generated-at", default=None, help="Provenance only -- generated_at of the Big Money ML pitcher snapshot consumed for this build.")
+    parser.add_argument("--hitter-projection-snapshot-generated-at", default=None, help="Provenance only -- generated_at of the Big Money ML hitter snapshot consumed for this build.")
     parser.add_argument("--lineups", type=int, default=1)
     parser.add_argument("--objective", choices=["projection", "ceiling", "balanced", "leverage"], default="projection")
     parser.add_argument("--min-unique", type=int, default=1)
@@ -197,7 +231,7 @@ def main() -> None:
 
     pool_doc = _load_pool(args.pool)
     projection_overrides = _load_projection_overrides(args.projection_overrides) if args.projection_overrides else None
-    players, skipped = _build_optimizer_players(pool_doc, projection_overrides)
+    players, skipped, excluded_missing_source = _build_optimizer_players(pool_doc, projection_overrides, strict_source=args.strict_projection_source)
 
     if not args.validate_only:
         print("=" * 70)
@@ -205,11 +239,14 @@ def main() -> None:
         print("=" * 70)
         print(f"\nSlate date: {args.date}")
         print(f"Player pool: {args.pool}")
+        print(f"Projection source: {args.projection_source}")
         print(f"Active players available: {len(players)}")
         if projection_overrides:
             print(f"Projection overrides: {args.projection_overrides} ({len(projection_overrides)} player(s))")
         if skipped:
             print(f"Skipped (active but missing projection/ceiling -- never invented): {len(skipped)}")
+        if excluded_missing_source:
+            print(f"Excluded (strict {args.projection_source} source -- no ML projection, never mixed with another source): {len(excluded_missing_source)}")
 
     ownership_doc = None
     if args.ownership:
@@ -306,6 +343,13 @@ def main() -> None:
         args.date, generated_at, args.pool, pool_doc.get("pitcher_snapshot_path"), pool_doc.get("batter_snapshot_path"),
         OPTIMIZER_VERSION, settings.to_dict(), result, output.players_by_key,
         ownership_snapshot_path=args.ownership,
+        projection_source=args.projection_source,
+        slate_id=pool_doc.get("selected_slate_id"),
+        pitcher_model_version=args.pitcher_model_version,
+        hitter_model_version=args.hitter_model_version,
+        pitcher_projection_snapshot_generated_at=args.pitcher_projection_snapshot_generated_at,
+        hitter_projection_snapshot_generated_at=args.hitter_projection_snapshot_generated_at,
+        excluded_missing_projection_source=excluded_missing_source,
     )
     json_path = save_lineup_set_json(document, args.date, ts, output_root=args.output_root)
     csv_path = save_lineup_set_csv(document, args.date, ts, output_root=args.output_root)

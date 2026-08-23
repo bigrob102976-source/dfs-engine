@@ -34,6 +34,19 @@ def build_lineup_set_document(
     slate_date: str, generated_at_utc: str, pool_path: str, pitcher_snapshot_path: Optional[str],
     batter_snapshot_path: Optional[str], optimizer_version: str, settings: dict, result, players_by_key: dict,
     ownership_snapshot_path: Optional[str] = None,
+    # Milestone 32.4 -- Big Money ML lineup provenance. All None/default
+    # for every pre-existing Projection Source (independent/external/
+    # adjusted/ai/native/fantasypros); populated only when a build
+    # actually used Big Money ML, so every prior document shape is
+    # unaffected (these keys simply carry null, same as before this
+    # milestone existed).
+    projection_source: str = "independent",
+    slate_id: Optional[str] = None,
+    pitcher_model_version: Optional[str] = None,
+    hitter_model_version: Optional[str] = None,
+    pitcher_projection_snapshot_generated_at: Optional[str] = None,
+    hitter_projection_snapshot_generated_at: Optional[str] = None,
+    excluded_missing_projection_source: Optional[list] = None,
 ) -> dict:
     return {
         "slate_date": slate_date,
@@ -49,6 +62,14 @@ def build_lineup_set_document(
         "lineups_generated": result.generated,
         "stopped_reason": result.stopped_reason,
         "lineups": [lu.to_dict() for lu in result.lineups],
+        # Milestone 32.4 provenance block.
+        "projection_source": projection_source,
+        "slate_id": slate_id,
+        "pitcher_model_version": pitcher_model_version,
+        "hitter_model_version": hitter_model_version,
+        "pitcher_projection_snapshot_generated_at": pitcher_projection_snapshot_generated_at,
+        "hitter_projection_snapshot_generated_at": hitter_projection_snapshot_generated_at,
+        "excluded_missing_projection_source": list(excluded_missing_projection_source or []),
     }
 
 

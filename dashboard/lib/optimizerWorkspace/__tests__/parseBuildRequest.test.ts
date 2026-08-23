@@ -119,7 +119,7 @@ describe("parseBuildRequest", () => {
   });
 
   it("accepts every real projection source", () => {
-    for (const projectionSource of ["independent", "external", "adjusted"]) {
+    for (const projectionSource of ["independent", "external", "adjusted", "ai", "native", "fantasypros", "big_money_ml"]) {
       const result = parseBuildRequest(baseBody({ projectionSource }));
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.request.projectionSource).toBe(projectionSource);

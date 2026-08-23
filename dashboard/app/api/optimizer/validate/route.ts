@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthApi } from "@/lib/auth/guards";
+import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { validateBuildRequest } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -25,6 +26,10 @@ export async function POST(request: Request) {
   const parsed = parseBuildRequest(body);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  if (parsed.request.projectionSource === "big_money_ml" && !userCanSelectBigMoneyMlOptimizerSource(userOrRes)) {
+    return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
   const errors = await validateBuildRequest(parsed.request);

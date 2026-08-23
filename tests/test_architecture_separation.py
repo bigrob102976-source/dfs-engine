@@ -343,13 +343,13 @@ def test_big_money_ml_never_imports_historical_mlb_modules_that_pull_in_evaluati
         assert not forbidden, f"{path.relative_to(PROJECT_ROOT)} imports {forbidden}, which transitively pulls in evaluation/."
 
 
-def test_big_money_ml_source_key_never_appears_in_optimizer_projection_source_type():
-    """Python-side proxy for the TypeScript check (see
-    dashboard/lib/__tests__/architectureSeparation.test.ts): the
-    optimizer's ProjectionSource union in
-    dashboard/lib/optimizerWorkspace/types.ts must never list
-    "big_money_ml" as a selectable value -- shadow mode means the
-    optimizer cannot select this source yet."""
+def test_big_money_ml_source_key_is_admin_gated_in_optimizer_projection_source_type():
+    """Milestone 32.4 DELIBERATELY supersedes M32.2B/M32.3B's shadow-only
+    guarantee: "big_money_ml" IS now a selectable ProjectionSource, for
+    ADMIN/OWNER users only. Python-side proxy for the TypeScript check
+    (see dashboard/lib/__tests__/architectureSeparation.test.ts) --
+    proves the source exists in the union AND that both optimizer API
+    routes enforce server-side admin gating (never trust the UI alone)."""
     import re
 
     types_ts = PROJECT_ROOT / "dashboard" / "lib" / "optimizerWorkspace" / "types.ts"
@@ -357,7 +357,32 @@ def test_big_money_ml_source_key_never_appears_in_optimizer_projection_source_ty
     match = re.search(r"export type ProjectionSource\s*=\s*([^;]+);", text)
     assert match is not None, "Could not find the ProjectionSource type union in types.ts -- check this test still matches its shape."
     union = match.group(1)
-    assert "big_money_ml" not in union, "big_money_ml must not appear in the ProjectionSource union -- the optimizer must not be able to select the ML shadow source yet."
+    assert "big_money_ml" in union, "big_money_ml must appear in the ProjectionSource union as of Milestone 32.4."
+
+    for route in ("build", "validate"):
+        route_text = (PROJECT_ROOT / "dashboard" / "app" / "api" / "optimizer" / route / "route.ts").read_text(encoding="utf-8")
+        assert "userCanSelectBigMoneyMlOptimizerSource" in route_text, f"{route}/route.ts must enforce Big Money ML admin gating server-side."
+        assert 'projectionSource === "big_money_ml"' in route_text
+
+
+def test_big_money_ml_optimizer_feature_flag_seeded_admin_only():
+    """The 'mlb.big_money_ml_optimizer' feature flag must default
+    ADMIN_ONLY, not PRODUCTION/BETA -- shipping this migration must
+    cause zero behavior change for any current member."""
+    migration = (PROJECT_ROOT / "dashboard" / "lib" / "db" / "migrations" / "0006_big_money_ml_optimizer_flag.sql").read_text(encoding="utf-8")
+    assert "mlb.big_money_ml_optimizer" in migration
+    assert "ADMIN_ONLY" in migration
+
+
+def test_optimize_dk_lineups_strict_source_never_falls_back_to_independent_projection():
+    """Structural proof of the "no mixed-source fallback" guarantee:
+    scripts/optimize_dk_lineups.py's strict_source path must exclude a
+    player with no override entry rather than reading the pool's own
+    independent projection for them."""
+    script_text = (PROJECT_ROOT / "scripts" / "optimize_dk_lineups.py").read_text(encoding="utf-8")
+    assert "strict_source" in script_text
+    assert "--strict-projection-source" in script_text
+    assert "excluded_missing_source" in script_text
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,44 @@ def test_document_has_required_provenance_fields():
     assert doc["timezone"] == "America/Chicago"
 
 
+def test_document_defaults_projection_source_to_independent_and_null_ml_provenance():
+    """Every pre-M32.4 build (native/ai/fantasypros/external/adjusted/
+    independent) must keep getting this exact shape -- projection_source
+    defaults to 'independent', every ML-specific field stays null."""
+    doc = _document()
+    assert doc["projection_source"] == "independent"
+    assert doc["slate_id"] is None
+    assert doc["pitcher_model_version"] is None
+    assert doc["hitter_model_version"] is None
+    assert doc["pitcher_projection_snapshot_generated_at"] is None
+    assert doc["hitter_projection_snapshot_generated_at"] is None
+    assert doc["excluded_missing_projection_source"] == []
+
+
+def test_document_persists_big_money_ml_provenance_when_supplied():
+    players = feasible_pool()
+    out = generate_lineups(players, OptimizerSettings(num_lineups=2, min_unique=1))
+    doc = build_lineup_set_document(
+        "2026-08-11", "2026-08-11T18:00:00+00:00", "dfs_input/2026-08-11/dk_player_pool_x.json",
+        "predictions/2026-08-11/pitcher_board_x.json", "predictions/2026-08-11/batter_board_x.json",
+        OPTIMIZER_VERSION, OptimizerSettings(num_lineups=2).to_dict(), out.result, out.players_by_key,
+        projection_source="big_money_ml",
+        slate_id="dkunofficial-152543",
+        pitcher_model_version="1.0.0",
+        hitter_model_version="1.0.0",
+        pitcher_projection_snapshot_generated_at="2026-08-22T20:18:43+00:00",
+        hitter_projection_snapshot_generated_at="2026-08-22T22:11:56+00:00",
+        excluded_missing_projection_source=["Bench Guy"],
+    )
+    assert doc["projection_source"] == "big_money_ml"
+    assert doc["slate_id"] == "dkunofficial-152543"
+    assert doc["pitcher_model_version"] == "1.0.0"
+    assert doc["hitter_model_version"] == "1.0.0"
+    assert doc["pitcher_projection_snapshot_generated_at"] == "2026-08-22T20:18:43+00:00"
+    assert doc["hitter_projection_snapshot_generated_at"] == "2026-08-22T22:11:56+00:00"
+    assert doc["excluded_missing_projection_source"] == ["Bench Guy"]
+
+
 def test_json_save_and_no_overwrite(tmp_path):
     doc = _document()
     path = save_lineup_set_json(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)

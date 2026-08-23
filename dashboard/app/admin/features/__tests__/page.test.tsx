@@ -14,12 +14,16 @@ beforeEach(() => {
 });
 
 describe("AdminFeaturesPage", () => {
-  it("lists every seeded feature flag, all PRODUCTION by default", async () => {
+  it("lists every seeded page-level feature flag as PRODUCTION by default, and the M32.4 Big Money ML optimizer capability as ADMIN_ONLY", async () => {
     render(await AdminFeaturesPage());
 
     expect(screen.getByText("Optimizer")).toBeInTheDocument();
+    expect(screen.getByText("Big Money ML Optimizer")).toBeInTheDocument();
     const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
     expect(selects.length).toBeGreaterThan(0);
-    expect(selects.every((s) => s.value === "PRODUCTION")).toBe(true);
+    // Every page-level flag (Optimizer, Pitchers, Hitters, ...) still
+    // defaults PRODUCTION; the one M32.4 addition defaults ADMIN_ONLY.
+    expect(selects.some((s) => s.value === "ADMIN_ONLY")).toBe(true);
+    expect(selects.filter((s) => s.value === "PRODUCTION").length).toBeGreaterThan(0);
   });
 });

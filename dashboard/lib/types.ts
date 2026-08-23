@@ -278,6 +278,16 @@ export interface LineupSet extends TimestampFields, JsonRecord {
   lineups_generated: number;
   stopped_reason: string | null;
   lineups: Lineup[];
+  // Milestone 32.4 -- Big Money ML lineup provenance. "independent" and
+  // null for every build made before this milestone (optional so older
+  // persisted lineup sets on disk still parse).
+  projection_source?: string;
+  slate_id?: string | null;
+  pitcher_model_version?: string | null;
+  hitter_model_version?: string | null;
+  pitcher_projection_snapshot_generated_at?: string | null;
+  hitter_projection_snapshot_generated_at?: string | null;
+  excluded_missing_projection_source?: string[];
 }
 
 // ---------------------------------------------------------------------------

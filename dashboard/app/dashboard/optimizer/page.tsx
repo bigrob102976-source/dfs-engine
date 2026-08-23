@@ -1,6 +1,8 @@
 import { OptimizerView } from "@/components/OptimizerView";
 import { OptimizerWorkspace } from "@/components/optimizer/OptimizerWorkspace";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { listLineupSets } from "@/lib/loaders";
 import { isValidSlateDateString } from "@/lib/slateDate";
 import type { LineupSet } from "@/lib/types";
@@ -34,12 +36,21 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
     .filter((r): r is typeof r & { data: LineupSet } => r.data !== null)
     .map((r) => ({ filename: r.filename, data: r.data }));
 
+  // Milestone 32.4: Big Money ML optimizer selection is ADMIN/OWNER-only
+  // (default ADMIN_ONLY feature flag) -- resolved server-side and passed
+  // down as a plain boolean prop; the client component never touches
+  // the DB/session itself (see app/api/optimizer/build/route.ts for the
+  // matching server-side enforcement -- this prop only controls whether
+  // the option is OFFERED in the UI, never the actual authorization).
+  const user = await getCurrentUser();
+  const canUseBigMoneyMl = userCanSelectBigMoneyMlOptimizerSource(user);
+
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Optimizer</h1>
       <p className="mb-4 text-xs text-text-faint">Select a DFS slate date, configure constraints, and build lineups.</p>
 
-      <OptimizerWorkspace initialDate={initialDate} />
+      <OptimizerWorkspace initialDate={initialDate} canUseBigMoneyMl={canUseBigMoneyMl} />
 
       {runs.length > 0 && (
         <div className="mt-8">

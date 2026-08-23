@@ -105,3 +105,48 @@ def test_predict_hitter_never_returns_confidence_field():
 def test_predict_hitter_raises_clearly_when_no_artifact_exists(tmp_path):
     with pytest.raises(FileNotFoundError):
         predict_hitter({"player_id": "1"}, artifact_dir=tmp_path)
+
+
+def test_predict_hitter_with_preloaded_pipeline_is_numerically_equivalent_to_fresh_load(trained_artifact_dir):
+    """Milestone 32.4 performance optimization -- passing an
+    already-loaded pipeline/feature_list/metadata must produce a
+    BYTE-IDENTICAL projection to the fresh-load-every-call path."""
+    from historical_models.hitter_v1.persistence import FEATURE_LIST_FILENAME, METADATA_FILENAME, load_json, load_model
+
+    artifact_dir, X = trained_artifact_dir
+    features = X.iloc[0].to_dict()
+    features["player_id"] = "12345"
+
+    fresh = predict_hitter(features, artifact_dir=artifact_dir)
+
+    pipeline = load_model(artifact_dir)
+    feature_list = load_json(artifact_dir, FEATURE_LIST_FILENAME)
+    metadata = load_json(artifact_dir, METADATA_FILENAME)
+    preloaded = predict_hitter(features, artifact_dir=artifact_dir, pipeline=pipeline, feature_list=feature_list, metadata=metadata)
+
+    assert preloaded.projection == fresh.projection
+    assert preloaded.model_version == fresh.model_version
+    assert preloaded.feature_availability_class == fresh.feature_availability_class
+    assert preloaded.feature_coverage == fresh.feature_coverage
+    assert preloaded.data_quality_score == fresh.data_quality_score
+
+
+def test_predict_hitter_never_reloads_model_when_pipeline_is_preloaded(trained_artifact_dir, monkeypatch):
+    """Proves the performance fix actually skips the disk read -- not
+    just that output happens to match."""
+    import historical_models.hitter_v1.inference as inference_module
+
+    artifact_dir, X = trained_artifact_dir
+    features = X.iloc[0].to_dict()
+
+    pipeline = inference_module.load_model(artifact_dir)
+    feature_list = inference_module.load_json(artifact_dir, inference_module.FEATURE_LIST_FILENAME)
+    metadata = inference_module.load_json(artifact_dir, inference_module.METADATA_FILENAME)
+
+    def _boom(_artifact_dir):
+        raise AssertionError("load_model must not be called when a pipeline is already supplied")
+
+    monkeypatch.setattr(inference_module, "load_model", _boom)
+
+    result = predict_hitter(features, artifact_dir=artifact_dir, pipeline=pipeline, feature_list=feature_list, metadata=metadata)
+    assert isinstance(result, HitterModelPrediction)

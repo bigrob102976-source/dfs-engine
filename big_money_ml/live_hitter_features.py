@@ -67,6 +67,7 @@ def build_live_pregame_hitter_features(
     statcast_buffer: LiveStatcastBuffer,
     opposing_starter_id: str,
     batting_order_actual: int,
+    opposing_pitcher_cache: Optional[Dict[str, dict]] = None,
 ) -> LivePregameHitterFeatureResult:
     """Mirrors historical_mlb.hitter_features.build_hitter_game_row's
     PREGAME portion exactly (same sub-function calls, same argument
@@ -74,7 +75,19 @@ def build_live_pregame_hitter_features(
     callers must supply an already-confirmed opposing_starter_id and
     batting_order_actual (see eligible_hitters.py / hitter_shadow_
     inference.py) -- this function does not decide eligibility, it
-    only computes features once eligibility is already established."""
+    only computes features once eligibility is already established.
+
+    Milestone 32.4 performance optimization -- `opposing_pitcher_cache`
+    is an OPTIONAL shared dict a caller running many hitters in one
+    slate refresh (hitter_shadow_inference.py) may pass in so that
+    hitters facing the SAME opposing starter (up to 8-9 per game) reuse
+    one fetch_person/fetch_pitcher_game_log result instead of refetching
+    it once per hitter. `as_of_date` is constant across one slate run,
+    so caching purely by opposing_starter_id is safe within that scope.
+    Omitting it (the default) preserves the exact prior always-fetch
+    behavior -- purely additive, never weakens data freshness (the cache
+    only ever lives for the duration of one Python process's run, never
+    persisted, never reused across slate refreshes)."""
     warnings: List[str] = []
     season = as_of_date[:4]
 
@@ -132,19 +145,27 @@ def build_live_pregame_hitter_features(
         for stat in ("pa", "avg", "obp", "slg", "woba"):
             row[f"platoon_{side}_{stat}"] = platoon[side][stat]
 
-    opposing_person = fetch_person(opposing_starter_id)
-    opposing_hand = (_person_handedness(opposing_person) or {}).get("throw_hand")
-    if opposing_hand is None:
+    cache = opposing_pitcher_cache if opposing_pitcher_cache is not None else {}
+    cached = cache.get(opposing_starter_id)
+    if cached is None:
+        opposing_person = fetch_person(opposing_starter_id)
+        opposing_hand = (_person_handedness(opposing_person) or {}).get("throw_hand")
+        opposing_season_log = _unwrap_game_log(fetch_pitcher_game_log(opposing_starter_id, season))
+        opposing_season_stats = build_rolling_pitcher_stats(opposing_season_log, target_game_date=as_of_date, window_days=None, window_label="season")
+        cached = {
+            "hand": opposing_hand, "era": opposing_season_stats.era, "k_pct": opposing_season_stats.k_rate,
+            "has_season_log": bool(opposing_season_log),
+        }
+        cache[opposing_starter_id] = cached
+
+    if cached["hand"] is None:
         warnings.append(f"No throw_hand available from MLB Stats API for opposing starter {opposing_starter_id}.")
-
-    opposing_season_log = _unwrap_game_log(fetch_pitcher_game_log(opposing_starter_id, season))
-    if not opposing_season_log:
+    if not cached["has_season_log"]:
         warnings.append(f"No current-season game log for opposing starter {opposing_starter_id} -- opposing_pitcher_era_season/k_pct_season will be None.")
-    opposing_season_stats = build_rolling_pitcher_stats(opposing_season_log, target_game_date=as_of_date, window_days=None, window_label="season")
 
-    row["opposing_starting_pitcher_hand"] = opposing_hand
-    row["opposing_pitcher_era_season"] = opposing_season_stats.era
-    row["opposing_pitcher_k_pct_season"] = opposing_season_stats.k_rate
+    row["opposing_starting_pitcher_hand"] = cached["hand"]
+    row["opposing_pitcher_era_season"] = cached["era"]
+    row["opposing_pitcher_k_pct_season"] = cached["k_pct"]
 
     row["batting_order_actual"] = batting_order_actual
 

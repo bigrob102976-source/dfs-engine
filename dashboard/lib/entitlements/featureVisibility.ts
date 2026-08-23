@@ -32,3 +32,14 @@ export function listVisibleFeatureKeysForUser(user: { id: string; role: string }
   }
   return keys;
 }
+
+export const BIG_MONEY_ML_OPTIMIZER_FLAG_KEY = "mlb.big_money_ml_optimizer";
+
+/** Milestone 32.4: server-side gate for selecting Big Money ML as an
+ * optimizer projection source -- checked in BOTH the build and validate
+ * API routes (never trust the UI selector alone). Reuses the same
+ * feature-flag/entitlement machinery every other gated capability in
+ * this app already goes through; no new authorization mechanism. */
+export function userCanSelectBigMoneyMlOptimizerSource(user: { id: string; role: string } | null): boolean {
+  return isFeatureVisibleToUser(user, BIG_MONEY_ML_OPTIMIZER_FLAG_KEY);
+}

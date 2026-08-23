@@ -131,6 +131,63 @@ def test_build_live_pregame_hitter_features_home_away_selects_correct_roof_team(
     assert away_result.features["venue_roof_type"] == home_result.features["venue_roof_type"]
 
 
+def test_opposing_pitcher_cache_avoids_refetching_for_a_shared_opposing_starter(monkeypatch):
+    """Milestone 32.4 performance optimization: two hitters facing the
+    SAME opposing starter within one shared cache dict must trigger only
+    ONE fetch_person/fetch_pitcher_game_log call for that starter, not two."""
+    monkeypatch.setattr(live_hitter_features, "fetch_batter_game_log", lambda player_id, season: None)
+
+    call_counts = {"person": 0, "game_log": 0}
+
+    def counting_person(player_id):
+        if player_id == "111":
+            call_counts["person"] += 1
+        return {"batSide": {"code": "R"}, "pitchHand": {"code": "L"}}
+
+    def counting_game_log(player_id, season):
+        if player_id == "111":
+            call_counts["game_log"] += 1
+        return None
+
+    monkeypatch.setattr(live_hitter_features, "fetch_person", counting_person)
+    monkeypatch.setattr(live_hitter_features, "fetch_pitcher_game_log", counting_game_log)
+
+    buffer = LiveStatcastBuffer()
+    shared_cache: dict = {}
+
+    for player_id in ("100", "200"):
+        build_live_pregame_hitter_features(
+            player_id=player_id, team="NYY", opponent="BOS", home_away="home",
+            as_of_date="2026-08-22", venue_id=15, statcast_buffer=buffer,
+            opposing_starter_id="111", batting_order_actual=2,
+            opposing_pitcher_cache=shared_cache,
+        )
+
+    assert call_counts["person"] == 1
+    assert call_counts["game_log"] == 1
+
+
+def test_opposing_pitcher_cache_still_produces_correct_values_for_every_hitter(monkeypatch):
+    """The cache must never change the RESULT -- both hitters facing the
+    same opposing starter must see identical opposing_* feature values."""
+    monkeypatch.setattr(live_hitter_features, "fetch_batter_game_log", lambda player_id, season: None)
+    monkeypatch.setattr(live_hitter_features, "fetch_person", lambda player_id: {"batSide": {"code": "R"}, "pitchHand": {"code": "L"}})
+    monkeypatch.setattr(live_hitter_features, "fetch_pitcher_game_log", lambda player_id, season: None)
+
+    buffer = LiveStatcastBuffer()
+    shared_cache: dict = {}
+    results = [
+        build_live_pregame_hitter_features(
+            player_id=player_id, team="NYY", opponent="BOS", home_away="home",
+            as_of_date="2026-08-22", venue_id=15, statcast_buffer=buffer,
+            opposing_starter_id="111", batting_order_actual=2,
+            opposing_pitcher_cache=shared_cache,
+        )
+        for player_id in ("100", "200")
+    ]
+    assert results[0].features["opposing_starting_pitcher_hand"] == results[1].features["opposing_starting_pitcher_hand"] == "L"
+
+
 def test_no_current_slate_imputation_fitting():
     """Train-time imputation statistics come only from the frozen
     artifact's own preprocessor. This module only ever COMPUTES raw

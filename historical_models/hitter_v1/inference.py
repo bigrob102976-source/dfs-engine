@@ -56,12 +56,26 @@ def _family_coverage(row: Dict[str, Any], feature_list: List[str], prefix: str) 
     return available / len(cols)
 
 
-def predict_hitter(features: Dict[str, Any], artifact_dir: Optional[Path] = None) -> HitterModelPrediction:
+def predict_hitter(
+    features: Dict[str, Any], artifact_dir: Optional[Path] = None,
+    pipeline: Optional[Any] = None, feature_list: Optional[List[str]] = None, metadata: Optional[dict] = None,
+) -> HitterModelPrediction:
+    """Milestone 32.4 -- `pipeline`/`feature_list`/`metadata` are an
+    OPTIONAL performance escape hatch: a caller running many predictions
+    in one process (e.g. big_money_ml/hitter_shadow_inference.py's
+    per-slate loop) may load the artifact ONCE and pass it in here on
+    every call, instead of this function re-reading model.joblib/
+    feature_list.json/metadata.json from disk on every single hitter.
+    Omitting them preserves the exact prior behavior (load fresh every
+    call) -- purely additive, output is byte-identical either way since
+    it's the same fitted pipeline object either way."""
     artifact_dir = Path(artifact_dir or DEFAULT_ARTIFACT_DIR)
-    feature_list = load_json(artifact_dir, FEATURE_LIST_FILENAME)
     if feature_list is None:
-        raise FileNotFoundError(f"No feature_list.json found under {artifact_dir} -- run historical_models.hitter_v1.train first.")
-    metadata = load_json(artifact_dir, METADATA_FILENAME) or {}
+        feature_list = load_json(artifact_dir, FEATURE_LIST_FILENAME)
+        if feature_list is None:
+            raise FileNotFoundError(f"No feature_list.json found under {artifact_dir} -- run historical_models.hitter_v1.train first.")
+    if metadata is None:
+        metadata = load_json(artifact_dir, METADATA_FILENAME) or {}
 
     # Identity fields are explicitly allowed in the CALLER's input dict
     # (retained for joining/evaluation/reporting -- see the milestone's
@@ -73,7 +87,8 @@ def predict_hitter(features: Dict[str, Any], artifact_dir: Optional[Path] = None
     non_identity_keys = [k for k in features.keys() if k not in _ALLOWED_IDENTITY_KEYS_IN_INPUT]
     assert_no_leakage(non_identity_keys)
     assert_no_leakage(feature_list)
-    pipeline = load_model(artifact_dir)
+    if pipeline is None:
+        pipeline = load_model(artifact_dir)
 
     row = {col: features.get(col) for col in feature_list}
     missing_features = [col for col, value in row.items() if value is None]

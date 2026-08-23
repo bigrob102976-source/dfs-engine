@@ -8,6 +8,7 @@ import { PrimaryButton } from "@/components/ui/Button";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
 import { resolveExternalSourceLabel } from "@/lib/projectionLabels";
+import type { BigMoneyMlCoverage } from "@/lib/bigMoneyMlOptimizer";
 import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
 import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
 import { isValidSlateDateString } from "@/lib/slateDate";
@@ -50,8 +51,15 @@ function formatTime(iso: string | null): string {
  * date" -- selectedDate then falls back to whatever was persisted from
  * a previous session, or stays null (server APIs default to Chicago-
  * today themselves, exactly matching this component's pre-M31.2C
- * behavior when selectedDate is never set at all). */
-export function OptimizerWorkspace({ initialDate = null }: { initialDate?: string | null }) {
+ * behavior when selectedDate is never set at all).
+ *
+ * Milestone 32.4: `canUseBigMoneyMl` is resolved SERVER-SIDE (see
+ * app/dashboard/optimizer/page.tsx) from the 'mlb.big_money_ml_optimizer'
+ * feature flag (default ADMIN_ONLY) -- this prop only controls whether
+ * the option is OFFERED in this component's UI; actual authorization is
+ * enforced again server-side in /api/optimizer/build and /validate, so
+ * a stale/tampered client value here can never bypass it. */
+export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = false }: { initialDate?: string | null; canUseBigMoneyMl?: boolean }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
@@ -89,6 +97,9 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
   // a slate has no native snapshot yet, so this is never a silent trap.
   const [projectionSource, setProjectionSource] = useState<ProjectionSource>("native");
   const [showProjectionComparison, setShowProjectionComparison] = useState(false);
+  // Milestone 32.4: BIG MONEY ML COVERAGE gate -- fetched only for ADMIN,
+  // only once a pool is loaded, never blocks build/validate on its own.
+  const [mlCoverage, setMlCoverage] = useState<BigMoneyMlCoverage | null>(null);
 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [building, setBuilding] = useState(false);
@@ -125,7 +136,11 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
         setMinUnique(persisted.minUnique);
         setLineups(persisted.lineups);
         setObjective(persisted.objective);
-        setProjectionSource(persisted.projectionSource ?? "native");
+        const persistedSource = persisted.projectionSource ?? "native";
+        // A big_money_ml value persisted while ADMIN, later loaded by a
+        // MEMBER (or after the flag flipped) must never silently stick --
+        // fall back to native rather than surface an unreachable option.
+        setProjectionSource(persistedSource === "big_money_ml" && !canUseBigMoneyMl ? "native" : persistedSource);
         setShowProjectionComparison(persisted.showProjectionComparison ?? false);
       }
       setHydrated(true);
@@ -356,10 +371,38 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
     const aiUnavailable = projectionSource === "ai" && !pool.hasAiProjections;
     const nativeUnavailable = projectionSource === "native" && !pool.hasNativeProjections;
     const fantasyProsUnavailable = projectionSource === "fantasypros" && !pool.hasFantasyProsProjections;
-    if (externalUnavailable || aiUnavailable || nativeUnavailable || fantasyProsUnavailable) {
+    // Milestone 32.4: also falls back if the ADMIN's browser somehow has
+    // big_money_ml persisted but this slate has no ML coverage yet, or
+    // if canUseBigMoneyMl became false (e.g. flag flipped mid-session).
+    const mlUnavailable = projectionSource === "big_money_ml" && (!canUseBigMoneyMl || !pool.hasMlProjections);
+    if (externalUnavailable || aiUnavailable || nativeUnavailable || fantasyProsUnavailable || mlUnavailable) {
       Promise.resolve().then(() => setProjectionSource("independent"));
     }
-  }, [pool, projectionSource]);
+  }, [pool, projectionSource, canUseBigMoneyMl]);
+
+  // Milestone 32.4: BIG MONEY ML COVERAGE gate -- ADMIN-only, fetched
+  // once a pool is loaded so the coverage numbers are ready the moment
+  // the option is offered (not only after selecting it).
+  useEffect(() => {
+    if (!canUseBigMoneyMl || !pool || !selectedSlateId) {
+      Promise.resolve().then(() => setMlCoverage(null));
+      return;
+    }
+    let cancelled = false;
+    const params = new URLSearchParams({ slateId: selectedSlateId });
+    if (selectedDate) params.set("date", selectedDate);
+    fetch(`/api/optimizer/ml-coverage?${params.toString()}`)
+      .then((res) => res.json())
+      .then((body) => {
+        if (!cancelled) setMlCoverage(body?.coverage ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMlCoverage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseBigMoneyMl, pool, selectedSlateId, selectedDate]);
 
   // 5. Debounced, authoritative pre-solve validation (reuses the real
   // optimizer's own resolve_settings()/pre_solve_diagnostics() via
@@ -551,6 +594,7 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
             [
               { value: "native" as ProjectionSource, label: "Big Money Native" },
               { value: "ai" as ProjectionSource, label: "Big Money AI" },
+              ...(canUseBigMoneyMl ? [{ value: "big_money_ml" as ProjectionSource, label: "Big Money ML" }] : []),
               { value: "external" as ProjectionSource, label: externalSourceLabel },
               { value: "adjusted" as ProjectionSource, label: `${externalSourceLabel} (Adjusted)` },
               { value: "fantasypros" as ProjectionSource, label: "FantasyPros" },
@@ -561,6 +605,7 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
               opt.value === "ai" ? !pool?.hasAiProjections
               : opt.value === "native" ? !pool?.hasNativeProjections
               : opt.value === "fantasypros" ? !pool?.hasFantasyProsProjections
+              : opt.value === "big_money_ml" ? !pool?.hasMlProjections
               : opt.value !== "independent" && !pool?.hasExternalProjections;
             return (
               <button
@@ -573,7 +618,9 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
                   projectionSource === opt.value
                     ? opt.value === "ai" || opt.value === "native"
                       ? "bg-purple/20 text-purple"
-                      : "bg-accent-dim text-text"
+                      : opt.value === "big_money_ml"
+                        ? "bg-yellow/20 text-yellow"
+                        : "bg-accent-dim text-text"
                     : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
                 } disabled:cursor-not-allowed disabled:opacity-40`}
               >
@@ -592,12 +639,49 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
         {!pool?.hasFantasyProsProjections && (
           <span className="text-[11px] text-text-faint">FantasyPros not available -- not configured, no matched players, or not fetched yet.</span>
         )}
+        {canUseBigMoneyMl && !pool?.hasMlProjections && (
+          <span className="text-[11px] text-text-faint">Big Money ML not generated yet for this slate -- run the shadow-inference step during Process/Refresh.</span>
+        )}
 
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
           <input type="checkbox" checked={showProjectionComparison} onChange={(e) => setShowProjectionComparison(e.target.checked)} />
           Show comparison columns
         </label>
       </div>
+
+      {/* Milestone 32.4: BIG MONEY ML COVERAGE gate + EXPERIMENTAL/OWNER
+          TEST labeling -- shown only once big_money_ml is actually the
+          selected source, informational only (never blocks the build by
+          itself; strict-source exclusion + roster feasibility diagnostics
+          handle that if coverage is too thin). */}
+      {projectionSource === "big_money_ml" && (
+        <div className="rounded-[var(--radius-card)] border border-yellow/40 bg-yellow/5 p-3 text-xs shadow-[var(--shadow-card)]">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="rounded bg-yellow/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow">Experimental</span>
+            <span className="rounded bg-yellow/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow">Owner Test</span>
+            <span className="font-medium text-text">Big Money ML</span>
+            {mlCoverage && (
+              <span className="text-text-faint">
+                Pitchers v{mlCoverage.pitcherModelVersion ?? "--"} &middot; Hitters v{mlCoverage.hitterModelVersion ?? "--"}
+              </span>
+            )}
+          </div>
+          {mlCoverage ? (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <StatusStat label="Pitchers" value={`${mlCoverage.pitchers.generated}/${mlCoverage.pitchers.eligible}`} />
+              <StatusStat label="Hitters" value={`${mlCoverage.hitters.generated}/${mlCoverage.hitters.eligible}`} />
+              <StatusStat label="Combined" value={`${mlCoverage.combined.generated}/${mlCoverage.combined.eligible}`} />
+              <StatusStat label="Games Waiting For Lineups" value={mlCoverage.gamesWaitingForLineups} />
+            </div>
+          ) : (
+            <p className="text-text-faint">Loading ML coverage...</p>
+          )}
+          <p className="mt-2 text-[11px] text-text-faint">
+            ML-only means ML-only: any optimizer-eligible player without a valid pregame ML projection is EXCLUDED from this build, never
+            silently mixed with Native/AI/FantasyPros/Legacy.
+          </p>
+        </div>
+      )}
 
       {slateUnavailableMessage && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{slateUnavailableMessage}</div>
@@ -710,7 +794,7 @@ export function OptimizerWorkspace({ initialDate = null }: { initialDate?: strin
   );
 }
 
-function StatusStat({ label, value }: { label: string; value: number }) {
+function StatusStat({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wide text-text-faint">{label}</div>

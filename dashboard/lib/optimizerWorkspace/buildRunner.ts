@@ -6,6 +6,7 @@ import { getAiProjectionByPlayerId } from "../aiProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
+import { getBigMoneyMlProvenance, getMlProjectionByPlayerId } from "../mlProjections";
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
@@ -34,7 +35,21 @@ import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
  * "fantasypros" changes ONLY the projection source; eligibility, salary,
  * positions, Vegas, ownership, constraints, and stacks are untouched --
  * getFantasyProsProjectionByPlayerId already only contains MATCHED
- * players, so an unmatched/off-slate player is simply absent here too. */
+ * players, so an unmatched/off-slate player is simply absent here too.
+ *
+ * Milestone 32.4: "big_money_ml" is DIFFERENT from every source above --
+ * see isStrictProjectionSource below. It still writes the same override
+ * shape (only players with a genuinely valid, pregame-captured ML
+ * projection get an entry -- MISSING/INVALID_FEATURE_PARITY rows are
+ * never included, same discipline as the Projection Lab's ML column),
+ * but scripts/optimize_dk_lineups.py is told (via --strict-projection-
+ * source) to EXCLUDE any optimizer-eligible player who has no entry
+ * here, rather than falling back to their independent projection --
+ * "ML-only means ML-only," never a hidden mixture of sources. */
+export function isStrictProjectionSource(source: OptimizerBuildRequest["projectionSource"]): boolean {
+  return source === "big_money_ml";
+}
+
 function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
   if (request.projectionSource === "independent") return null;
 
@@ -57,6 +72,18 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
       if (player.dk_points === null) continue;
       overrides[mlbPlayerId] = { projection: player.dk_points, ceiling: null, floor: null };
     }
+  } else if (request.projectionSource === "big_money_ml") {
+    const mlByPlayerId = getMlProjectionByPlayerId(request.date);
+    for (const [mlbPlayerId, player] of mlByPlayerId) {
+      if (player.projection === null) continue;
+      if (player.projection_status !== "LIVE_PREGAME" && player.projection_status !== "PREGAME_FROZEN") continue;
+      // No ML ceiling/floor exists (the frozen models output a point
+      // projection only) -- left null so scripts/optimize_dk_lineups.py
+      // falls back to the pool's own independent ceiling/floor, same
+      // documented exception FantasyPros already uses above. Only the
+      // PROJECTION value itself is held to strict source purity.
+      overrides[mlbPlayerId] = { projection: player.projection, ceiling: null, floor: null };
+    }
   } else {
     const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
     for (const [mlbPlayerId, row] of comparisonByPlayerId) {
@@ -65,7 +92,14 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
       overrides[mlbPlayerId] = { projection, ceiling: null, floor: null };
     }
   }
-  if (Object.keys(overrides).length === 0) return null;
+  // Milestone 32.4: an empty ML overrides map must still produce an
+  // (empty) file rather than null -- returning null here would make
+  // buildArgv omit --projection-overrides entirely, and combined with
+  // --strict-projection-source that would mean "no overrides file
+  // loaded" reads as an empty dict either way, so this is actually safe
+  // either way -- but writing the empty file keeps the on-disk record
+  // honest about which source was actually selected for this build.
+  if (Object.keys(overrides).length === 0 && !isStrictProjectionSource(request.projectionSource)) return null;
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mlb-dfs-projection-overrides-"));
   const filePath = path.join(dir, "overrides.json");
@@ -88,6 +122,15 @@ function buildArgv(
   const args: string[] = ["--date", request.date, "--pool", poolPath];
   if (ownershipPath) args.push("--ownership", ownershipPath);
   if (projectionOverridesPath) args.push("--projection-overrides", projectionOverridesPath);
+  args.push("--projection-source", request.projectionSource);
+  if (isStrictProjectionSource(request.projectionSource)) {
+    args.push("--strict-projection-source");
+    const provenance = getBigMoneyMlProvenance(request.date);
+    if (provenance.pitcherModelVersion) args.push("--pitcher-model-version", provenance.pitcherModelVersion);
+    if (provenance.hitterModelVersion) args.push("--hitter-model-version", provenance.hitterModelVersion);
+    if (provenance.pitcherSnapshotGeneratedAt) args.push("--pitcher-projection-snapshot-generated-at", provenance.pitcherSnapshotGeneratedAt);
+    if (provenance.hitterSnapshotGeneratedAt) args.push("--hitter-projection-snapshot-generated-at", provenance.hitterSnapshotGeneratedAt);
+  }
   args.push("--lineups", String(request.lineups));
   args.push("--objective", request.objective);
   args.push("--min-unique", String(request.minUnique));
@@ -156,6 +199,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
       stoppedReason: null,
       lineups: [],
       elapsedMs: Date.now() - startedAt,
+      excludedMissingProjectionSource: [],
     };
   }
 
@@ -171,6 +215,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
       stoppedReason: null,
       lineups: [],
       elapsedMs: Date.now() - startedAt,
+      excludedMissingProjectionSource: [],
     };
   }
 
@@ -198,6 +243,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
       stoppedReason: null,
       lineups: [],
       elapsedMs,
+      excludedMissingProjectionSource: [],
     };
   }
 
@@ -214,5 +260,6 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     stoppedReason: doc?.stopped_reason ?? null,
     lineups: doc?.lineups ?? [],
     elapsedMs,
+    excludedMissingProjectionSource: doc?.excluded_missing_projection_source ?? [],
   };
 }

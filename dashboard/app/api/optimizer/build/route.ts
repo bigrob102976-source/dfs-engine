@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthApi } from "@/lib/auth/guards";
+import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { buildLineups } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -30,6 +31,13 @@ export async function POST(request: Request) {
   const parsed = parseBuildRequest(body);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  // Milestone 32.4: Big Money ML optimizer selection is ADMIN/OWNER-only
+  // (feature flag 'mlb.big_money_ml_optimizer', default ADMIN_ONLY) --
+  // enforced here server-side, never trusting the UI selector alone.
+  if (parsed.request.projectionSource === "big_money_ml" && !userCanSelectBigMoneyMlOptimizerSource(userOrRes)) {
+    return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
   const result = await buildLineups(parsed.request);

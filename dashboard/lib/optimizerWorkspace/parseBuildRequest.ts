@@ -3,7 +3,13 @@ import { isValidSlateId } from "./validateSlateId";
 import type { OptimizerBuildRequest } from "./types";
 
 const OBJECTIVES = new Set(["projection", "ceiling", "balanced", "leverage"]);
-const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai", "native"]);
+// "fantasypros" was missing here despite being a real, wired-up
+// buildRunner.ts branch since FantasyPros' own milestone -- fixed
+// alongside adding "big_money_ml" (Milestone 32.4) rather than leaving
+// a second inconsistency. Admin-only enforcement for "big_money_ml" is
+// a SEPARATE check in app/api/optimizer/build/route.ts (never trust
+// this list alone for authorization -- it only validates shape).
+const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai", "native", "fantasypros", "big_money_ml"]);
 
 export type ParseResult = { ok: true; request: OptimizerBuildRequest } | { ok: false; error: string };
 
