@@ -131,6 +131,27 @@ export async function runSlatePipeline(
     errors.push(`FantasyPros API error: ${tail(fantasyProsResult.stdout, 400)}`);
   }
 
+  // BlueCollar DFS (optional, ADMIN-testable comparison/optimizer
+  // source -- never affects `status` below). Same non-blocking contract
+  // as FantasyPros above: scripts/fetch_bluecollar_projections.py
+  // always exits 0 for every EXPECTED outcome (not configured, no
+  // research yet, slate match ambiguous/failed, API error) and reports
+  // status via a trailing JSON line -- BlueCollar being down or
+  // unmatched must never fail the whole slate refresh. This is the
+  // ONLY place BlueCollar's API is ever called from -- a member's page
+  // load only ever reads the snapshot this step persists (see
+  // lib/blueCollarProjections.ts), never re-fetches.
+  onProgress(87, "Fetching BlueCollar DFS projections");
+  const blueCollarResult = await runPythonScript("scripts/fetch_bluecollar_projections.py", ["--date", date, "--slate-id", slateId]);
+  const blueCollarStatus = parseLastJsonLine(blueCollarResult.stdout)?.status;
+  if (blueCollarResult.exitCode !== 0) {
+    errors.push(`BlueCollar fetch failed: ${tail(blueCollarResult.stdout + blueCollarResult.stderr, 800)}`);
+  } else if (blueCollarStatus === "api_error") {
+    errors.push(`BlueCollar API error: ${tail(blueCollarResult.stdout, 400)}`);
+  } else if (blueCollarStatus === "slate_match_failed") {
+    errors.push(`BlueCollar not updated: ${tail(blueCollarResult.stdout, 400)}`);
+  }
+
   // Milestone 32.2B: Big Money ML -- SHADOW MODE, experimental. Same
   // non-blocking contract as FantasyPros above: this script always
   // exits 0 for every EXPECTED outcome (no eligible starters, feature

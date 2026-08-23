@@ -3,13 +3,23 @@ import { describe, expect, it } from "vitest";
 import { buildProjectionLabRows, buildProjectionLabSummary } from "../projectionLab";
 import type { PlayerRow } from "../types";
 
+function bcPlayer(overrides: Record<string, unknown> = {}) {
+  return {
+    bluecollar_local_id: "test|nyy|of", name: "Test Player", team: "NYY", position: "OF", opponent: "BOS",
+    salary: 5000, raw_projection: 9.5, usable_projection: 9.5, match_status: "matched" as const,
+    match_confidence: "name_team_exact", mlb_player_id: "p1", candidate_mlb_ids: [], candidate_names: [],
+    ...overrides,
+  };
+}
+
 function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
   return {
     id: "p1", playerType: "hitter", name: "Test Player", team: "NYY", opponent: "BOS", gameId: "g1",
     position: "OF", positions: ["OF"], battingOrder: 3, salary: 5000, projection: 10, ceiling: 15, floor: 5,
     overall: null, power: null, matchup: null, risk: null, confidence: null, ownership: 20, ownershipTier: null,
     chalkScore: null, leverage: 3, tags: [], reasons: [], lineupStatus: null, matchStatus: null,
-    eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, mlProjection: null, mlProjectionStatus: null, raw: {} as PlayerRow["raw"],
+    eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, mlProjection: null, mlProjectionStatus: null,
+    blueCollarProjection: null, blueCollarMatchStatus: null, raw: {} as PlayerRow["raw"],
     ...overrides,
   };
 }
@@ -17,12 +27,12 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
 describe("buildProjectionLabRows", () => {
   it("joins BlueCollar/Native/AI onto each row by id, honestly leaving unloaded sources null", () => {
     const rows = [row({ id: "p1" }), row({ id: "p2", name: "No Data Player" })];
-    const externalByPlayerId = new Map([["p1", { independentProjection: 10, externalProjection: 9.5, adjustedProjection: 10.2, adjustmentDelta: 0.2, adjustmentPercent: 2, adjustmentReasons: [] }]]);
+    const blueCollarByPlayerId = new Map([["p1", bcPlayer({ usable_projection: 9.5 }) as never]]);
     const nativeByPlayerId = new Map([["p1", { native_projection: 11 } as never]]);
     const aiByPlayerId = new Map([["p1", { ai_projection: 12, ai_confidence: 80, total_adjustment: 1 } as never]]);
     const actualByPlayerId = new Map([["p1", 14.5]]);
 
-    const result = buildProjectionLabRows(rows, externalByPlayerId, nativeByPlayerId, aiByPlayerId, actualByPlayerId);
+    const result = buildProjectionLabRows(rows, blueCollarByPlayerId, nativeByPlayerId, aiByPlayerId, actualByPlayerId);
 
     expect(result).toHaveLength(2);
     const p1 = result.find((r) => r.id === "p1")!;
@@ -44,9 +54,9 @@ describe("buildProjectionLabRows", () => {
 
   it("falls back to Native for the Big Money side of the BlueCollar delta when AI is unavailable", () => {
     const rows = [row({ id: "p1" })];
-    const externalByPlayerId = new Map([["p1", { independentProjection: 10, externalProjection: 8, adjustedProjection: null, adjustmentDelta: null, adjustmentPercent: null, adjustmentReasons: [] }]]);
+    const blueCollarByPlayerId = new Map([["p1", bcPlayer({ usable_projection: 8 }) as never]]);
     const nativeByPlayerId = new Map([["p1", { native_projection: 10.5 } as never]]);
-    const result = buildProjectionLabRows(rows, externalByPlayerId, nativeByPlayerId, new Map(), new Map());
+    const result = buildProjectionLabRows(rows, blueCollarByPlayerId, nativeByPlayerId, new Map(), new Map());
     expect(result[0].bigMoneyVsBlueCollarDelta).toBe(2.5); // 10.5 - 8
   });
 

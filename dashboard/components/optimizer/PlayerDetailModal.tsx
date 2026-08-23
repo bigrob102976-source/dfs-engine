@@ -54,6 +54,13 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
   const hasComparison = player.externalProjection !== null || player.adjustedProjection !== null;
   const hasAi = player.aiProjection !== null;
   const hasNative = player.nativeProjection !== null;
+  // BlueCollar Live Projection Integration: labeled "BlueCollar Live" (not
+  // plain "BlueCollar") to disambiguate from the OLD, pre-existing
+  // externalProjection/adjustedProjection row above, which is a
+  // different, older comparison mechanism that happens to default its
+  // own label to "BlueCollar" too -- same disambiguation already applied
+  // to the optimizer's projection-source button (see OptimizerWorkspace.tsx).
+  const hasBlueCollarLive = player.blueCollarProjection !== null || player.blueCollarRawProjection !== null;
   const maxAbsSignalDelta = hasAi ? Math.max(0, ...player.aiSignals.map((s) => Math.abs(s.delta))) : 0;
 
   return (
@@ -200,6 +207,31 @@ export function PlayerDetailModal({ player, onClose }: { player: PoolPlayerRow; 
           <p className="text-xs text-text-faint">No Native Projection generated yet for this player -- run scripts/run_native_projection_engine.py.</p>
         </div>
       )}
+
+      {/* BlueCollar Live Projection Integration: the real, slate-matched
+          BlueCollar DFS API projection (bluecollar/*.py), distinct from
+          the older BlueCollar/BlueCollar (Adjusted) rows shown above in
+          "Projection Comparison". Zero-value rule: a BlueCollar-reported
+          0.0 or missing value shows as NOT AVAILABLE here, never a
+          fabricated 0.0 -- see lib/blueCollarProjections.ts. */}
+      <div className="mt-4 border-t border-border-subtle pt-3">
+        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">BlueCollar Live</h3>
+        <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+          <dt className="text-text-faint">BlueCollar Live</dt>
+          <dd className="text-right font-semibold text-text">
+            {player.blueCollarProjection === null ? "NOT AVAILABLE" : fmt(player.blueCollarProjection)}
+          </dd>
+          {player.blueCollarMatchStatus && player.blueCollarMatchStatus !== "matched" && (
+            <>
+              <dt className="text-text-faint">Match Status</dt>
+              <dd className="text-right text-text-faint">{player.blueCollarMatchStatus}</dd>
+            </>
+          )}
+        </dl>
+        {!hasBlueCollarLive && (
+          <p className="mt-2 text-xs text-text-faint">No usable BlueCollar Live projection for this player.</p>
+        )}
+      </div>
 
       {/* Milestone 20: AI Projection Engine -- combines every research
           signal already computed elsewhere (weather/Vegas/bullpen/park/

@@ -43,3 +43,13 @@ export const BIG_MONEY_ML_OPTIMIZER_FLAG_KEY = "mlb.big_money_ml_optimizer";
 export function userCanSelectBigMoneyMlOptimizerSource(user: { id: string; role: string } | null): boolean {
   return isFeatureVisibleToUser(user, BIG_MONEY_ML_OPTIMIZER_FLAG_KEY);
 }
+
+export const BLUECOLLAR_OPTIMIZER_FLAG_KEY = "mlb.bluecollar_optimizer";
+
+/** BlueCollar Live Projection Integration: server-side gate for
+ * selecting BlueCollar as an optimizer projection source -- checked in
+ * BOTH the build and validate API routes (never trust the UI selector
+ * alone). Mirrors userCanSelectBigMoneyMlOptimizerSource exactly. */
+export function userCanSelectBlueCollarOptimizerSource(user: { id: string; role: string } | null): boolean {
+  return isFeatureVisibleToUser(user, BLUECOLLAR_OPTIMIZER_FLAG_KEY);
+}

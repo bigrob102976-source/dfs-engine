@@ -10,6 +10,7 @@ function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
     overall: 60, power: 55, matchup: 50, risk: 30, confidence: 90, ownership: 20, ownershipTier: "medium",
     chalkScore: 50, leverage: 5, tags: [], reasons: [], lineupStatus: "active", matchStatus: "matched",
     eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, mlProjection: null, mlProjectionStatus: null,
+    blueCollarProjection: null, blueCollarMatchStatus: null,
     raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };

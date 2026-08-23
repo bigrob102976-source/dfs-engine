@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthApi } from "@/lib/auth/guards";
-import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
+import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { validateBuildRequest } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -30,6 +30,10 @@ export async function POST(request: Request) {
 
   if (parsed.request.projectionSource === "big_money_ml" && !userCanSelectBigMoneyMlOptimizerSource(userOrRes)) {
     return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
+  }
+
+  if (parsed.request.projectionSource === "bluecollar" && !userCanSelectBlueCollarOptimizerSource(userOrRes)) {
+    return NextResponse.json({ error: "BlueCollar is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
   const { errors, coverage } = await validateBuildRequest(parsed.request);

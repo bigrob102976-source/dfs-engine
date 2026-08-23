@@ -37,6 +37,7 @@ const PROJECTION_SOURCE_EXPLANATIONS: Partial<Record<ProjectionSource, string>> 
   native: "Deterministic Big Money projection engine",
   ai: "Context-adjusted Big Money projection",
   fantasypros: "External comparison source",
+  bluecollar: "Live BlueCollar DFS projections -- external comparison source",
 };
 
 function formatTime(iso: string | null): string {
@@ -68,8 +69,13 @@ function formatTime(iso: string | null): string {
  * feature flag (default ADMIN_ONLY) -- this prop only controls whether
  * the option is OFFERED in this component's UI; actual authorization is
  * enforced again server-side in /api/optimizer/build and /validate, so
- * a stale/tampered client value here can never bypass it. */
-export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = false }: { initialDate?: string | null; canUseBigMoneyMl?: boolean }) {
+ * a stale/tampered client value here can never bypass it.
+ *
+ * BlueCollar Live Projection Integration: `canUseBlueCollar` is the same
+ * pattern, resolved from 'mlb.bluecollar_optimizer' (default ADMIN_ONLY). */
+export function OptimizerWorkspace({
+  initialDate = null, canUseBigMoneyMl = false, canUseBlueCollar = false,
+}: { initialDate?: string | null; canUseBigMoneyMl?: boolean; canUseBlueCollar?: boolean }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
@@ -164,7 +170,9 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
         // A big_money_ml value persisted while ADMIN, later loaded by a
         // MEMBER (or after the flag flipped) must never silently stick --
         // fall back to native rather than surface an unreachable option.
-        setProjectionSource(persistedSource === "big_money_ml" && !canUseBigMoneyMl ? "native" : persistedSource);
+        const persistedSourceUnreachable =
+          (persistedSource === "big_money_ml" && !canUseBigMoneyMl) || (persistedSource === "bluecollar" && !canUseBlueCollar);
+        setProjectionSource(persistedSourceUnreachable ? "native" : persistedSource);
         setShowProjectionComparison(persisted.showProjectionComparison ?? false);
       }
       setHydrated(true);
@@ -433,10 +441,14 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
     // big_money_ml persisted but this slate has no ML coverage yet, or
     // if canUseBigMoneyMl became false (e.g. flag flipped mid-session).
     const mlUnavailable = projectionSource === "big_money_ml" && (!canUseBigMoneyMl || !pool.hasMlProjections);
-    if (externalUnavailable || aiUnavailable || nativeUnavailable || fantasyProsUnavailable || mlUnavailable) {
+    // BlueCollar: same fallback pattern -- also falls back if the
+    // ADMIN's browser somehow has bluecollar persisted but this slate
+    // has no BlueCollar coverage yet, or canUseBlueCollar became false.
+    const blueCollarUnavailable = projectionSource === "bluecollar" && (!canUseBlueCollar || !pool.hasBlueCollarProjections);
+    if (externalUnavailable || aiUnavailable || nativeUnavailable || fantasyProsUnavailable || mlUnavailable || blueCollarUnavailable) {
       Promise.resolve().then(() => setProjectionSource("independent"));
     }
-  }, [pool, projectionSource, canUseBigMoneyMl]);
+  }, [pool, projectionSource, canUseBigMoneyMl, canUseBlueCollar]);
 
   // Milestone 32.4: BIG MONEY ML COVERAGE gate -- ADMIN-only, fetched
   // once a pool is loaded so the coverage numbers are ready the moment
@@ -662,6 +674,16 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
               { value: "native" as ProjectionSource, label: "Big Money Native" },
               { value: "ai" as ProjectionSource, label: "Big Money AI" },
               ...(canUseBigMoneyMl ? [{ value: "big_money_ml" as ProjectionSource, label: "Big Money ML" }] : []),
+              // "BlueCollar Live" -- deliberately NOT the bare "BlueCollar"
+              // label: the pre-existing "external"/"adjusted" comparison
+              // source (Milestone 17/27, external_projections/registry.py)
+              // already defaults ITS OWN label to plain "BlueCollar" via
+              // resolveExternalSourceLabel() whenever no baseline provider
+              // is configured -- a real naming collision two buttons would
+              // otherwise share. This button is the live, purpose-built
+              // bluecollar/ package integration; "Live" disambiguates it
+              // from that separate, older, CSV/registry-based mechanism.
+              ...(canUseBlueCollar ? [{ value: "bluecollar" as ProjectionSource, label: "BlueCollar Live" }] : []),
               { value: "external" as ProjectionSource, label: externalSourceLabel },
               { value: "adjusted" as ProjectionSource, label: `${externalSourceLabel} (Adjusted)` },
               { value: "fantasypros" as ProjectionSource, label: "FantasyPros" },
@@ -673,6 +695,7 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
               : opt.value === "native" ? !pool?.hasNativeProjections
               : opt.value === "fantasypros" ? !pool?.hasFantasyProsProjections
               : opt.value === "big_money_ml" ? !pool?.hasMlProjections
+              : opt.value === "bluecollar" ? !pool?.hasBlueCollarProjections
               : opt.value !== "independent" && !pool?.hasExternalProjections;
             return (
               <button
@@ -685,7 +708,7 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
                   projectionSource === opt.value
                     ? opt.value === "ai" || opt.value === "native"
                       ? "bg-purple/20 text-purple"
-                      : opt.value === "big_money_ml"
+                      : opt.value === "big_money_ml" || opt.value === "bluecollar"
                         ? "bg-yellow/20 text-yellow"
                         : "bg-accent-dim text-text"
                     : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
@@ -708,6 +731,22 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
         )}
         {canUseBigMoneyMl && !pool?.hasMlProjections && (
           <span className="text-[11px] text-text-faint">Big Money ML not generated yet for this slate -- run the shadow-inference step during Process/Refresh.</span>
+        )}
+        {canUseBlueCollar && pool && !pool.hasBlueCollarProjections && (
+          <span className="text-[11px] text-text-faint">
+            {pool.blueCollarSlateMatchStatus && pool.blueCollarSlateMatchStatus !== "matched"
+              ? "BLUECOLLAR NOT UPDATED -- slate match failed for this DK slate."
+              : "BlueCollar not fetched yet for this slate -- run Admin Refresh Data."}
+          </span>
+        )}
+        {/* Freshness status (per spec: never make the user wonder whether
+            the data loaded) -- shown whenever a BlueCollar snapshot
+            exists for this slate, regardless of which source is
+            currently selected. */}
+        {canUseBlueCollar && pool?.hasBlueCollarProjections && (
+          <span className="w-full text-[11px] text-text-faint">
+            BLUECOLLAR &middot; {pool.blueCollarSlateName ?? "matched slate"} &middot; UPDATED {pool.blueCollarUpdated ?? "--"}
+          </span>
         )}
 
         {PROJECTION_SOURCE_EXPLANATIONS[projectionSource] && (
@@ -762,6 +801,25 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
           <p className="mt-2 text-[11px] text-text-faint">
             ML-only means ML-only: any optimizer-eligible player without a valid pregame ML projection is EXCLUDED from this build, never
             silently mixed with Native/AI/FantasyPros/Legacy.
+          </p>
+        </div>
+      )}
+
+      {/* BlueCollar Live Projection Integration: shown only once
+          bluecollar is actually the selected source. Coverage numbers
+          come from the same generic poolCoverage line above (Part 3) --
+          this box adds only the strict-source reminder + freshness. */}
+      {projectionSource === "bluecollar" && (
+        <div className="rounded-[var(--radius-card)] border border-yellow/40 bg-yellow/5 p-3 text-xs shadow-[var(--shadow-card)]">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="rounded bg-yellow/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow">Admin Test</span>
+            <span className="font-medium text-text">BlueCollar</span>
+            {pool?.blueCollarSlateName && <span className="text-text-faint">{pool.blueCollarSlateName}</span>}
+            {pool?.blueCollarUpdated && <span className="text-text-faint">&middot; Updated {pool.blueCollarUpdated}</span>}
+          </div>
+          <p className="text-[11px] text-text-faint">
+            BlueCollar-only means BlueCollar-only: any optimizer-eligible player without a genuinely usable (matched, positive) BlueCollar
+            projection is EXCLUDED from this build, never silently mixed with Native/AI/ML/Legacy.
           </p>
         </div>
       )}

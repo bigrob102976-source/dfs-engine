@@ -9,7 +9,7 @@ const OBJECTIVES = new Set(["projection", "ceiling", "balanced", "leverage"]);
 // a second inconsistency. Admin-only enforcement for "big_money_ml" is
 // a SEPARATE check in app/api/optimizer/build/route.ts (never trust
 // this list alone for authorization -- it only validates shape).
-const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai", "native", "fantasypros", "big_money_ml"]);
+const PROJECTION_SOURCES = new Set(["independent", "external", "adjusted", "ai", "native", "fantasypros", "big_money_ml", "bluecollar"]);
 
 export type ParseResult = { ok: true; request: OptimizerBuildRequest } | { ok: false; error: string };
 

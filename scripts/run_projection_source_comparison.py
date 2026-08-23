@@ -68,7 +68,7 @@ def _print_metrics_section(title: str, metrics) -> None:
         return
     for m in metrics:
         print(f"  {m.source:<12} n={m.n:<4} MAE={_fmt(m.mae, 2):<7} RMSE={_fmt(m.rmse, 2):<7} corr={_fmt(m.correlation):<7} "
-              f"rank_corr={_fmt(m.rank_correlation):<7} top5={_fmt(m.top5_hit_rate):<7} top10={_fmt(m.top10_hit_rate)}")
+              f"rank_corr={_fmt(m.rank_correlation):<7} bias={_fmt(m.bias, 2):<7} top5={_fmt(m.top5_hit_rate):<7} top10={_fmt(m.top10_hit_rate)}")
     print()
 
 
@@ -100,6 +100,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare every available projection source against actual postgame results.")
     parser.add_argument("--date", required=True, help="Slate date in YYYY-MM-DD format")
     parser.add_argument("--output", default=str(DEFAULT_EVALUATIONS_ROOT), help="Evaluations output root (default: evaluations)")
+    parser.add_argument("--dk-slate-id", default=None, help="DK slate id, needed to include the BlueCollar source (slate-scoped, see bluecollar/persistence.py) -- omitted, BlueCollar is simply left out")
     args = parser.parse_args()
 
     actual_pitcher_by_id = load_actual_pitcher_points(args.date)
@@ -110,10 +111,10 @@ def main() -> None:
         print(f"And/or: python scripts/collect_hitter_results.py --date {args.date}")
         return
 
-    pitcher_sources = build_pitcher_projection_sources(args.date)
-    hitter_sources = build_hitter_projection_sources(args.date)
+    pitcher_sources = build_pitcher_projection_sources(args.date, dk_slate_id=args.dk_slate_id)
+    hitter_sources = build_hitter_projection_sources(args.date, dk_slate_id=args.dk_slate_id)
     if not pitcher_sources and not hitter_sources:
-        print(f"No projection sources (independent/external/adjusted/ai/native) found for {args.date}.")
+        print(f"No projection sources (independent/external/adjusted/ai/native/bluecollar) found for {args.date}.")
         return
 
     pitcher_metrics = compare_projection_sources(pitcher_sources, actual_pitcher_by_id) if actual_pitcher_by_id else []

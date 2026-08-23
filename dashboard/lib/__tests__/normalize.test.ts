@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 
+import type { BlueCollarPlayerProjection } from "../blueCollarProjections";
 import { buildHitterRows, buildPitcherRows } from "../normalize";
 import type { BatterRecord, DKPlayerPool, OwnershipSnapshot, PitcherRecord } from "../types";
+
+function bcPlayer(overrides: Partial<BlueCollarPlayerProjection> = {}): BlueCollarPlayerProjection {
+  return {
+    bluecollar_local_id: "test|nyy|of",
+    name: "Test Player",
+    team: "NYY",
+    position: "OF",
+    opponent: "BOS",
+    salary: 5000,
+    raw_projection: 9.5,
+    usable_projection: 9.5,
+    match_status: "matched",
+    match_confidence: "name_team_exact",
+    mlb_player_id: "2001",
+    candidate_mlb_ids: [],
+    candidate_names: [],
+    ...overrides,
+  };
+}
 
 function pitcher(overrides: Partial<PitcherRecord> = {}): PitcherRecord {
   return {
@@ -114,6 +134,25 @@ describe("buildPitcherRows", () => {
     expect(rows[0].ownership).toBeNull();
     expect(rows[0].salary).toBeNull();
   });
+
+  it("defaults blueCollarProjection/blueCollarMatchStatus to null when no BlueCollar map is passed", () => {
+    const rows = buildPitcherRows([pitcher()], null, null);
+    expect(rows[0].blueCollarProjection).toBeNull();
+    expect(rows[0].blueCollarMatchStatus).toBeNull();
+  });
+
+  it("joins a usable BlueCollar projection onto a pitcher row by mlb player id", () => {
+    const blueCollarByPlayerId = new Map([["1001", bcPlayer({ mlb_player_id: "1001", position: "P", usable_projection: 14.2 })]]);
+    const rows = buildPitcherRows([pitcher()], null, null, blueCollarByPlayerId);
+    expect(rows[0].blueCollarProjection).toBe(14.2);
+    expect(rows[0].blueCollarMatchStatus).toBe("matched");
+  });
+
+  it("never surfaces a BlueCollar usable_projection of null as a fabricated 0 -- stays null (NOT AVAILABLE upstream)", () => {
+    const blueCollarByPlayerId = new Map([["1001", bcPlayer({ mlb_player_id: "1001", position: "P", raw_projection: 0, usable_projection: null })]]);
+    const rows = buildPitcherRows([pitcher()], null, null, blueCollarByPlayerId);
+    expect(rows[0].blueCollarProjection).toBeNull();
+  });
 });
 
 describe("buildHitterRows", () => {
@@ -183,6 +222,25 @@ describe("buildHitterRows", () => {
     const rows = buildHitterRows([hitter()], null, null, mlByPlayerId);
     expect(rows[0].mlProjection).toBeNull();
     expect(rows[0].mlProjectionStatus).toBe("MISSING");
+  });
+
+  it("defaults blueCollarProjection/blueCollarMatchStatus to null when no BlueCollar map is passed", () => {
+    const rows = buildHitterRows([hitter()], null, null);
+    expect(rows[0].blueCollarProjection).toBeNull();
+    expect(rows[0].blueCollarMatchStatus).toBeNull();
+  });
+
+  it("joins a usable BlueCollar projection onto a hitter row by mlb player id", () => {
+    const blueCollarByPlayerId = new Map([["2001", bcPlayer({ usable_projection: 9.5 })]]);
+    const rows = buildHitterRows([hitter()], null, null, new Map(), blueCollarByPlayerId);
+    expect(rows[0].blueCollarProjection).toBe(9.5);
+    expect(rows[0].blueCollarMatchStatus).toBe("matched");
+  });
+
+  it("never surfaces a BlueCollar usable_projection of null as a fabricated 0 -- stays null (NOT AVAILABLE upstream)", () => {
+    const blueCollarByPlayerId = new Map([["2001", bcPlayer({ raw_projection: 0, usable_projection: null })]]);
+    const rows = buildHitterRows([hitter()], null, null, new Map(), blueCollarByPlayerId);
+    expect(rows[0].blueCollarProjection).toBeNull();
   });
 });
 
@@ -306,6 +364,14 @@ describe("Milestone 27.2: DK-pool player preservation", () => {
     const rows = buildHitterRows([], null, poolWithLad);
     expect(rows[0].id).toBe("dk:1006");
     expect(rows[0].id).not.toBe("1006");
+  });
+
+  it("joins BlueCollar onto a DK-pool-only (no board match) hitter row when an mlb_player_id is present", () => {
+    const poolWithLad = pool();
+    poolWithLad.players = [unconfirmedPoolHitter({ mlb_player_id: "660271" })];
+    const blueCollarByPlayerId = new Map([["660271", bcPlayer({ mlb_player_id: "660271", usable_projection: 11.4 })]]);
+    const rows = buildHitterRows([], null, poolWithLad, new Map(), blueCollarByPlayerId);
+    expect(rows[0].blueCollarProjection).toBe(11.4);
   });
 });
 

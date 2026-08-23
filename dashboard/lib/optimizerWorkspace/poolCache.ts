@@ -5,6 +5,7 @@ import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { buildDkSlateVegasCoverage } from "../dkVegasCoverage";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId, loadLatestBaselineSnapshot } from "../externalProjections";
+import { getBlueCollarProjectionByPlayerId, loadLatestBlueCollarSnapshot } from "../blueCollarProjections";
 import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
 import { loadLatestEnvironmentReport } from "../gameEnvironment";
 import { getMlProjectionByPlayerId } from "../mlProjections";
@@ -111,6 +112,10 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(entry.date);
   // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only join.
   const mlByPlayerId = getMlProjectionByPlayerId(entry.date);
+  // BlueCollar DFS -- comparison + optional ADMIN-only optimizer source,
+  // always slate-scoped (never date-only like FantasyPros above).
+  const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(entry.date, entry.slateId);
+  const blueCollarSnapshot = loadLatestBlueCollarSnapshot(entry.date, entry.slateId);
   const vegasCoverage = buildDkSlateVegasCoverage(matchReport, loadLatestEnvironmentReport(entry.date));
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
@@ -120,6 +125,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     const native = p.mlb_player_id ? nativeByPlayerId.get(p.mlb_player_id) : undefined;
     const fantasyPros = p.mlb_player_id ? fantasyProsByPlayerId.get(p.mlb_player_id) : undefined;
     const ml = p.mlb_player_id ? mlByPlayerId.get(p.mlb_player_id) : undefined;
+    const blueCollar = p.mlb_player_id ? blueCollarByPlayerId.get(p.mlb_player_id) : undefined;
     const mlIsValidPregame = ml?.projection_status === "LIVE_PREGAME" || ml?.projection_status === "PREGAME_FROZEN";
     return {
       dkPlayerId: p.dk_player_id,
@@ -175,6 +181,9 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
       mlProjectionStatus: ml?.projection_status ?? null,
       mlFeatureTimestamp: ml?.feature_timestamp ?? null,
       fantasyProsMatchStatus: fantasyPros?.match_status ?? null,
+      blueCollarProjection: blueCollar?.usable_projection ?? null,
+      blueCollarRawProjection: blueCollar?.raw_projection ?? null,
+      blueCollarMatchStatus: blueCollar?.match_status ?? null,
     };
   });
 
@@ -216,6 +225,10 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     hasNativeProjections: nativeByPlayerId.size > 0,
     hasFantasyProsProjections: fantasyProsByPlayerId.size > 0,
     hasMlProjections: mlByPlayerId.size > 0,
+    hasBlueCollarProjections: blueCollarByPlayerId.size > 0,
+    blueCollarSlateName: blueCollarSnapshot?.bluecollar_slate_name ?? null,
+    blueCollarSlateMatchStatus: blueCollarSnapshot?.slate_match_status ?? null,
+    blueCollarUpdated: blueCollarSnapshot?.bluecollar_updated ?? null,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
     vegasCoverage,

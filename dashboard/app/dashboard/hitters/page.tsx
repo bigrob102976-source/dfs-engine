@@ -2,6 +2,7 @@ import { EligibilityFilterSelect } from "@/components/EligibilityFilterSelect";
 import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
 import { PageHeader } from "@/components/ui/Header";
+import { getBlueCollarProjectionByPlayerId } from "@/lib/blueCollarProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { HITTER_ELIGIBILITY_OPTIONS, filterHitterRowsByEligibility, isHitterEligibilityFilter } from "@/lib/eligibilityFilter";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
@@ -30,8 +31,11 @@ export default async function TopHittersPage(props: PageProps<"/dashboard/hitter
   // Milestone 32.3B: Big Money ML -- independent SHADOW comparison
   // column only. Never changes eligibility/rows/default ranking.
   const mlByPlayerId = date ? getMlProjectionByPlayerId(date) : new Map();
+  // BlueCollar Live Projection Integration: optional comparison column.
+  // Slate-scoped (see lib/blueCollarProjections.ts) -- never date-only.
+  const blueCollarByPlayerId = date ? getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null) : new Map();
 
-  const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, pool, mlByPlayerId);
+  const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, pool, mlByPlayerId, blueCollarByPlayerId);
   const gameFiltered = filterByGameIds(allRows, effectiveGameIds(slateCtx));
   const rows = filterHitterRowsByEligibility(gameFiltered, eligibility);
   const waitingRows = eligibility === "confirmed" ? filterHitterRowsByEligibility(gameFiltered, "unconfirmed") : [];

@@ -59,6 +59,12 @@ describe("Big Money ML optimizer wiring (Milestone 32.4, dashboard)", () => {
     expect(source).toMatch(/mlb\.big_money_ml_optimizer'?,\s*'MLB',\s*'Big Money ML Optimizer',\s*'ADMIN_ONLY'/);
   });
 
+  it("bluecollar is admin-gated exactly like big_money_ml -- same source, same enforcement pattern", () => {
+    const source = readSource("lib/optimizerWorkspace/buildRunner.ts");
+    expect(source).toContain('isStrictProjectionSource(source: OptimizerBuildRequest["projectionSource"]): boolean');
+    expect(source).toMatch(/source === "big_money_ml" \|\| source === "bluecollar"/);
+  });
+
   it("slatePipeline's Big Money ML shadow-inference steps never affect computed slate status", () => {
     const source = readSource("lib/slatePipeline.ts");
     // Both the pitcher and hitter shadow-inference steps must push only
@@ -70,5 +76,73 @@ describe("Big Money ML optimizer wiring (Milestone 32.4, dashboard)", () => {
     expect(statusComputationIndex).toBeGreaterThan(-1);
     const mlStepBlock = source.slice(mlStepIndex, statusComputationIndex);
     expect(mlStepBlock).not.toContain("readiness.ok");
+  });
+});
+
+describe("BlueCollar Live Projection Integration wiring (dashboard)", () => {
+  it("lists bluecollar in the optimizer's ProjectionSource union", () => {
+    const source = readSource("lib/optimizerWorkspace/types.ts");
+    const match = source.match(/export type ProjectionSource\s*=\s*([^;]+);/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toContain("bluecollar");
+  });
+
+  it("buildRunner's projection-override writer HAS a bluecollar branch that uses the slate-scoped BlueCollar loader", () => {
+    const source = readSource("lib/optimizerWorkspace/buildRunner.ts");
+    expect(source).toContain('request.projectionSource === "bluecollar"');
+    expect(source).toContain("getBlueCollarProjectionByPlayerId");
+  });
+
+  it("bluecollar is a strict projection source -- never mixed with Native/AI/ML for a missing player", () => {
+    const source = readSource("lib/optimizerWorkspace/buildRunner.ts");
+    expect(source).toMatch(/isStrictProjectionSource[\s\S]*?source === "bluecollar"/);
+  });
+
+  it("model-version provenance flags stay scoped to big_money_ml only, never attached to a bluecollar build", () => {
+    const source = readSource("lib/optimizerWorkspace/buildRunner.ts");
+    const strictBlock = source.slice(source.indexOf("if (isStrictProjectionSource(request.projectionSource)) {"), source.indexOf("args.push(\"--lineups\""));
+    expect(strictBlock).toContain('request.projectionSource === "big_money_ml"');
+    expect(strictBlock).toContain("getBigMoneyMlProvenance");
+  });
+
+  it("both the build and validate API routes enforce admin gating for bluecollar server-side", () => {
+    for (const route of ["app/api/optimizer/build/route.ts", "app/api/optimizer/validate/route.ts"]) {
+      const source = readSource(route);
+      expect(source).toContain("userCanSelectBlueCollarOptimizerSource");
+      expect(source).toMatch(/projectionSource\s*===\s*["']bluecollar["']/);
+    }
+  });
+
+  it("parseBuildRequest accepts bluecollar as a valid projectionSource shape (authorization is a separate, later check)", () => {
+    const source = readSource("lib/optimizerWorkspace/parseBuildRequest.ts");
+    expect(source).toContain("bluecollar");
+  });
+
+  it("the BlueCollar optimizer feature flag is seeded ADMIN_ONLY, not PRODUCTION", () => {
+    const source = readSource("lib/db/migrations/0007_bluecollar_optimizer_flag.sql");
+    expect(source).toMatch(/mlb\.bluecollar_optimizer'?,\s*'MLB',\s*'BlueCollar Optimizer',\s*'ADMIN_ONLY'/);
+  });
+
+  it("slatePipeline's BlueCollar fetch step never affects computed slate status", () => {
+    const source = readSource("lib/slatePipeline.ts");
+    const stepIndex = source.indexOf("fetch_bluecollar_projections.py");
+    expect(stepIndex).toBeGreaterThan(-1);
+    const statusComputationIndex = source.indexOf('readiness.ok ? "READY"');
+    expect(statusComputationIndex).toBeGreaterThan(-1);
+    const stepBlock = source.slice(stepIndex, statusComputationIndex);
+    expect(stepBlock).not.toContain("readiness.ok");
+  });
+
+  it("slatePipeline passes --slate-id to the BlueCollar fetch -- always slate-scoped, never date-only", () => {
+    const source = readSource("lib/slatePipeline.ts");
+    const callIndex = source.indexOf('runPythonScript("scripts/fetch_bluecollar_projections.py"');
+    expect(callIndex).toBeGreaterThan(-1);
+    const line = source.slice(callIndex, source.indexOf("\n", callIndex));
+    expect(line).toContain("--slate-id");
+  });
+
+  it("BlueCollar's loader never runs from a Client Component -- server-only, filesystem-reading module", () => {
+    const source = readSource("lib/blueCollarProjections.ts");
+    expect(source).not.toContain('"use client"');
   });
 });

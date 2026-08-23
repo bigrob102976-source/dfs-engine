@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthApi } from "@/lib/auth/guards";
-import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
+import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { buildLineups } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
 
@@ -38,6 +38,13 @@ export async function POST(request: Request) {
   // enforced here server-side, never trusting the UI selector alone.
   if (parsed.request.projectionSource === "big_money_ml" && !userCanSelectBigMoneyMlOptimizerSource(userOrRes)) {
     return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
+  }
+
+  // BlueCollar Live Projection Integration: same ADMIN/OWNER-only gate
+  // (feature flag 'mlb.bluecollar_optimizer', default ADMIN_ONLY) --
+  // enforced here server-side, never trusting the UI selector alone.
+  if (parsed.request.projectionSource === "bluecollar" && !userCanSelectBlueCollarOptimizerSource(userOrRes)) {
+    return NextResponse.json({ error: "BlueCollar is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
   const result = await buildLineups(parsed.request);

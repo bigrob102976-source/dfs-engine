@@ -676,5 +676,129 @@ describe("buildLineups", () => {
         expect(call.args).toContain("--projection-overrides");
       });
     });
+
+    describe("BlueCollar Live Projection Integration -- strict source, no mixed-source fallback", () => {
+      function writeBlueCollarSnapshot() {
+        writeJson(`bluecollar_projection_snapshots/${DATE}/mock-main/bluecollar_projection_20260812T180000.json`, {
+          slate_date: DATE, dk_slate_id: "mock-main", bluecollar_slate_id: "bluecollar-main",
+          bluecollar_slate_name: "1:35PM ET Main 1 Games", bluecollar_updated: "12:00:00 ET",
+          retrieved_at: `${DATE}T18:00:00Z`, slate_match_status: "matched", slate_match_reason: null,
+          player_count: 3, matched_count: 3, usable_projection_count: 1,
+          players: [
+            { bluecollar_local_id: "test-pitcher|nyy|p", name: "Test Pitcher", team: "NYY", position: "P", opponent: "BOS", salary: 9000, raw_projection: 20.0, usable_projection: 20.0, match_status: "matched", match_confidence: "name_team_exact", mlb_player_id: "p1", candidate_mlb_ids: [], candidate_names: [] },
+            { bluecollar_local_id: "zero-proj-guy|bos|of", name: "Zero Proj Guy", team: "BOS", position: "OF", opponent: "NYY", salary: 4000, raw_projection: 0.0, usable_projection: null, match_status: "matched", match_confidence: "name_team_exact", mlb_player_id: "h2", candidate_mlb_ids: [], candidate_names: [] },
+            { bluecollar_local_id: "unmatched-guy|zzz|of", name: "Unmatched Guy", team: "ZZZ", position: "OF", opponent: null, salary: 3000, raw_projection: 5.0, usable_projection: 5.0, match_status: "unmatched", match_confidence: null, mlb_player_id: null, candidate_mlb_ids: [], candidate_names: [] },
+          ],
+        });
+      }
+
+      it("writes a --projection-overrides file with only matched players carrying a genuinely usable (nonzero) projection", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeBlueCollarSnapshot();
+        let capturedOverrides: Record<string, { projection: number; ceiling: number | null; floor: number | null }> | null = null;
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(
+          makeFakeRunner(
+            {
+              "scripts/optimize_dk_lineups.py": (args) => {
+                const overridesPath = argValue(args, "--projection-overrides");
+                if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+                return ok(JSON.stringify({ errors: [] }));
+              },
+            },
+            calls,
+          ),
+        );
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "bluecollar" }));
+
+        expect(capturedOverrides).not.toBeNull();
+        expect(capturedOverrides!.p1.projection).toBe(20.0);
+        expect(capturedOverrides!.p1.ceiling).toBeNull();
+        // A zero raw projection (usable_projection null) must NEVER appear as a fabricated 0.
+        expect(capturedOverrides!.h2).toBeUndefined();
+      });
+
+      it("passes --strict-projection-source only for bluecollar, never for any other source", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeBlueCollarSnapshot();
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+
+        await validateBuildRequest(baseRequest({ projectionSource: "bluecollar" }));
+        const bcCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(bcCall.args).toContain("--strict-projection-source");
+        expect(argValue(bcCall.args, "--projection-source")).toBe("bluecollar");
+
+        calls.length = 0;
+        await validateBuildRequest(baseRequest({ projectionSource: "native" }));
+        const nativeCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(nativeCall.args).not.toContain("--strict-projection-source");
+      });
+
+      it("never attaches Big Money ML model-version provenance flags to a bluecollar build", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeBlueCollarSnapshot();
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "bluecollar" }));
+
+        const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(call.args).not.toContain("--pitcher-model-version");
+        expect(call.args).not.toContain("--hitter-model-version");
+      });
+
+      it("still passes --projection-overrides (an empty file) and --strict-projection-source even with zero BlueCollar coverage, never silently reverting to non-strict", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        // Deliberately no BlueCollar snapshot written at all.
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "bluecollar" }));
+
+        const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
+        expect(call.args).toContain("--strict-projection-source");
+        expect(call.args).toContain("--projection-overrides");
+      });
+
+      it("never falls back to native/ai/ml/independent for a player BlueCollar didn't usably project", async () => {
+        const calls: Array<{ script: string; args: string[] }> = [];
+        await seedCachedPool(calls);
+        writeBlueCollarSnapshot();
+        writeJson(`native_projection_snapshots/${DATE}/native_projection_20260812T200000.json`, {
+          slate_date: DATE, generated_at: `${DATE}T20:00:00Z`, model_version: "1.0.0",
+          pitcher_snapshot_path: null, batter_snapshot_path: null, environment_snapshot_path: null, player_count: 1,
+          players: [{ player_id: "h2", name: "Zero Proj Guy", team: "BOS", player_type: "hitter", native_projection: 15.0, native_ceiling: 20.0, native_floor: 5.0, confidence: 80, reasons: [] }],
+          warnings: [],
+        });
+        let capturedOverrides: Record<string, { projection: number }> | null = null;
+        const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+        __setPythonRunnerForTests(
+          makeFakeRunner(
+            {
+              "scripts/optimize_dk_lineups.py": (args) => {
+                const overridesPath = argValue(args, "--projection-overrides");
+                if (overridesPath) capturedOverrides = JSON.parse(fs.readFileSync(overridesPath, "utf-8"));
+                return ok(JSON.stringify({ errors: [] }));
+              },
+            },
+            calls,
+          ),
+        );
+        const { validateBuildRequest } = await import("../buildRunner");
+        await validateBuildRequest(baseRequest({ projectionSource: "bluecollar" }));
+
+        // h2 has a real Native projection (15.0) but no usable BlueCollar
+        // one -- must be absent from the overrides, never silently
+        // filled in from Native.
+        expect(capturedOverrides!.h2).toBeUndefined();
+      });
+    });
   });
 });

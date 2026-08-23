@@ -4,8 +4,8 @@ import { ProjectionLabSummaryCards } from "@/components/projections/ProjectionLa
 import { ProjectionLabTable } from "@/components/projections/ProjectionLabTable";
 import { loadActualDkPointsByPlayerId } from "@/lib/actualResults";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
+import { getBlueCollarProjectionByPlayerId } from "@/lib/blueCollarProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
-import { getProjectionComparisonByPlayerId } from "@/lib/externalProjections";
 import { getFantasyProsProjectionByPlayerId } from "@/lib/fantasyProsProjections";
 import { loadLatestBatterSnapshot, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
@@ -18,8 +18,9 @@ export const dynamic = "force-dynamic";
 
 /** PROJECTION LAB (Milestone 27): the dedicated side-by-side comparison
  * of every projection source Big Money DFS carries for a player --
- * BlueCollar (if imported), Big Money Native, Big Money AI, and (once
- * postgame results exist) Actual DK -- so no column anywhere has to be
+ * BlueCollar (live, slate-matched -- see lib/blueCollarProjections.ts),
+ * Big Money Native, Big Money AI, Big Money ML, and (once postgame
+ * results exist) Actual DK -- so no column anywhere has to be
  * ambiguously labeled "Projection." Pure read/compose layer: every
  * value traces to an already-built, already-immutable snapshot; nothing
  * here recomputes a projection. Follows the SAME selected-slate scoping
@@ -57,7 +58,11 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
   const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
   const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
 
-  const externalByPlayerId = getProjectionComparisonByPlayerId(date);
+  // BlueCollar Live Projection Integration: slate-scoped (never
+  // date-only) -- see lib/blueCollarProjections.ts's module docstring
+  // for why this is a separate pipeline from the older, generic
+  // "External"/"Adjusted" comparison-baseline mechanism.
+  const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null);
   const nativeByPlayerId = getNativeProjectionByPlayerId(date);
   const aiByPlayerId = getAiProjectionByPlayerId(date);
   const actualByPlayerId = loadActualDkPointsByPlayerId(date);
@@ -73,7 +78,7 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
 
   const rows = buildProjectionLabRows(
     [...pitcherRows, ...hitterRows],
-    externalByPlayerId,
+    blueCollarByPlayerId,
     nativeByPlayerId,
     aiByPlayerId,
     actualByPlayerId,

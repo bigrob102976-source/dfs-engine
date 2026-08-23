@@ -2,7 +2,7 @@ import { OptimizerView } from "@/components/OptimizerView";
 import { OptimizerWorkspace } from "@/components/optimizer/OptimizerWorkspace";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getTodayChicagoDate } from "@/lib/currentDate";
-import { userCanSelectBigMoneyMlOptimizerSource } from "@/lib/entitlements/featureVisibility";
+import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { listLineupSets } from "@/lib/loaders";
 import { isValidSlateDateString } from "@/lib/slateDate";
 import type { LineupSet } from "@/lib/types";
@@ -44,13 +44,16 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
   // the option is OFFERED in the UI, never the actual authorization).
   const user = await getCurrentUser();
   const canUseBigMoneyMl = userCanSelectBigMoneyMlOptimizerSource(user);
+  // BlueCollar Live Projection Integration: same ADMIN/OWNER-only
+  // server-side gate ('mlb.bluecollar_optimizer', default ADMIN_ONLY).
+  const canUseBlueCollar = userCanSelectBlueCollarOptimizerSource(user);
 
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Optimizer</h1>
       <p className="mb-4 text-xs text-text-faint">Select a DFS slate date, configure constraints, and build lineups.</p>
 
-      <OptimizerWorkspace initialDate={initialDate} canUseBigMoneyMl={canUseBigMoneyMl} />
+      <OptimizerWorkspace initialDate={initialDate} canUseBigMoneyMl={canUseBigMoneyMl} canUseBlueCollar={canUseBlueCollar} />
 
       {runs.length > 0 && (
         <div className="mt-8">

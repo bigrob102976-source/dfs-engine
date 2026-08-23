@@ -3,8 +3,16 @@ metric math to real, already-persisted snapshots: the Independent
 projection (predictions/), External baseline + Big Money Adjusted
 (external_projection_snapshots/ / adjusted_projection_snapshots/), the
 AI Projection (ai_projection_snapshots/), the Native Projection
-(native_projection_snapshots/, Milestone 23), and actual postgame results
-(results/).
+(native_projection_snapshots/, Milestone 23), the live BlueCollar DFS
+projection (bluecollar_projection_snapshots/, BlueCollar Live Projection
+Integration), and actual postgame results (results/).
+
+BlueCollar is the one source here that's slate-scoped, not date-only
+(see bluecollar/persistence.py) -- its loaders take an explicit
+`dk_slate_id` and simply omit the source (return {}) when no slate id is
+given or no snapshot exists for that (date, slate). Only MATCHED players
+with a genuinely usable_projection (never a fabricated 0.0 -- see
+bluecollar/build.py) ever appear in the returned map.
 
 Milestone 23 added a hitter equivalent of every pitcher loader below
 (results/<date>/hitter_results.json via scripts/collect_hitter_results.py,
@@ -24,6 +32,8 @@ import json
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from bluecollar.persistence import DEFAULT_BLUECOLLAR_ROOT, load_latest_bluecollar_snapshot
+from bluecollar.player_matcher import _PITCHER_POSITIONS as BLUECOLLAR_PITCHER_POSITIONS
 from external_projections.persistence import DEFAULT_ADJUSTED_SNAPSHOT_ROOT, load_latest_adjusted_snapshot
 from projection_engine.persistence import DEFAULT_AI_PROJECTION_ROOT, load_latest_ai_projection_snapshot
 from research.prediction_snapshot import DEFAULT_PREDICTIONS_ROOT, list_snapshots, load_snapshot
@@ -144,12 +154,54 @@ def load_native_hitter_projections(slate_date: str, native_root: Path = DEFAULT_
     }, None
 
 
+def _load_bluecollar_projections_by_position(
+    slate_date: str, dk_slate_id: Optional[str], bluecollar_root: Path, pitcher_side: bool,
+) -> Tuple[Dict[str, float], Optional[str]]:
+    if not dk_slate_id:
+        return {}, None
+    snapshot = load_latest_bluecollar_snapshot(slate_date, dk_slate_id, output_root=bluecollar_root)
+    if snapshot is None:
+        return {}, None
+    result: Dict[str, float] = {}
+    for p in snapshot.get("players", []):
+        if p.get("match_status") != "matched":
+            continue
+        player_id = p.get("mlb_player_id")
+        usable = p.get("usable_projection")
+        if player_id is None or usable is None:
+            continue
+        is_pitcher = str(p.get("position", "")).upper() in BLUECOLLAR_PITCHER_POSITIONS
+        if is_pitcher != pitcher_side:
+            continue
+        result[str(player_id)] = usable
+    return result, None
+
+
+def load_bluecollar_pitcher_projections(
+    slate_date: str, dk_slate_id: Optional[str], bluecollar_root: Path = DEFAULT_BLUECOLLAR_ROOT,
+) -> Tuple[Dict[str, float], Optional[str]]:
+    """{player_id: usable_projection} from the latest BlueCollar snapshot
+    for (slate_date, dk_slate_id), pitchers only. Returns ({}, None) when
+    no dk_slate_id is given or no snapshot exists yet -- BlueCollar is
+    always slate-scoped, never date-only (see bluecollar/persistence.py)."""
+    return _load_bluecollar_projections_by_position(slate_date, dk_slate_id, bluecollar_root, pitcher_side=True)
+
+
+def load_bluecollar_hitter_projections(
+    slate_date: str, dk_slate_id: Optional[str], bluecollar_root: Path = DEFAULT_BLUECOLLAR_ROOT,
+) -> Tuple[Dict[str, float], Optional[str]]:
+    """Hitter equivalent of load_bluecollar_pitcher_projections()."""
+    return _load_bluecollar_projections_by_position(slate_date, dk_slate_id, bluecollar_root, pitcher_side=False)
+
+
 def build_pitcher_projection_sources(
     slate_date: str,
     predictions_root: Path = DEFAULT_PREDICTIONS_ROOT,
     adjusted_root: Path = DEFAULT_ADJUSTED_SNAPSHOT_ROOT,
     ai_root: Path = DEFAULT_AI_PROJECTION_ROOT,
     native_root: Path = DEFAULT_NATIVE_PROJECTION_ROOT,
+    dk_slate_id: Optional[str] = None,
+    bluecollar_root: Path = DEFAULT_BLUECOLLAR_ROOT,
 ) -> Dict[str, Dict[str, float]]:
     """{source_label: {player_id: value}} for every source that actually
     has data for `slate_date` -- a source with no data for this slate is
@@ -173,6 +225,10 @@ def build_pitcher_projection_sources(
     native, _ = load_native_pitcher_projections(slate_date, native_root=native_root)
     if native:
         sources["native"] = native
+
+    bluecollar, _ = load_bluecollar_pitcher_projections(slate_date, dk_slate_id, bluecollar_root=bluecollar_root)
+    if bluecollar:
+        sources["bluecollar"] = bluecollar
 
     return sources
 
@@ -254,6 +310,8 @@ def build_hitter_projection_sources(
     adjusted_root: Path = DEFAULT_ADJUSTED_SNAPSHOT_ROOT,
     ai_root: Path = DEFAULT_AI_PROJECTION_ROOT,
     native_root: Path = DEFAULT_NATIVE_PROJECTION_ROOT,
+    dk_slate_id: Optional[str] = None,
+    bluecollar_root: Path = DEFAULT_BLUECOLLAR_ROOT,
 ) -> Dict[str, Dict[str, float]]:
     """Hitter equivalent of build_pitcher_projection_sources()."""
     sources: Dict[str, Dict[str, float]] = {}
@@ -275,5 +333,9 @@ def build_hitter_projection_sources(
     native, _ = load_native_hitter_projections(slate_date, native_root=native_root)
     if native:
         sources["native"] = native
+
+    bluecollar, _ = load_bluecollar_hitter_projections(slate_date, dk_slate_id, bluecollar_root=bluecollar_root)
+    if bluecollar:
+        sources["bluecollar"] = bluecollar
 
     return sources

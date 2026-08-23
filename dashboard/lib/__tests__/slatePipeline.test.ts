@@ -84,6 +84,11 @@ function defaultHandlers(): Record<string, Handler> {
     // is "not_configured" (exit 0, JSON status line) -- never a Python
     // exception -- see fantasypros/build.py::build_fantasypros_snapshot.
     "scripts/fetch_fantasypros_projections.py": () => ok(JSON.stringify({ status: "not_configured" })),
+    // BlueCollar DFS: optional, ADMIN-testable comparison/optimizer
+    // source. The default/expected outcome for a test env with no API
+    // key configured is "not_configured" (exit 0, JSON status line) --
+    // never a Python exception -- see bluecollar/build.py::build_bluecollar_snapshot.
+    "scripts/fetch_bluecollar_projections.py": () => ok(JSON.stringify({ status: "not_configured" })),
     // Milestone 32.2B: Big Money ML shadow inference -- same non-blocking,
     // always-exit-0-for-expected-outcomes contract as FantasyPros above.
     "scripts/run_ml_shadow_inference.py": () => ok(JSON.stringify({ status: "no_eligible_pitchers" })),
@@ -136,6 +141,7 @@ describe("runSlatePipeline", () => {
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
       "scripts/fetch_fantasypros_projections.py",
+      "scripts/fetch_bluecollar_projections.py",
       "scripts/run_ml_shadow_inference.py",
       "scripts/run_ml_hitter_shadow_inference.py",
     ]);
@@ -324,6 +330,77 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors).toEqual([]);
     expect(calls.map((c) => c.script)).toContain("scripts/fetch_fantasypros_projections.py");
+  });
+
+  it("passes --slate-id to the BlueCollar fetch script -- BlueCollar is always fetched scoped to ONE DK slate, never date-only", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    const call = calls.find((c) => c.script === "scripts/fetch_bluecollar_projections.py")!;
+    expect(call.args).toEqual(["--date", DATE, "--slate-id", SLATE_ID]);
+  });
+
+  it("still marks the slate READY when BlueCollar reports an api_error -- Native/AI/ML are unaffected and the error is recorded, not swallowed or fatal", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/fetch_bluecollar_projections.py": () => ok(JSON.stringify({ status: "api_error", error: "HTTP 500" })) };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("BlueCollar API error"))).toBe(true);
+    const { getSlateStatus } = await import("../db/slateStatus");
+    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+  });
+
+  it("still marks the slate READY when BlueCollar's slate match is ambiguous/failed -- recorded as BlueCollar not updated, never fatal", async () => {
+    const handlers = {
+      ...defaultHandlers(),
+      "scripts/fetch_bluecollar_projections.py": () => ok(JSON.stringify({ status: "slate_match_failed", reason: "BLUECOLLAR_SLATE_MATCH_AMBIGUOUS: ..." })),
+    };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("BlueCollar not updated"))).toBe(true);
+  });
+
+  it("still marks the slate READY when the BlueCollar script itself exits non-zero unexpectedly -- recorded as an error, never fatal to the slate", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/fetch_bluecollar_projections.py": () => fail("unexpected crash") };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("BlueCollar fetch failed"))).toBe(true);
+    const { getSlateStatus } = await import("../db/slateStatus");
+    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+  });
+
+  it("does not record an error when BlueCollar is simply not configured -- that is a normal, expected outcome", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors).toEqual([]);
+    expect(calls.map((c) => c.script)).toContain("scripts/fetch_bluecollar_projections.py");
   });
 
   it("sets status to PROCESSING immediately, before the pipeline completes", async () => {

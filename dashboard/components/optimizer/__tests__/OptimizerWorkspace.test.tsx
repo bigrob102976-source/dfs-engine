@@ -722,6 +722,88 @@ describe("OptimizerWorkspace", () => {
     });
   });
 
+  describe("BlueCollar Live Projection Integration -- admin gating", () => {
+    const POOL_WITH_BLUECOLLAR = {
+      ...POOL_RESULT,
+      hasBlueCollarProjections: true,
+      blueCollarSlateName: "1:35PM ET Main 8 Games",
+      blueCollarSlateMatchStatus: "matched",
+      blueCollarUpdated: "12:36:44 ET",
+      players: [{ ...POOL_RESULT.players[0] }, { ...POOL_RESULT.players[1] }],
+    };
+
+    it("never renders the BlueCollar button when canUseBlueCollar is false (the default)", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_BLUECOLLAR }) });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.queryByRole("button", { name: "BlueCollar Live" })).not.toBeInTheDocument();
+    });
+
+    it("renders the BlueCollar button when canUseBlueCollar is true, disabled until the pool has BlueCollar coverage", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBlueCollar />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByRole("button", { name: "BlueCollar Live" })).toBeDisabled();
+    });
+
+    it("enables BlueCollar once the pool has coverage, and selecting it shows the strict-source panel with slate name and freshness", async () => {
+      installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_BLUECOLLAR }) });
+      render(<OptimizerWorkspace canUseBlueCollar />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.getByRole("button", { name: "BlueCollar Live" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "BlueCollar Live" }));
+      expect(screen.getByRole("button", { name: "BlueCollar Live" })).toHaveAttribute("aria-pressed", "true");
+
+      expect(screen.getByText("Admin Test")).toBeInTheDocument();
+      expect(screen.getAllByText(/1:35PM ET Main 8 Games/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/12:36:44 ET/).length).toBeGreaterThan(0);
+    });
+
+    it("selecting BlueCollar is reflected in the validate request", async () => {
+      const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_BLUECOLLAR }) });
+      render(<OptimizerWorkspace canUseBlueCollar />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByRole("button", { name: "BlueCollar Live" }));
+
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).toBe("bluecollar");
+      });
+    });
+
+    it("a bluecollar value persisted in localStorage while ADMIN never sticks once canUseBlueCollar is false", async () => {
+      window.localStorage.setItem(
+        "mlb-dfs-optimizer-workspace-v1",
+        JSON.stringify({
+          selectedSlateId: "mock-main", locks: [], exclusions: [], maxExposure: {}, stackSize: null, stackTeam: null,
+          allowPitcherVsHitter: false, minSalary: null, minUnique: 2, lineups: 20, objective: "projection",
+          projectionSource: "bluecollar",
+        }),
+      );
+      const { calls } = installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_BLUECOLLAR }) });
+      render(<OptimizerWorkspace canUseBlueCollar={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.queryByRole("button", { name: "BlueCollar Live" })).not.toBeInTheDocument();
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.projectionSource).not.toBe("bluecollar");
+      });
+    });
+
+    it("shows a not-fetched-yet message when the slate has no BlueCollar snapshot at all", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBlueCollar />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByText(/BlueCollar not fetched yet for this slate/)).toBeInTheDocument();
+    });
+  });
+
   describe("Milestone 32.6 Part 4: Stack -> Optimizer handoff", () => {
     it("applies ?stackTeam=&stackSize= from the URL and shows a visible confirmation banner", async () => {
       mockSearchParams = new URLSearchParams("stackTeam=BOS&stackSize=1");

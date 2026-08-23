@@ -1,3 +1,4 @@
+import type { BlueCollarPlayerProjection } from "./blueCollarProjections";
 import type { MlPitcherProjection } from "./mlProjections";
 import type {
   BatterRecord,
@@ -56,6 +57,11 @@ export function buildPitcherRows(
   pitchers: PitcherRecord[],
   ownership: OwnershipSnapshot | null,
   pool: DKPlayerPool | null,
+  // BlueCollar Live Projection Integration: optional, comparison-only
+  // join. Omitted/empty for every existing caller that hasn't wired it
+  // up yet (see app/dashboard/pitchers/page.tsx for the one caller that
+  // does). Mirrors the mlByPlayerId join pattern below.
+  blueCollarByPlayerId: Map<string, BlueCollarPlayerProjection> = new Map(),
 ): PlayerRow[] {
   const ownershipById = indexByMlbId<OwnershipPlayer>(ownership?.players);
   const poolById = indexByMlbId<DFSPlayer>(pool?.players);
@@ -63,6 +69,7 @@ export function buildPitcherRows(
   const rows: PlayerRow[] = pitchers.map((p) => {
     const own = ownershipById.get(String(p.player_id)) ?? null;
     const poolPlayer = poolById.get(String(p.player_id)) ?? null;
+    const bc = blueCollarByPlayerId.get(String(p.player_id)) ?? null;
     return {
       id: String(p.player_id),
       playerType: "pitcher",
@@ -94,6 +101,8 @@ export function buildPitcherRows(
       optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
       mlProjection: null,
       mlProjectionStatus: null,
+      blueCollarProjection: bc?.usable_projection ?? null,
+      blueCollarMatchStatus: bc?.match_status ?? null,
       raw: { snapshot: p, ownership: own, pool: poolPlayer },
     };
   });
@@ -105,6 +114,7 @@ export function buildPitcherRows(
     if (covered.has(id)) continue;
     covered.add(id);
     const own = p.mlb_player_id ? (ownershipById.get(p.mlb_player_id) ?? null) : null;
+    const bc = p.mlb_player_id ? (blueCollarByPlayerId.get(p.mlb_player_id) ?? null) : null;
     rows.push({
       id,
       playerType: "pitcher",
@@ -136,6 +146,8 @@ export function buildPitcherRows(
       optimizerEligible: p.optimizer_eligible ?? false,
       mlProjection: null,
       mlProjectionStatus: null,
+      blueCollarProjection: bc?.usable_projection ?? null,
+      blueCollarMatchStatus: bc?.match_status ?? null,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }
@@ -151,6 +163,9 @@ export function buildHitterRows(
   // Omitted/empty for every existing caller that hasn't wired it up yet
   // (see app/dashboard/hitters/page.tsx for the one caller that does).
   mlByPlayerId: Map<string, MlPitcherProjection> = new Map(),
+  // BlueCollar Live Projection Integration: optional, comparison-only
+  // join. Mirrors mlByPlayerId immediately above.
+  blueCollarByPlayerId: Map<string, BlueCollarPlayerProjection> = new Map(),
 ): PlayerRow[] {
   const ownershipById = indexByMlbId<OwnershipPlayer>(ownership?.players);
   const poolById = indexByMlbId<DFSPlayer>(pool?.players);
@@ -161,6 +176,7 @@ export function buildHitterRows(
     const positions = poolPlayer?.dk_positions ?? (h.position ? [h.position] : []);
     const ml = mlByPlayerId.get(String(h.player_id)) ?? null;
     const mlValid = ml !== null && ML_VALID_PREGAME_STATUSES.has(ml.projection_status);
+    const bc = blueCollarByPlayerId.get(String(h.player_id)) ?? null;
     return {
       id: String(h.player_id),
       playerType: "hitter",
@@ -192,6 +208,8 @@ export function buildHitterRows(
       optimizerEligible: poolPlayer?.optimizer_eligible ?? false,
       mlProjection: mlValid ? (ml?.projection ?? null) : null,
       mlProjectionStatus: ml?.projection_status ?? null,
+      blueCollarProjection: bc?.usable_projection ?? null,
+      blueCollarMatchStatus: bc?.match_status ?? null,
       raw: { snapshot: h, ownership: own, pool: poolPlayer },
     };
   });
@@ -205,6 +223,7 @@ export function buildHitterRows(
     const own = p.mlb_player_id ? (ownershipById.get(p.mlb_player_id) ?? null) : null;
     const ml = p.mlb_player_id ? (mlByPlayerId.get(p.mlb_player_id) ?? null) : null;
     const mlValid = ml !== null && ML_VALID_PREGAME_STATUSES.has(ml.projection_status);
+    const bc = p.mlb_player_id ? (blueCollarByPlayerId.get(p.mlb_player_id) ?? null) : null;
     rows.push({
       id,
       playerType: "hitter",
@@ -236,6 +255,8 @@ export function buildHitterRows(
       optimizerEligible: p.optimizer_eligible ?? false,
       mlProjection: mlValid ? (ml?.projection ?? null) : null,
       mlProjectionStatus: ml?.projection_status ?? null,
+      blueCollarProjection: bc?.usable_projection ?? null,
+      blueCollarMatchStatus: bc?.match_status ?? null,
       raw: { snapshot: {}, ownership: own, pool: p },
     });
   }

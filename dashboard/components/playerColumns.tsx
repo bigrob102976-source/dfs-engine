@@ -55,6 +55,21 @@ const TAGS_COLUMN: PlayerColumn = {
   render: (row) => <TagList tags={row.tags} />,
 };
 
+// BlueCollar Live Projection Integration: optional comparison column,
+// pitchers and hitters alike. Never sorted into overall/power/matchup/
+// risk/confidence/ownership/leverage or the default ranking -- same
+// comparison-only discipline as ML_COLUMN below. row.blueCollarProjection
+// is already null-safe at the source (lib/blueCollarProjections.ts) --
+// a BlueCollar-reported 0.0/missing value arrives here as null, so
+// "NOT AVAILABLE" is shown, never a fabricated 0.0.
+const BLUECOLLAR_COLUMN: PlayerColumn = {
+  key: "blueCollarProjection",
+  label: "BlueCollar",
+  sortKey: "blueCollarProjection",
+  align: "right",
+  render: (row) => (row.blueCollarProjection === null ? "NOT AVAILABLE" : row.blueCollarProjection.toFixed(1)),
+};
+
 export const PITCHER_COLUMNS: PlayerColumn[] = [
   {
     key: "name",
@@ -70,6 +85,7 @@ export const PITCHER_COLUMNS: PlayerColumn[] = [
     ),
   },
   numericColumn("salary", "Salary", 0),
+  BLUECOLLAR_COLUMN,
   numericColumn("projection", "Projection"),
   numericColumn("ceiling", "Ceiling"),
   numericColumn("overall", "Overall"),
@@ -100,6 +116,7 @@ export const HITTER_COLUMNS: PlayerColumn[] = [
   { key: "team", label: "Team", sortKey: "team", render: (row) => row.team },
   { key: "battingOrder", label: "Order", sortKey: "battingOrder", align: "right", render: (row) => row.battingOrder ?? "--" },
   numericColumn("salary", "Salary", 0),
+  BLUECOLLAR_COLUMN,
   numericColumn("projection", "Projection"),
   ML_COLUMN,
   numericColumn("power", "Power"),

@@ -52,6 +52,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
 
+from config.env_loader import load_dashboard_env
 from dfs.team_abbreviations import normalize_dk_team_abbr
 from external_projections.base import (
     ProjectionProvider,
@@ -61,6 +62,8 @@ from external_projections.base import (
 )
 from external_projections.models import ExternalProjectionPlayer, ExternalSlateInfo
 from research import cache
+
+load_dashboard_env()
 
 API_BASE_URL = "https://bluecollardfs.com"
 API_ENDPOINT = "/api/mlb_draftkings"

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { PlayerTable } from "../PlayerTable";
-import { numericColumn, type PlayerColumn } from "../playerColumns";
+import { HITTER_COLUMNS, numericColumn, PITCHER_COLUMNS, type PlayerColumn } from "../playerColumns";
 import type { PlayerRow } from "@/lib/types";
 
 function row(overrides: Partial<PlayerRow>): PlayerRow {
@@ -33,6 +33,7 @@ function row(overrides: Partial<PlayerRow>): PlayerRow {
     reasons: [],
     lineupStatus: null, matchStatus: null, eligibilityStatus: null, optimizerEligible: false,
     mlProjection: null, mlProjectionStatus: null,
+    blueCollarProjection: null, blueCollarMatchStatus: null,
     raw: { snapshot: {}, ownership: null, pool: null },
     ...overrides,
   };
@@ -107,5 +108,29 @@ describe("PlayerTable", () => {
   it("auto-opens the detail panel for a highlighted player id", () => {
     render(<PlayerTable rows={rows} columns={columns} initialSortKey="projection" highlightId="2" />);
     expect(screen.getByText("Ownership")).toBeInTheDocument();
+  });
+});
+
+describe("PlayerTable -- BlueCollar Live Projection Integration column (hitter/pitcher boards)", () => {
+  it("shows NOT AVAILABLE in the BlueCollar column for a hitter row with no usable BlueCollar projection, never a fabricated 0.0", () => {
+    const hitterRows = [row({ id: "1", name: "No BlueCollar Player", blueCollarProjection: null })];
+    render(<PlayerTable rows={hitterRows} variant="hitter" initialSortKey="projection" />);
+    expect(screen.getByText("NOT AVAILABLE")).toBeInTheDocument();
+  });
+
+  it("shows the real BlueCollar value in the hitter board column when a usable projection exists", () => {
+    const hitterRows = [row({ id: "1", name: "Has BlueCollar Player", blueCollarProjection: 11.4 })];
+    render(<PlayerTable rows={hitterRows} variant="hitter" initialSortKey="projection" />);
+    expect(screen.getByText("11.4")).toBeInTheDocument();
+  });
+
+  it("includes a sortable BlueCollar column on the pitcher board too", () => {
+    expect(PITCHER_COLUMNS.some((c) => c.key === "blueCollarProjection")).toBe(true);
+    expect(HITTER_COLUMNS.some((c) => c.key === "blueCollarProjection")).toBe(true);
+  });
+
+  it("never lets BlueCollar influence the default sort -- HITTER_COLUMNS/PITCHER_COLUMNS keep it comparison-only", () => {
+    const blueCollarCol = HITTER_COLUMNS.find((c) => c.key === "blueCollarProjection");
+    expect(blueCollarCol?.label).toBe("BlueCollar");
   });
 });

@@ -142,7 +142,7 @@ export function ProjectionLabTable({ rows }: { rows: ProjectionLabRow[] }) {
                 <td className="px-2 py-1 font-medium text-text">{r.name}</td>
                 <td className="px-2 py-1">{r.team}</td>
                 <td className="px-2 py-1 text-right">{r.salary !== null ? `$${r.salary.toLocaleString()}` : "--"}</td>
-                <td className="px-2 py-1 text-right">{r.blueCollarProjection === null ? "NOT LOADED" : formatProjectionCell(r.blueCollarProjection)}</td>
+                <td className="px-2 py-1 text-right">{formatProjectionCell(r.blueCollarProjection, "NOT AVAILABLE")}</td>
                 <td className="px-2 py-1 text-right text-purple">{formatProjectionCell(r.nativeProjection)}</td>
                 <td className="px-2 py-1 text-right text-purple">{formatProjectionCell(r.aiProjection)}</td>
                 <td className="px-2 py-1 text-right">{formatProjectionCell(r.fantasyProsProjection, "NOT AVAILABLE")}</td>

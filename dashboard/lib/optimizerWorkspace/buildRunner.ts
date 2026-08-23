@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { getAiProjectionByPlayerId } from "../aiProjections";
+import { getBlueCollarProjectionByPlayerId } from "../blueCollarProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
 import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
@@ -61,7 +62,7 @@ function parseCoverage(doc: Record<string, unknown> | null): OptimizerCoverageSu
  * here, rather than falling back to their independent projection --
  * "ML-only means ML-only," never a hidden mixture of sources. */
 export function isStrictProjectionSource(source: OptimizerBuildRequest["projectionSource"]): boolean {
-  return source === "big_money_ml";
+  return source === "big_money_ml" || source === "bluecollar";
 }
 
 function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
@@ -97,6 +98,25 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
       // documented exception FantasyPros already uses above. Only the
       // PROJECTION value itself is held to strict source purity.
       overrides[mlbPlayerId] = { projection: player.projection, ceiling: null, floor: null };
+    }
+  } else if (request.projectionSource === "bluecollar") {
+    // BlueCollar Live Projection Integration: same strict-source
+    // discipline as big_money_ml above -- ADMIN/OWNER-only, never
+    // mixed with Native/AI/ML. usable_projection is already null
+    // whenever BlueCollar reported no genuinely usable value (a raw
+    // value <= 0 is NOT AVAILABLE, never a real zero -- see
+    // bluecollar/build.py) or the player didn't resolve to a canonical
+    // MLB identity at all, so only players with a real, positive,
+    // matched BlueCollar projection get an entry here. No ceiling/floor
+    // exists (BlueCollar reports a point projection only) -- left null
+    // so scripts/optimize_dk_lineups.py falls back to the pool's own
+    // independent ceiling/floor, same documented exception as
+    // big_money_ml/FantasyPros above. Only the PROJECTION itself is
+    // held to strict source purity.
+    const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(request.date, request.slateId);
+    for (const [mlbPlayerId, player] of blueCollarByPlayerId) {
+      if (player.usable_projection === null) continue;
+      overrides[mlbPlayerId] = { projection: player.usable_projection, ceiling: null, floor: null };
     }
   } else {
     const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
@@ -139,11 +159,17 @@ function buildArgv(
   args.push("--projection-source", request.projectionSource);
   if (isStrictProjectionSource(request.projectionSource)) {
     args.push("--strict-projection-source");
-    const provenance = getBigMoneyMlProvenance(request.date);
-    if (provenance.pitcherModelVersion) args.push("--pitcher-model-version", provenance.pitcherModelVersion);
-    if (provenance.hitterModelVersion) args.push("--hitter-model-version", provenance.hitterModelVersion);
-    if (provenance.pitcherSnapshotGeneratedAt) args.push("--pitcher-projection-snapshot-generated-at", provenance.pitcherSnapshotGeneratedAt);
-    if (provenance.hitterSnapshotGeneratedAt) args.push("--hitter-projection-snapshot-generated-at", provenance.hitterSnapshotGeneratedAt);
+    // Model-version provenance is a big_money_ml-specific concept
+    // (frozen model artifacts) -- BlueCollar has no model version to
+    // report, so this stays scoped to big_money_ml only, even though
+    // both sources share the general --strict-projection-source flag.
+    if (request.projectionSource === "big_money_ml") {
+      const provenance = getBigMoneyMlProvenance(request.date);
+      if (provenance.pitcherModelVersion) args.push("--pitcher-model-version", provenance.pitcherModelVersion);
+      if (provenance.hitterModelVersion) args.push("--hitter-model-version", provenance.hitterModelVersion);
+      if (provenance.pitcherSnapshotGeneratedAt) args.push("--pitcher-projection-snapshot-generated-at", provenance.pitcherSnapshotGeneratedAt);
+      if (provenance.hitterSnapshotGeneratedAt) args.push("--hitter-projection-snapshot-generated-at", provenance.hitterSnapshotGeneratedAt);
+    }
   }
   args.push("--lineups", String(request.lineups));
   args.push("--objective", request.objective);

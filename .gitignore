@@ -39,6 +39,11 @@ dashboard/next-env.d.ts
 /native_projection_snapshots/
 /fantasypros_snapshots/
 
+# BlueCollar Live Projection Integration -- reproducible by re-running
+# scripts/fetch_bluecollar_projections.py against the live BlueCollar
+# DFS API, never source. See bluecollar/.
+/bluecollar_projection_snapshots/
+
 # Milestone 32.2B: Big Money ML SHADOW pitcher projection snapshots --
 # reproducible by re-running scripts/run_ml_shadow_inference.py, never
 # source. See big_money_ml/.

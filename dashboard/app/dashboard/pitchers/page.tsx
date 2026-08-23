@@ -2,6 +2,7 @@ import { EligibilityFilterSelect } from "@/components/EligibilityFilterSelect";
 import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
 import { PageHeader } from "@/components/ui/Header";
+import { getBlueCollarProjectionByPlayerId } from "@/lib/blueCollarProjections";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { PITCHER_ELIGIBILITY_OPTIONS, filterPitcherRowsByEligibility, isPitcherEligibilityFilter } from "@/lib/eligibilityFilter";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
@@ -26,8 +27,11 @@ export default async function TopPitchersPage(props: PageProps<"/dashboard/pitch
   const pitcherSnapshot = date ? loadLatestPitcherSnapshot(date).data : null;
   const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
   const pool = date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data : null;
+  // BlueCollar Live Projection Integration: optional comparison column.
+  // Slate-scoped (see lib/blueCollarProjections.ts) -- never date-only.
+  const blueCollarByPlayerId = date ? getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null) : new Map();
 
-  const allRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, pool);
+  const allRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, pool, blueCollarByPlayerId);
   const gameFiltered = filterByGameIds(allRows, effectiveGameIds(slateCtx));
   const rows = filterPitcherRowsByEligibility(gameFiltered, eligibility);
 

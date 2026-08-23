@@ -35,6 +35,12 @@ export const ARTIFACT_DIRS = {
   // consumed by the optimizer. See lib/mlProjections.ts.
   mlProjectionSnapshots: "ml_projection_snapshots",
   fantasyProsSnapshots: "fantasypros_snapshots",
+  // BlueCollar DFS MLB DraftKings projections (bluecollar/persistence.py's
+  // output) -- ALWAYS slate-scoped (unlike fantasyProsSnapshots above),
+  // since BlueCollar's own data genuinely differs per DK slate
+  // (Main/Turbo/Afternoon each have a different player pool). See
+  // lib/blueCollarProjections.ts.
+  blueCollarProjectionSnapshots: "bluecollar_projection_snapshots",
   // Milestone 27: postgame actual DK fantasy points (results/<date>/
   // {pitcher,hitter}_results.json) -- date-scoped only, by design (a
   // player's real stat line doesn't depend on which DK slate you view

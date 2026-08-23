@@ -1,6 +1,6 @@
 import type { AiPlayerProjection } from "./aiProjections";
+import type { BlueCollarPlayerProjection } from "./blueCollarProjections";
 import { joinAiProjections, joinNativeProjections } from "./commandCenter";
-import type { ProjectionComparisonRow } from "./externalProjections";
 import type { FantasyProsPlayerProjection } from "./fantasyProsProjections";
 import type { MlPitcherProjection, MlProjectionStatus } from "./mlProjections";
 import type { NativePlayerProjection } from "./nativeProjections";
@@ -9,10 +9,21 @@ import type { PlayerRow } from "./types";
 // Milestone 27 -- Part 3: PROJECTION LAB. Pure composition layer, same
 // discipline as lib/commandCenter.ts -- every field here is read
 // straight from an already-built, already-immutable snapshot (BlueCollar
-// import, Native Projection, AI Projection, actual DK results) or is a
-// trivial derived transform (a subtraction). Nothing here recomputes a
-// projection or invents a value; a source with no data for a player
-// stays null, rendered as "NOT LOADED"/"--" by the page, never a guess.
+// Live Projection Integration, Native Projection, AI Projection, actual
+// DK results) or is a trivial derived transform (a subtraction). Nothing
+// here recomputes a projection or invents a value; a source with no data
+// for a player stays null, rendered as "NOT LOADED"/"--" by the page,
+// never a guess.
+//
+// BlueCollar sourcing note: `blueCollarProjection` is joined from the
+// real, slate-scoped bluecollar/ package's snapshot (usable_projection
+// only -- a raw value <=0 is already null there, never a fabricated
+// zero -- see bluecollar/build.py), NOT the older, generic
+// external_projections/ "External"/"Adjusted" comparison-baseline
+// mechanism (that one stays available as its own separately-labeled
+// optimizer source; the two are deliberately never conflated under one
+// field, even though the older mechanism's own docstring once assumed
+// BlueCollar would eventually be wired through it).
 
 export interface ProjectionLabRow {
   id: string;
@@ -71,7 +82,7 @@ function delta(a: number | null, b: number | null): number | null {
 
 export function buildProjectionLabRows(
   rows: PlayerRow[],
-  externalByPlayerId: Map<string, ProjectionComparisonRow>,
+  blueCollarByPlayerId: Map<string, BlueCollarPlayerProjection>,
   nativeByPlayerId: Map<string, NativePlayerProjection>,
   aiByPlayerId: Map<string, AiPlayerProjection>,
   actualByPlayerId: Map<string, number>,
@@ -86,7 +97,7 @@ export function buildProjectionLabRows(
     const ai = aiById.get(r.id) ?? null;
     const nativeProjection = native?.nativeProjection ?? null;
     const aiProjection = ai?.aiProjection ?? null;
-    const blueCollarProjection = externalByPlayerId.get(r.id)?.externalProjection ?? null;
+    const blueCollarProjection = blueCollarByPlayerId.get(r.id)?.usable_projection ?? null;
     const fantasyPros = fantasyProsByPlayerId.get(r.id) ?? null;
     const fantasyProsProjection = fantasyPros?.dk_points ?? null;
     const bigMoneyFinal = aiProjection ?? nativeProjection;

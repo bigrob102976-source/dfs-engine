@@ -88,6 +88,11 @@ class ProjectionSourceMetrics:
     top5_hit_rate: Optional[float]
     top10_hit_rate: Optional[float]
     top20_hit_rate: Optional[float] = None
+    # BlueCollar Live Projection Integration: mean(actual - predicted) --
+    # positive means the source under-projects on average, negative means
+    # it over-projects. Explicitly requested alongside MAE/RMSE/Pearson/
+    # Spearman for the BlueCollar-vs-Big-Money forward evaluation.
+    bias: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -120,6 +125,7 @@ def evaluate_projection_source(source: str, predicted_by_id: Dict[str, float], a
         top5_hit_rate=_hit_rate(predicted_map, actual_map, 5),
         top10_hit_rate=_hit_rate(predicted_map, actual_map, 10),
         top20_hit_rate=_hit_rate(predicted_map, actual_map, 20),
+        bias=_mean(errors),
     )
 
 

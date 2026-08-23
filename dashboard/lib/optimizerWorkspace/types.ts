@@ -123,9 +123,26 @@ export interface PoolPlayerRow {
   mlDataQualityScore: number | null;
   mlProjectionStatus: "LIVE_PREGAME" | "PREGAME_FROZEN" | "MISSING" | "INVALID_FEATURE_PARITY" | null;
   mlFeatureTimestamp: string | null;
+
+  // BlueCollar DFS: a COMPARISON + OPTIONAL ADMIN-ONLY OPTIMIZER SOURCE
+  // only -- joined in from the latest, slate-scoped
+  // bluecollar_projection_snapshots/<date>/<slateId>/*.json snapshot by
+  // mlbPlayerId (see lib/blueCollarProjections.ts). `projection` above
+  // is still ALWAYS the independent value; never fed into Native/AI/ML's
+  // own computation.
+  //
+  // ZERO-VALUE RULE: blueCollarProjection is null whenever BlueCollar
+  // reported no genuinely usable projection (a raw value <= 0 is treated
+  // as NOT AVAILABLE, never a real zero -- see bluecollar/build.py).
+  // blueCollarRawProjection preserves the raw value regardless, for
+  // debugging only -- UI code must never show it to a member as "the"
+  // projection.
+  blueCollarProjection: number | null;
+  blueCollarRawProjection: number | null;
+  blueCollarMatchStatus: "matched" | "unmatched" | "ambiguous" | null;
 }
 
-export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros" | "big_money_ml";
+export type ProjectionSource = "independent" | "external" | "adjusted" | "ai" | "native" | "fantasypros" | "big_money_ml" | "bluecollar";
 
 export interface OptimizerPoolResult {
   date: string;
@@ -156,6 +173,14 @@ export interface OptimizerPoolResult {
   hasNativeProjections: boolean;
   hasFantasyProsProjections: boolean;
   hasMlProjections: boolean;
+  hasBlueCollarProjections: boolean;
+  // BlueCollar's own matched slate name/status for THIS DK slate (e.g.
+  // "1:35PM ET Main 8 Games" / "matched"), or null when no BlueCollar
+  // snapshot exists yet -- lets the UI show "BLUECOLLAR NOT UPDATED"
+  // honestly instead of silently showing nothing.
+  blueCollarSlateName: string | null;
+  blueCollarSlateMatchStatus: string | null;
+  blueCollarUpdated: string | null;
   vegasCoverage: DkSlateVegasCoverage;
 }
 

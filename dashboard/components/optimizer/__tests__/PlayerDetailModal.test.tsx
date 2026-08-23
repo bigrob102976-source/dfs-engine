@@ -55,6 +55,9 @@ function player(overrides: Partial<PoolPlayerRow> = {}): PoolPlayerRow {
     nativePitcherComponents: null,
     fantasyProsProjection: null,
     fantasyProsMatchStatus: null,
+    blueCollarProjection: null,
+    blueCollarRawProjection: null,
+    blueCollarMatchStatus: null,
     mlProjection: null,
     mlDataQualityScore: null,
     mlProjectionStatus: null,
@@ -67,7 +70,11 @@ describe("PlayerDetailModal -- FantasyPros comparison row", () => {
   it("shows NOT AVAILABLE when no FantasyPros projection exists for this player, never a fabricated value", () => {
     render(<PlayerDetailModal player={player()} onClose={vi.fn()} />);
     expect(screen.getByText("FantasyPros")).toBeInTheDocument();
-    expect(screen.getByText("NOT AVAILABLE")).toBeInTheDocument();
+    // BlueCollar Live Projection Integration: the new "BlueCollar Live"
+    // section also renders "NOT AVAILABLE" when null (same discipline as
+    // FantasyPros), so a default fixture (both null) legitimately shows
+    // it twice now -- getAllByText, not getByText.
+    expect(screen.getAllByText("NOT AVAILABLE").length).toBeGreaterThan(0);
   });
 
   it("shows the FantasyPros projection when matched", () => {
@@ -85,6 +92,33 @@ describe("PlayerDetailModal -- FantasyPros comparison row", () => {
     render(<PlayerDetailModal player={player({ fantasyProsProjection: 5.2, fantasyProsMatchStatus: "ambiguous" })} onClose={vi.fn()} />);
     expect(screen.getByText("5.2")).toBeInTheDocument();
     expect(screen.getByText("(ambiguous)")).toBeInTheDocument();
+  });
+});
+
+describe("PlayerDetailModal -- BlueCollar Live Projection Integration section", () => {
+  it("labels the new live-integration row 'BlueCollar Live', distinct from the older BlueCollar/BlueCollar (Adjusted) rows above", () => {
+    render(<PlayerDetailModal player={player()} onClose={vi.fn()} />);
+    expect(screen.getAllByText("BlueCollar Live").length).toBeGreaterThan(0);
+    // The OLD comparison-mechanism rows are still present, unmodified.
+    expect(screen.getByText("BlueCollar")).toBeInTheDocument();
+    expect(screen.getByText("BlueCollar (Adjusted)")).toBeInTheDocument();
+  });
+
+  it("shows the real BlueCollar Live projection when usable", () => {
+    render(<PlayerDetailModal player={player({ blueCollarProjection: 11.4 })} onClose={vi.fn()} />);
+    expect(screen.getByText("11.4")).toBeInTheDocument();
+  });
+
+  it("never shows a fabricated 0.0 -- a null blueCollarProjection (BlueCollar reported <=0 or missing) renders NOT AVAILABLE", () => {
+    render(<PlayerDetailModal player={player({ blueCollarProjection: null, blueCollarRawProjection: 0 })} onClose={vi.fn()} />);
+    expect(screen.getAllByText("NOT AVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.queryByText("0.0")).not.toBeInTheDocument();
+  });
+
+  it("shows the match status when it's not a clean match", () => {
+    render(<PlayerDetailModal player={player({ blueCollarProjection: 9.1, blueCollarMatchStatus: "ambiguous" })} onClose={vi.fn()} />);
+    expect(screen.getByText("Match Status")).toBeInTheDocument();
+    expect(screen.getByText("ambiguous")).toBeInTheDocument();
   });
 });
 

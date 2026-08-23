@@ -414,6 +414,13 @@ export interface PlayerRow {
   // as ProjectionLabTable's mlProjection field.
   mlProjection: number | null;
   mlProjectionStatus: string | null;
+  // BlueCollar Live Projection Integration: live, slate-matched
+  // comparison-only column (see lib/blueCollarProjections.ts). Already
+  // null-safe at the source -- usable_projection is null whenever
+  // BlueCollar returned an unusable (<=0 or missing) value, so this
+  // field is never a fabricated zero. Never influences default ranking.
+  blueCollarProjection: number | null;
+  blueCollarMatchStatus: string | null;
   raw: {
     snapshot: JsonRecord;
     ownership: OwnershipPlayer | null;
