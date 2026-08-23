@@ -5,6 +5,7 @@
 // against a player pool the user is actively browsing/locking/excluding.
 
 import type { AiSignalContribution } from "../aiProjections";
+import type { BlueCollarCoverage } from "../blueCollarProjections";
 import type { DkSlateVegasCoverage } from "../dkVegasCoverage";
 import type { NativeHitterComponents, NativePitcherComponents } from "../nativeProjections";
 import type { ProviderSource, SlateOption } from "../orchestrator/types";
@@ -181,6 +182,10 @@ export interface OptimizerPoolResult {
   blueCollarSlateName: string | null;
   blueCollarSlateMatchStatus: string | null;
   blueCollarUpdated: string | null;
+  // M32.7: BlueCollar's own funnel, as separate counts (never collapsed
+  // into one "coverage %") -- see lib/blueCollarProjections.ts's
+  // computeBlueCollarCoverage, the single source of truth for this.
+  blueCollarCoverage: BlueCollarCoverage;
   vegasCoverage: DkSlateVegasCoverage;
 }
 

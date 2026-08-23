@@ -35,7 +35,7 @@ describe("listPostgresMigrationFiles", () => {
     expect(files).toEqual([
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql",
       "0004_slate_publishing.sql", "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql",
-      "0007_bluecollar_optimizer_flag.sql",
+      "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql",
     ]);
   });
 });
@@ -58,7 +58,7 @@ describe("runPostgresMigrations", () => {
   it("applies only the NEW migrations when some have already run", async () => {
     const { client } = fakeClient(["0001_init.sql", "0002_seed_reference_data.sql"]);
     const result = await runPostgresMigrations(client);
-    expect(result.applied).toEqual(["0003_stripe_billing.sql", "0004_slate_publishing.sql", "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql"]);
+    expect(result.applied).toEqual(["0003_stripe_billing.sql", "0004_slate_publishing.sql", "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql"]);
   });
 
   it("wraps each migration in BEGIN/COMMIT and rolls back on failure without recording it as applied", async () => {

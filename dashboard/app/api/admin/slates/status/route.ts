@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/auth/guards";
+import { computeBlueCollarCoverage, loadLatestBlueCollarSnapshot, type BlueCollarCoverage } from "@/lib/blueCollarProjections";
 import { listAuditLog } from "@/lib/db/auditLog";
 import { effectiveDisplayStatus, listSlateStatuses } from "@/lib/db/slateStatus";
 import { listJobsForSlate } from "@/lib/jobs/queue";
-import { loadLatestDkMatchReport } from "@/lib/loaders";
+import { loadLatestDkMatchReport, loadLatestDKPlayerPool } from "@/lib/loaders";
 import { listSlates } from "@/lib/optimizerWorkspace/poolCache";
 import { isValidSlateDateString } from "@/lib/slateDate";
+import type { SlateChangeReport } from "@/lib/slateChangeReport";
 import { evaluatePublishReadiness } from "@/lib/slatePublishReadiness";
 
 // Milestone 30.1: the eligibility breakdown dfs/eligibility.py computes
@@ -88,6 +90,28 @@ export async function GET(request: Request) {
           unmatched: (matchReport.unmatched_count as number) ?? 0,
         }
       : null;
+    // M32.7: BlueCollar's own funnel (returned/usable/identity-resolved/
+    // eligible/optimizer-ready), read cheaply -- the already-persisted
+    // pool + BlueCollar snapshot, never poolCache.ts's heavier loadPool()
+    // (which can invoke Python if nothing is cached yet -- unsafe to call
+    // from a route a status-board poll hits every few seconds).
+    const pool = loadLatestDKPlayerPool(date, s.slateId).data;
+    const blueCollarSnapshot = loadLatestBlueCollarSnapshot(date, s.slateId);
+    const optimizerIds = new Set(
+      (pool?.players ?? []).filter((p) => p.optimizer_eligible && p.mlb_player_id).map((p) => p.mlb_player_id as string),
+    );
+    const blueCollarCoverage: BlueCollarCoverage = computeBlueCollarCoverage(blueCollarSnapshot, optimizerIds);
+    // M32.7: the most recent Process/Refresh run's change report, if any
+    // (see lib/slateChangeReport.ts) -- null for a slate that has never
+    // completed a run since this column was added.
+    let changeReport: SlateChangeReport | null = null;
+    if (statusRow?.change_report_json) {
+      try {
+        changeReport = JSON.parse(statusRow.change_report_json) as SlateChangeReport;
+      } catch {
+        changeReport = null;
+      }
+    }
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -105,6 +129,8 @@ export async function GET(request: Request) {
       activeJob: activeJob ? { id: activeJob.id, jobType: activeJob.job_type, status: activeJob.status, progress: activeJob.progress, currentStep: activeJob.current_step } : null,
       eligibility,
       identity,
+      blueCollarCoverage,
+      changeReport,
     };
   });
 

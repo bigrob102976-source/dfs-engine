@@ -174,6 +174,10 @@ export interface SlateStatusRow {
   source_hash: string | null;
   source_provenance: string | null;
   validation_json: string | null;
+  // M32.7: the Admin Change Report (lib/slateChangeReport.ts) from the
+  // most recent Process/Refresh run, JSON-encoded -- null if no run has
+  // completed one since this column was added.
+  change_report_json: string | null;
   last_processed_at: string | null;
   last_refreshed_at: string | null;
 

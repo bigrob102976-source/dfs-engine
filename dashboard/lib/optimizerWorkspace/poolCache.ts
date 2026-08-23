@@ -5,7 +5,7 @@ import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
 import { buildDkSlateVegasCoverage } from "../dkVegasCoverage";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId, loadLatestBaselineSnapshot } from "../externalProjections";
-import { getBlueCollarProjectionByPlayerId, loadLatestBlueCollarSnapshot } from "../blueCollarProjections";
+import { computeBlueCollarCoverage, getBlueCollarProjectionByPlayerId, loadLatestBlueCollarSnapshot } from "../blueCollarProjections";
 import { getFantasyProsProjectionByPlayerId } from "../fantasyProsProjections";
 import { loadLatestEnvironmentReport } from "../gameEnvironment";
 import { getMlProjectionByPlayerId } from "../mlProjections";
@@ -191,6 +191,12 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
   // dfs/eligibility.py) replaces lineupStatus === "active" here too --
   // this count feeds the optimizer workspace's own player-pool summary,
   // which must match what the optimizer itself will actually select from.
+  // M32.7: BlueCollar's own funnel, as separate counts.
+  const blueCollarOptimizerIds = new Set(
+    players.filter((p) => p.optimizerEligible && p.mlbPlayerId).map((p) => p.mlbPlayerId as string),
+  );
+  const blueCollarCoverage = computeBlueCollarCoverage(blueCollarSnapshot, blueCollarOptimizerIds);
+
   const activePlayers = players.filter((p) => p.optimizerEligible);
   const confirmedGameIds = new Set(activePlayers.filter((p) => p.playerType === "hitter" && p.gameId).map((p) => p.gameId as string));
   const unconfirmedGameIds = new Set(
@@ -229,6 +235,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     blueCollarSlateName: blueCollarSnapshot?.bluecollar_slate_name ?? null,
     blueCollarSlateMatchStatus: blueCollarSnapshot?.slate_match_status ?? null,
     blueCollarUpdated: blueCollarSnapshot?.bluecollar_updated ?? null,
+    blueCollarCoverage,
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
     vegasCoverage,

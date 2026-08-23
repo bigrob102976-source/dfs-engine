@@ -86,3 +86,35 @@ export function getBlueCollarProjectionByPlayerId(date: string, slateId: string 
   }
   return map;
 }
+
+export interface BlueCollarCoverage {
+  returned: number;
+  usable: number;
+  identityResolved: number;
+  eligible: number;
+  optimizerReady: number;
+}
+
+/** M32.7: BlueCollar's own funnel, as separate counts -- never
+ * collapsed into one "coverage %," and "usable" never implies
+ * "eligible" (usable_projection availability must not imply optimizer
+ * eligibility -- see this milestone's own OPTIMIZER SAFETY section).
+ * `optimizerIds` is the set of mlb_player_id strings the DK pool
+ * currently marks optimizer_eligible; pure and cheap -- no pool
+ * rebuild, just a join over two already-persisted, already-loaded
+ * artifacts. Shared by lib/optimizerWorkspace/poolCache.ts (which
+ * builds `optimizerIds` from its own richer pool) and the Admin Slate
+ * status route (which reads the pool directly, never via poolCache's
+ * heavier loadPool()). */
+export function computeBlueCollarCoverage(snapshot: BlueCollarSnapshot | null, optimizerIds: Set<string>): BlueCollarCoverage {
+  const eligible = (snapshot?.players ?? []).filter(
+    (p) => p.usable_projection !== null && p.mlb_player_id !== null && optimizerIds.has(p.mlb_player_id),
+  ).length;
+  return {
+    returned: snapshot?.player_count ?? 0,
+    usable: snapshot?.usable_projection_count ?? 0,
+    identityResolved: snapshot?.matched_count ?? 0,
+    eligible,
+    optimizerReady: eligible,
+  };
+}

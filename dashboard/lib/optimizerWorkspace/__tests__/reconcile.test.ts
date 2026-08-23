@@ -88,6 +88,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     blueCollarSlateName: null,
     blueCollarSlateMatchStatus: null,
     blueCollarUpdated: null,
+    blueCollarCoverage: { returned: 0, usable: 0, identityResolved: 0, eligible: 0, optimizerReady: 0 },
     confirmedLineupGames: 0,
     unconfirmedLineupGames: 0,
     unmatchedCount: 0,

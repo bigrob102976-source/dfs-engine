@@ -10,6 +10,7 @@ import type {
   OwnershipSnapshot,
   PitcherEvaluation,
   PitcherSnapshot,
+  ResearchGame,
   SlateIndex,
 } from "./types";
 
@@ -102,6 +103,19 @@ export function loadLatestDkMatchReport(date: string, slateId?: string | null): 
  * pipeline already wrote (see runner.ts's dfsSalaries step). */
 export function loadLatestProviderSlate(date: string): Loaded<Record<string, unknown>> {
   return loadLatest<Record<string, unknown>>(artifactPath(ARTIFACT_DIRS.dfsInput, date), "provider_slate_");
+}
+
+/** M32.7: real, live MLB game status (Scheduled/Live/Final/Postponed --
+ * research/normalizer.py's own status field, sourced from MLB Stats
+ * API's schedule response) for every game on `date` -- schedule-derived,
+ * not a timestamped snapshot (see research_output/'s own convention,
+ * same as loadResearchSlate above). Used ONLY to classify slate
+ * completion stage (lib/slateReadiness.ts) honestly from real data --
+ * never fabricated. */
+export function loadResearchGames(date: string): Loaded<ResearchGame[]> {
+  const filePath = artifactPath(ARTIFACT_DIRS.research, date, "games.json");
+  const data = safeReadJson<ResearchGame[]>(filePath);
+  return { data, path: data ? filePath : null };
 }
 
 export function loadLatestLineupSet(date: string): Loaded<LineupSet> {

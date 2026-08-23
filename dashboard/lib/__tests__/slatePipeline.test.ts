@@ -32,6 +32,14 @@ type Handler = (args: string[]) => PythonRunResult | Promise<PythonRunResult>;
 
 function defaultHandlers(): Record<string, Handler> {
   return {
+    // M32.7: refreshes research_output/<date>/{games,teams,pitchers,batters}.json
+    // from the live MLB schedule/lineups -- always exits 0.
+    "scripts/build_research_package.py": () => ok(),
+    // M32.7: re-scores confirmed starters through the Pitcher/Batter
+    // Agents -- always exits 0 for the normal "nothing new to score yet"
+    // case too, not just success.
+    "scripts/run_real_pitcher_agent.py": () => ok(),
+    "scripts/run_real_batter_agent.py": () => ok(),
     "scripts/fetch_dfs_slate.py": () => {
       writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
         status: "ready", provider_name: "draftkings_csv", is_mock: false, source: "real_dk_csv",
@@ -69,6 +77,9 @@ function defaultHandlers(): Record<string, Handler> {
     // derived identity crosswalk. Always exits 0 and reports status via
     // a trailing JSON line -- see player_identity/refresh.py.
     "scripts/refresh_player_identity.py": () => ok(JSON.stringify({ status: "ready", teams_total: 0, teams_fetched: 0 })),
+    // M32.7: Vegas/weather/park refresh -- always exits 0, JSON status
+    // line, same non-blocking contract as identity refresh above.
+    "scripts/build_game_environment_report.py": () => ok(JSON.stringify({ status: "ready", game_count: 1 })),
     "scripts/run_native_projection_engine.py": () => {
       writeJson(`native_projection_snapshots/${DATE}/native_projection_${nextTs()}.json`, {
         slate_date: DATE, generated_at: "x", model_version: "1.0.0", player_count: 1,
@@ -139,10 +150,14 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors).toEqual([]);
     expect(calls.map((c) => c.script)).toEqual([
+      "scripts/build_research_package.py",
+      "scripts/run_real_pitcher_agent.py",
+      "scripts/run_real_batter_agent.py",
       "scripts/fetch_dfs_slate.py",
       "scripts/build_dfs_pool_from_provider.py",
       "scripts/project_dk_ownership.py",
       "scripts/refresh_player_identity.py",
+      "scripts/build_game_environment_report.py",
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
       "scripts/fetch_fantasypros_projections.py",
@@ -461,6 +476,89 @@ describe("runSlatePipeline", () => {
     expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/fetch_bluecollar_projections.py"));
   });
 
+  it("M32.7: refreshes research_output (schedule/lineups) and re-scores both Agents BEFORE the pool is built", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    const scripts = calls.map((c) => c.script);
+    const researchIdx = scripts.indexOf("scripts/build_research_package.py");
+    const pitcherAgentIdx = scripts.indexOf("scripts/run_real_pitcher_agent.py");
+    const batterAgentIdx = scripts.indexOf("scripts/run_real_batter_agent.py");
+    const poolIdx = scripts.indexOf("scripts/build_dfs_pool_from_provider.py");
+    expect(researchIdx).toBeLessThan(pitcherAgentIdx);
+    expect(pitcherAgentIdx).toBeLessThan(batterAgentIdx);
+    expect(batterAgentIdx).toBeLessThan(poolIdx);
+  });
+
+  it("M32.7: still marks the slate READY when the research package refresh fails -- recorded as an error, never fatal", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/build_research_package.py": () => fail("network hiccup") };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("Research package refresh failed"))).toBe(true);
+  });
+
+  it("M32.7: still marks the slate READY when Pitcher/Batter Agent scoring fails -- recorded as errors, never fatal", async () => {
+    const handlers = {
+      ...defaultHandlers(),
+      "scripts/run_real_pitcher_agent.py": () => fail("pitcher agent crash"),
+      "scripts/run_real_batter_agent.py": () => fail("batter agent crash"),
+    };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("Pitcher Agent scoring failed"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("Batter Agent scoring failed"))).toBe(true);
+  });
+
+  it("M32.7: passes --date to the game environment (Vegas/weather) refresh script", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    const call = calls.find((c) => c.script === "scripts/build_game_environment_report.py")!;
+    expect(call.args).toEqual(["--date", DATE]);
+  });
+
+  it("M32.7: still marks the slate READY when game environment refresh exits non-zero -- recorded as an error, never fatal", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/build_game_environment_report.py": () => fail("unexpected crash") };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("Game environment refresh failed"))).toBe(true);
+  });
+
+  it("M32.7: does not record an error when game environment reports no_research -- a normal early-slate state", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/build_game_environment_report.py": () => ok(JSON.stringify({ status: "no_research", reason: "no research package yet" })) };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors).toEqual([]);
+  });
+
   it("sets status to PROCESSING immediately, before the pipeline completes", async () => {
     const calls: Array<{ script: string; args: string[] }> = [];
     const handlers = defaultHandlers();
@@ -480,5 +578,55 @@ describe("runSlatePipeline", () => {
     await runSlatePipeline(DATE, SLATE_ID, "Main");
 
     expect(sawProcessing).toBe(true);
+  });
+
+  it("M32.7: produces a real change report -- lineups posted, hitters became eligible, native/AI generated", async () => {
+    // Simulate a PRIOR refresh's leftover state: 3 teams still awaiting
+    // lineups, 0 confirmed hitters, no native/AI generated yet.
+    // loadLatestDkMatchReport(date, slateId) resolves its path FROM the
+    // matching pool file's own selected_slate_id (see lib/loaders.ts),
+    // so a matching pool file must exist too, not just the report.
+    writeJson(`dfs_input/${DATE}/dk_player_pool_0000000000.json`, { selected_slate_id: SLATE_ID, player_count: 0, players: [] });
+    writeJson(`dfs_input/${DATE}/dk_match_report_0000000000.json`, {
+      dk_entries: 1, matched_to_mlb: 1, unmatched_count: 0, dk_games_total: 1, dk_games_matched_to_research: 1,
+      teams_awaiting_lineups: ["HOU", "LAA", "WSH"],
+      eligibility: { confirmed_hitters: 0, optimizer_eligible: 0 },
+    });
+
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      "scripts/build_dfs_pool_from_provider.py": () => {
+        const ts = nextTs();
+        writeJson(`dfs_input/${DATE}/dk_player_pool_${ts}.json`, {
+          selected_slate_id: SLATE_ID, roster_feasibility_pass: true, player_count: 1,
+          players: [{
+            dk_player_id: "d1", mlb_player_id: "h1", name: "Leadoff Hitter", team: "BOS", player_type: "hitter",
+            dk_positions: ["OF"], salary: 4000, projection: 10, ceiling: 18, risk_score: 30, confidence: 80,
+            batting_order: 1, game_id: "g1", opponent: "TOR", lineup_status: "active", match_status: "matched",
+            source_sha256: "abc123hash",
+          }],
+        });
+        // Only HOU/LAA posted this refresh -- WSH is still awaiting.
+        writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, {
+          dk_entries: 1, matched_to_mlb: 1, unmatched_count: 0, dk_games_total: 1, dk_games_matched_to_research: 1,
+          source_provenance: "OFFICIAL_USER_UPLOAD",
+          identity_integrity: { total: 1, valid: 1, warning: 0, invalid: 0 },
+          teams_awaiting_lineups: ["WSH"],
+          eligibility: { confirmed_hitters: 18, optimizer_eligible: 18 },
+        });
+        return ok();
+      },
+    };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.changeReport.lineupsPosted).toBe(2); // HOU, LAA
+    expect(result.changeReport.hittersBecameEligible).toBe(18);
+    expect(result.changeReport.stacksBecameReady).toBe(2);
+    expect(result.changeReport.nativeGenerated).toBe(1); // defaultHandlers' native step writes 1 player
+    expect(result.changeReport.aiGenerated).toBe(1);
   });
 });

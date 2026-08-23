@@ -23,11 +23,16 @@ import { loadLatestDkMatchReport, loadLatestDKPlayerPool, loadLatestOwnershipSna
 import { parseLastJsonLine } from "./optimizerWorkspace/jsonLine";
 import { loadPool } from "./optimizerWorkspace/poolCache";
 import { runPythonScript, tail } from "./orchestrator/pythonRunner";
+import { captureSlateState, diffSlateState, type SlateChangeReport } from "./slateChangeReport";
 import { evaluatePublishReadiness } from "./slatePublishReadiness";
 
 export interface SlatePipelineResult {
   status: SlateLifecycleStatus; // READY | PARTIAL | ERROR
   errors: string[];
+  // M32.7: "After Refresh Data, show what changed" -- a before/after
+  // diff of already-persisted state (see lib/slateChangeReport.ts).
+  // Never recomputes eligibility/projections itself.
+  changeReport: SlateChangeReport;
 }
 
 function nativeSnapshotPath(date: string): string | null {
@@ -71,7 +76,56 @@ export async function runSlatePipeline(
   onProgress: (progress: number, step: string) => void = () => {},
 ): Promise<SlatePipelineResult> {
   const now = new Date().toISOString();
+  // M32.7: captured BEFORE anything runs -- the "before" half of the
+  // Admin Change Report (see lib/slateChangeReport.ts). Cheap, read-only.
+  const stateBefore = captureSlateState(date, slateId);
   upsertSlateStatus(date, slateId, { slateLabel, status: "PROCESSING" });
+
+  const errors: string[] = [];
+
+  // M32.7 AUTOMATIC PROMOTION -- the root fix: refresh
+  // research_output/<date>/{games,teams,pitchers,batters}.json from the
+  // live MLB schedule/lineups on EVERY run, not just the first. Confirmed
+  // live gap this milestone's own validation surfaced:
+  // dfs/pool_builder.py::ensure_research_package() only ever calls
+  // research/engine.py::build_research_package() when the package is
+  // MISSING (ResearchPackageNotFoundError) -- once today's files exist
+  // from an early-morning first refresh, they are simply READ forever
+  // after, so a newly-POSTED lineup later in the day would never reach
+  // any later "Refresh Data" run at all without this step. Safe to
+  // re-run any number of times (overwrites cleanly, not an
+  // immutable/no-clobber snapshot -- see scripts/build_research_package.py).
+  onProgress(1, "Refreshing MLB schedule and lineups");
+  const researchResult = await runPythonScript("scripts/build_research_package.py", ["--date", date]);
+  if (researchResult.exitCode !== 0) {
+    errors.push(`Research package refresh failed: ${tail(researchResult.stdout + researchResult.stderr, 800)}`);
+  }
+
+  // M32.7 AUTOMATIC PROMOTION: re-score the Pitcher/Batter Agents FIRST,
+  // before the player pool is (re)built below -- confirmed live gap
+  // this milestone's own validation surfaced: "Building player pool"
+  // only ever READS whichever predictions/*_board_*.json snapshot
+  // already happens to exist (dfs/pool_builder.py::load_snapshot_arg),
+  // it never triggers agent scoring itself. Without this step, a newly-
+  // posted lineup's hitters get identity-resolved and eligibility-
+  // promoted correctly, but the pool's own Independent projection (and
+  // therefore Ownership, which reads that same field) stays stale/null
+  // for them until someone happens to re-run the agents by hand. Never
+  // blocks the slate: both scripts fail loudly (non-zero exit) only on
+  // a genuine crash, never for "no eligible players yet" (an early
+  // slate with nobody confirmed yet still exits 0 with zero scored).
+  onProgress(2, "Scoring starting pitchers");
+  const pitcherAgentResult = await runPythonScript("scripts/run_real_pitcher_agent.py", ["--date", date]);
+  if (pitcherAgentResult.exitCode !== 0) {
+    errors.push(`Pitcher Agent scoring failed: ${tail(pitcherAgentResult.stdout + pitcherAgentResult.stderr, 800)}`);
+  }
+
+  onProgress(4, "Scoring confirmed starting hitters");
+  const batterAgentResult = await runPythonScript("scripts/run_real_batter_agent.py", ["--date", date]);
+  if (batterAgentResult.exitCode !== 0) {
+    errors.push(`Batter Agent scoring failed: ${tail(batterAgentResult.stdout + batterAgentResult.stderr, 800)}`);
+  }
+
   onProgress(5, "Building player pool");
 
   try {
@@ -98,10 +152,11 @@ export async function runSlatePipeline(
       sourceHash: recoveredHash,
       sourceProvenance: recoveredProvenance,
     });
-    return { status: "ERROR", errors: [`Player pool build failed: ${message}`] };
+    // Nothing progressed -- an honest self-diff (no change) rather than
+    // comparing against a state the pipeline never actually reached.
+    errors.push(`Player pool build failed: ${message}`);
+    return { status: "ERROR", errors, changeReport: diffSlateState(stateBefore, stateBefore) };
   }
-
-  const errors: string[] = [];
 
   // Canonical MLB Player Identity Foundation: refreshes the roster-
   // derived identity crosswalk (player_identity/refresh.py) for every
@@ -121,6 +176,22 @@ export async function runSlatePipeline(
   const identityResult = await runPythonScript("scripts/refresh_player_identity.py", ["--date", date]);
   if (identityResult.exitCode !== 0) {
     errors.push(`Player identity refresh failed: ${tail(identityResult.stdout + identityResult.stderr, 800)}`);
+  }
+
+  // M32.7 GLOBAL REFRESH: "Admin Refresh Data should be the single
+  // action that advances the day's slate... automatically handle...
+  // Vegas, weather..." -- previously ONLY available via the separate
+  // /api/game-environment/generate admin action (still there, unchanged,
+  // for an admin who wants to refresh weather/Vegas alone without
+  // re-running the rest). Added here so a member never has to wonder
+  // whether "Refresh Data" covers it. Same non-blocking contract as
+  // every other step: scripts/build_game_environment_report.py always
+  // exits 0 and reports "no_research" (no research package yet) via its
+  // own JSON status line, never a pipeline failure.
+  onProgress(37, "Refreshing Vegas/weather/park environment");
+  const environmentResult = await runPythonScript("scripts/build_game_environment_report.py", ["--date", date]);
+  if (environmentResult.exitCode !== 0) {
+    errors.push(`Game environment refresh failed: ${tail(environmentResult.stdout + environmentResult.stderr, 800)}`);
   }
 
   onProgress(40, "Running Native projection engine");
@@ -216,6 +287,7 @@ export async function runSlatePipeline(
 
   const readiness = evaluatePublishReadiness(date, slateId);
   const status: SlateLifecycleStatus = readiness.ok ? "READY" : pool.data ? "PARTIAL" : "ERROR";
+  const changeReport = diffSlateState(stateBefore, captureSlateState(date, slateId));
 
   upsertSlateStatus(date, slateId, {
     slateLabel,
@@ -230,9 +302,10 @@ export async function runSlatePipeline(
     sourceHash,
     sourceProvenance,
     validationJson: JSON.stringify(readiness),
+    changeReportJson: JSON.stringify(changeReport),
     lastProcessedAt: now,
     lastRefreshedAt: now,
   });
 
-  return { status, errors };
+  return { status, errors, changeReport };
 }

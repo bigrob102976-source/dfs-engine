@@ -33,6 +33,7 @@ interface UpsertPatch {
   sourceHash?: string | null;
   sourceProvenance?: string | null;
   validationJson?: string | null;
+  changeReportJson?: string | null;
   lastProcessedAt?: string | null;
   lastRefreshedAt?: string | null;
 }
@@ -64,15 +65,15 @@ export function upsertSlateStatus(slateDate: string, slateId: string, patch: Ups
         id, slate_date, slate_id, slate_label, status,
         pool_path, match_report_path, ownership_path, native_snapshot_path, ai_snapshot_path,
         vegas_snapshot_path, research_snapshot_path, source_hash, source_provenance, validation_json,
-        last_processed_at, last_refreshed_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        change_report_json, last_processed_at, last_refreshed_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id, slateDate, slateId, patch.slateLabel ?? null, patch.status ?? "DRAFT",
       patch.poolPath ?? null, patch.matchReportPath ?? null, patch.ownershipPath ?? null,
       patch.nativeSnapshotPath ?? null, patch.aiSnapshotPath ?? null,
       patch.vegasSnapshotPath ?? null, patch.researchSnapshotPath ?? null,
       patch.sourceHash ?? null, patch.sourceProvenance ?? null, patch.validationJson ?? null,
-      patch.lastProcessedAt ?? null, patch.lastRefreshedAt ?? null, now, now,
+      patch.changeReportJson ?? null, patch.lastProcessedAt ?? null, patch.lastRefreshedAt ?? null, now, now,
     );
     return getSlateStatus(slateDate, slateId)!;
   }
@@ -90,6 +91,7 @@ export function upsertSlateStatus(slateDate: string, slateId: string, patch: Ups
     source_hash: patch.sourceHash !== undefined ? patch.sourceHash : existing.source_hash,
     source_provenance: patch.sourceProvenance !== undefined ? patch.sourceProvenance : existing.source_provenance,
     validation_json: patch.validationJson !== undefined ? patch.validationJson : existing.validation_json,
+    change_report_json: patch.changeReportJson !== undefined ? patch.changeReportJson : existing.change_report_json,
     last_processed_at: patch.lastProcessedAt !== undefined ? patch.lastProcessedAt : existing.last_processed_at,
     last_refreshed_at: patch.lastRefreshedAt !== undefined ? patch.lastRefreshedAt : existing.last_refreshed_at,
   };
@@ -98,13 +100,13 @@ export function upsertSlateStatus(slateDate: string, slateId: string, patch: Ups
     `UPDATE slate_status SET
       slate_label = ?, status = ?, pool_path = ?, match_report_path = ?, ownership_path = ?,
       native_snapshot_path = ?, ai_snapshot_path = ?, vegas_snapshot_path = ?, research_snapshot_path = ?,
-      source_hash = ?, source_provenance = ?, validation_json = ?,
+      source_hash = ?, source_provenance = ?, validation_json = ?, change_report_json = ?,
       last_processed_at = ?, last_refreshed_at = ?, updated_at = ?
      WHERE slate_date = ? AND slate_id = ?`,
   ).run(
     next.slate_label, next.status, next.pool_path, next.match_report_path, next.ownership_path,
     next.native_snapshot_path, next.ai_snapshot_path, next.vegas_snapshot_path, next.research_snapshot_path,
-    next.source_hash, next.source_provenance, next.validation_json,
+    next.source_hash, next.source_provenance, next.validation_json, next.change_report_json,
     next.last_processed_at, next.last_refreshed_at, now,
     slateDate, slateId,
   );

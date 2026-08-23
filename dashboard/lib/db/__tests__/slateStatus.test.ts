@@ -41,6 +41,21 @@ describe("slate_status upsert", () => {
     expect(ready.pool_path).toBe("dfs_input/x/pool.json");
   });
 
+  it("M32.7: persists and updates change_report_json, preserving it across an unrelated upsert", () => {
+    const withReport = upsertSlateStatus(DATE, "main", { status: "READY", changeReportJson: JSON.stringify({ lineupsPosted: 2 }) });
+    expect(JSON.parse(withReport.change_report_json!)).toEqual({ lineupsPosted: 2 });
+
+    // An upsert that doesn't touch changeReportJson preserves it (same
+    // "only fields present in patch are changed" discipline as every
+    // other column here).
+    const unrelated = upsertSlateStatus(DATE, "main", { status: "PROCESSING" });
+    expect(JSON.parse(unrelated.change_report_json!)).toEqual({ lineupsPosted: 2 });
+
+    // A later refresh's own report replaces the prior one.
+    const updated = upsertSlateStatus(DATE, "main", { status: "READY", changeReportJson: JSON.stringify({ lineupsPosted: 0 }) });
+    expect(JSON.parse(updated.change_report_json!)).toEqual({ lineupsPosted: 0 });
+  });
+
   it("listSlateStatuses returns every slate for a date, sorted by slate_id", () => {
     upsertSlateStatus(DATE, "turbo", { status: "DRAFT" });
     upsertSlateStatus(DATE, "main", { status: "DRAFT" });

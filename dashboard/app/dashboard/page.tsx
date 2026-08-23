@@ -6,11 +6,14 @@ import { CommandCenterHeader } from "@/components/command-center/CommandCenterHe
 import { QuickActionsPanel } from "@/components/command-center/QuickActionsPanel";
 import { SlateKpiGrid } from "@/components/command-center/SlateKpiGrid";
 import { SlateRankingsColumn } from "@/components/command-center/SlateRankingsColumn";
+import { SlateReadinessCard } from "@/components/command-center/SlateReadinessCard";
+import { TeamReadinessTable } from "@/components/command-center/TeamReadinessTable";
 import { VegasCoverageCard } from "@/components/command-center/VegasCoverageCard";
 import { AiProjectionPerformanceCard } from "@/components/AiProjectionPerformanceCard";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
+import { loadLatestBlueCollarSnapshot } from "@/lib/blueCollarProjections";
 import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import {
   buildGameRankings,
@@ -45,10 +48,12 @@ import {
   loadLatestOwnershipSnapshot,
   loadLatestPitcherSnapshot,
   loadLatestProviderSlate,
+  loadResearchGames,
 } from "@/lib/loaders";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
 import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
+import { buildSlateReadinessSummary, buildTeamReadinessRows, computeSlateCompletionStage } from "@/lib/slateReadiness";
 import { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 import { buildStackSummaries } from "@/lib/stacks";
 import { recomputeVegasSlateAnalysis } from "@/lib/vegasIntelligence";
@@ -141,6 +146,25 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const mlByPlayerId = getMlProjectionByPlayerId(date);
   const mlCoverage = buildMlCoverageSummary([...pitcherRows, ...hitterRows], mlByPlayerId);
 
+  // M32.7: Slate Readiness / Team Readiness -- pure aggregation over
+  // data already loaded above (matchReport, joined Native/AI rows, ML
+  // coverage, stacks) plus two additive reads (BlueCollar snapshot,
+  // real MLB game status) -- see lib/slateReadiness.ts's own docstring.
+  const blueCollarSnapshot = loadLatestBlueCollarSnapshot(date, slateCtx.selected?.slateId ?? null);
+  const allTeams = Array.from(new Set([...pitcherRows, ...hitterRows].map((r) => r.team)));
+  const readiness = buildSlateReadinessSummary(matchReport, allTeams, pitcherRows, nativeAllRows, aiAllRows, mlCoverage, blueCollarSnapshot);
+  const hasOwnership = new Set((ownership?.players ?? []).map((p) => p.mlb_player_id).filter((id): id is string => Boolean(id)));
+  const stackStatusByTeam = new Map(stacks.map((s) => [s.team, s.status]));
+  const teamReadinessRows = buildTeamReadinessRows(
+    allTeams, pitcherRows, hitterRows, nativeAllRows, aiAllRows, blueCollarSnapshot, hasOwnership, stackStatusByTeam,
+  );
+  const researchGames = filterByGameIdField(loadResearchGames(date).data ?? [], gameIds);
+  const earliestLockTimeUtc = researchGames
+    .map((g) => g.game_datetime_utc)
+    .filter((v): v is string => Boolean(v))
+    .sort()[0] ?? null;
+  const completionStage = computeSlateCompletionStage(readiness, researchGames, earliestLockTimeUtc);
+
   const topHitters10 = [...hitterRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const topPitchers10 = [...pitcherRows].sort((a, b) => (b.projection ?? 0) - (a.projection ?? 0)).slice(0, 10);
   const highestLeverage10 = [...pitcherRows, ...hitterRows]
@@ -209,6 +233,12 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
       {/* VEGAS COVERAGE (Milestone 25) -- scoped to the selected DK slate, not raw SportsGameOdds event count */}
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <VegasCoverageCard coverage={vegasCoverage} />
+      </div>
+
+      {/* SLATE READINESS / TEAM READINESS (M32.7) */}
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
+        <SlateReadinessCard readiness={readiness} stage={completionStage} />
+        <TeamReadinessTable rows={teamReadinessRows} />
       </div>
 
       {/* CENTER LAYOUT -- AI Slate Summary / Slate Rankings / Quick Actions */}

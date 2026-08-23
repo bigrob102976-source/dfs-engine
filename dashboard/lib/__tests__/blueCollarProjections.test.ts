@@ -132,3 +132,42 @@ describe("getBlueCollarProjectionByPlayerId", () => {
     expect(player?.raw_projection).toBe(0.0);
   });
 });
+
+describe("computeBlueCollarCoverage (M32.7)", () => {
+  it("reads returned/usable/identityResolved straight from the snapshot's own counters", async () => {
+    const { computeBlueCollarCoverage } = await import("../blueCollarProjections");
+    const snapshot = snapshotDoc({ player_count: 746, usable_projection_count: 159, matched_count: 415 }) as never;
+    const result = computeBlueCollarCoverage(snapshot, new Set());
+    expect(result.returned).toBe(746);
+    expect(result.usable).toBe(159);
+    expect(result.identityResolved).toBe(415);
+  });
+
+  it("returns all zeros (never throws) when there is no snapshot", async () => {
+    const { computeBlueCollarCoverage } = await import("../blueCollarProjections");
+    expect(computeBlueCollarCoverage(null, new Set(["1"]))).toEqual({ returned: 0, usable: 0, identityResolved: 0, eligible: 0, optimizerReady: 0 });
+  });
+
+  it("eligible requires usable_projection AND membership in the optimizer-eligible id set -- usable alone is not enough", async () => {
+    const { computeBlueCollarCoverage } = await import("../blueCollarProjections");
+    const snapshot = snapshotDoc({
+      players: [
+        bcPlayerRecord({ mlb_player_id: "1", usable_projection: 10 }), // usable, eligible -> counts
+        bcPlayerRecord({ mlb_player_id: "2", usable_projection: 10 }), // usable, NOT eligible -> excluded
+        bcPlayerRecord({ mlb_player_id: "3", usable_projection: null }), // eligible, NOT usable -> excluded
+      ],
+    }) as never;
+    const result = computeBlueCollarCoverage(snapshot, new Set(["1", "3"]));
+    expect(result.eligible).toBe(1);
+    expect(result.optimizerReady).toBe(1);
+  });
+
+  it("never counts a player with no mlb_player_id, even if usable", async () => {
+    const { computeBlueCollarCoverage } = await import("../blueCollarProjections");
+    const snapshot = snapshotDoc({
+      players: [bcPlayerRecord({ mlb_player_id: null, match_status: "unmatched", usable_projection: 10 })],
+    }) as never;
+    const result = computeBlueCollarCoverage(snapshot, new Set());
+    expect(result.eligible).toBe(0);
+  });
+});

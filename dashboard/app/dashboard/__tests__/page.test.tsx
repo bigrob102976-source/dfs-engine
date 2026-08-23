@@ -171,6 +171,24 @@ function seedProjectionSourceComparison() {
   });
 }
 
+function seedM327ReadinessFixtures() {
+  writeJson(`research_output/${DATE}/games.json`, [
+    { game_id: "g1", date: DATE, game_datetime_utc: `${DATE}T23:05:00Z`, status: "Scheduled", home_team_abbr: "DET", away_team_abbr: "CLE", venue_name: null, home_probable_pitcher_id: null, away_probable_pitcher_id: null, game_number: 1 },
+  ]);
+  writeJson(`dfs_input/${DATE}/dk_match_report_20260814T180000.json`, {
+    dk_entries: 2, matched_to_mlb: 2, unmatched_count: 0, ambiguous_count: 0,
+    teams_awaiting_lineups: ["DET", "CLE"],
+    eligibility: { raw_dk_players: 2, starting_pitchers: 1, relief_pitchers: 0, confirmed_hitters: 0, bench_hitters: 0, waiting_for_lineups: 1, scratched: 0, unmatched: 0, ambiguous: 0, optimizer_eligible: 1 },
+  });
+  writeJson(`dfs_input/${DATE}/dk_player_pool_20260814T180000.json`, {
+    selected_slate_id: null, roster_feasibility_pass: false, player_count: 2,
+    players: [
+      { dk_player_id: "d1", mlb_player_id: "p1", name: "Tarik Skubal", team: "DET", player_type: "pitcher", dk_positions: ["P"], salary: 10500, projection: 24.5, ceiling: 34, risk_score: 20, confidence: 90, game_id: "g1", opponent: "CLE", lineup_status: "active", match_status: "matched", eligibility_status: "STARTING_PITCHER", optimizer_eligible: true },
+      { dk_player_id: "d2", mlb_player_id: "h1", name: "Bench Hitter", team: "CLE", player_type: "hitter", dk_positions: ["OF"], salary: 4000, projection: null, ceiling: null, risk_score: null, confidence: null, game_id: "g1", opponent: "DET", lineup_status: "lineup_not_confirmed", match_status: "matched", eligibility_status: "LINEUP_UNCONFIRMED", optimizer_eligible: false },
+    ],
+  });
+}
+
 describe("TodaysSlatePage (AI Slate Command Center)", () => {
   it("shows a clean empty-data state with no raw script path leaking, when nothing exists yet", async () => {
     const TodaysSlatePage = (await import("../page")).default;
@@ -217,6 +235,24 @@ describe("TodaysSlatePage (AI Slate Command Center)", () => {
 
     // Quick Actions
     expect(screen.getByRole("link", { name: "Build Lineups" })).toHaveAttribute("href", "/dashboard/optimizer");
+  });
+
+  it("M32.7: renders Slate Readiness and Team Readiness from real match-report/pool/games data", async () => {
+    seedEnvironmentReport();
+    seedPitcherSnapshot();
+    seedM327ReadinessFixtures();
+
+    const TodaysSlatePage = (await import("../page")).default;
+    const jsx = await TodaysSlatePage({ searchParams: Promise.resolve({}) } as never);
+    render(jsx);
+
+    expect(screen.getByText("Slate Readiness")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2")).toBeInTheDocument(); // Identity Resolved
+    expect(screen.getByText("0 / 2 teams")).toBeInTheDocument(); // Lineups Confirmed (CLE and DET both awaiting)
+
+    expect(screen.getByText("Team Readiness")).toBeInTheDocument();
+    expect(screen.getAllByText("DET").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("CLE").length).toBeGreaterThan(0);
   });
 
   it("Milestone 20: renders the AI Projection Engine section and Game Center AI data from a real ai_projection snapshot", async () => {

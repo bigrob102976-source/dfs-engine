@@ -44,6 +44,29 @@ interface IdentityCounts {
   unmatched: number;
 }
 
+// M32.7: BlueCollar's own funnel, always separate counts -- see
+// lib/blueCollarProjections.ts::computeBlueCollarCoverage.
+interface BlueCollarCoverage {
+  returned: number;
+  usable: number;
+  identityResolved: number;
+  eligible: number;
+  optimizerReady: number;
+}
+
+// M32.7: "After Refresh Data, show what changed" -- see
+// lib/slateChangeReport.ts.
+interface ChangeReport {
+  lineupsPosted: number;
+  hittersBecameEligible: number;
+  starterChanged: number;
+  nativeGenerated: number;
+  aiGenerated: number;
+  mlGenerated: number;
+  stacksBecameReady: number;
+  unchanged: string[];
+}
+
 interface SlateBoardRow {
   slateId: string;
   slateName: string | null;
@@ -61,6 +84,8 @@ interface SlateBoardRow {
   activeJob: ActiveJob | null;
   eligibility: EligibilityCounts | null;
   identity: IdentityCounts | null;
+  blueCollarCoverage: BlueCollarCoverage;
+  changeReport: ChangeReport | null;
 }
 
 interface StatusResponse {
@@ -227,6 +252,35 @@ export function AdminSlateOperations({ date }: { date: string }) {
                   <dd className="text-text">{isPublished ? `v${s.publishedVersion} · ${fmt(s.publishedAt)}` : "No"}</dd>
                 </dl>
 
+                {!s.activeJob && s.changeReport && (() => {
+                  const r = s.changeReport;
+                  const lines: string[] = [];
+                  if (r.lineupsPosted > 0) lines.push(`${r.lineupsPosted} lineup${r.lineupsPosted === 1 ? "" : "s"} posted`);
+                  if (r.hittersBecameEligible > 0) lines.push(`${r.hittersBecameEligible} hitter${r.hittersBecameEligible === 1 ? "" : "s"} became eligible`);
+                  if (r.starterChanged > 0) lines.push(`${r.starterChanged} starter${r.starterChanged === 1 ? "" : "s"} changed`);
+                  if (r.nativeGenerated > 0) lines.push(`${r.nativeGenerated} Native projection${r.nativeGenerated === 1 ? "" : "s"} generated`);
+                  if (r.aiGenerated > 0) lines.push(`${r.aiGenerated} AI projection${r.aiGenerated === 1 ? "" : "s"} generated`);
+                  if (r.mlGenerated > 0) lines.push(`${r.mlGenerated} ML projection${r.mlGenerated === 1 ? "" : "s"} generated`);
+                  if (r.stacksBecameReady > 0) lines.push(`${r.stacksBecameReady} stack${r.stacksBecameReady === 1 ? "" : "s"} became READY`);
+                  return (
+                    <div className="mb-3 rounded border border-border-subtle bg-bg-panel-raised px-2 py-1.5 text-[11px]">
+                      <div className="mb-1 font-semibold uppercase tracking-wide text-text-muted">Last Refresh Changes</div>
+                      {lines.length === 0 ? (
+                        <div className="text-text-faint">No change from the last refresh.</div>
+                      ) : (
+                        <ul className="list-inside list-disc text-text">
+                          {lines.map((l) => (
+                            <li key={l}>{l}</li>
+                          ))}
+                        </ul>
+                      )}
+                      {r.unchanged.length > 0 && (
+                        <div className="mt-1 text-text-faint">No Change: {r.unchanged.join(", ")}</div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {s.readiness.required.map((c) => (
                     <span
@@ -291,6 +345,24 @@ export function AdminSlateOperations({ date }: { date: string }) {
                       <dd className="text-text">{s.eligibility.scratched}</dd>
                       <dt className="font-semibold text-text-faint">Optimizer Eligible</dt>
                       <dd className="font-semibold text-green">{s.eligibility.optimizer_eligible}</dd>
+                    </dl>
+                  </div>
+                )}
+
+                {s.blueCollarCoverage.returned > 0 && (
+                  <div className="mb-3 border-t border-border-subtle pt-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-text-faint">BlueCollar Coverage</div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] sm:grid-cols-3">
+                      <dt className="text-text-faint">Returned</dt>
+                      <dd className="text-text">{s.blueCollarCoverage.returned}</dd>
+                      <dt className="text-text-faint">Usable</dt>
+                      <dd className="text-text">{s.blueCollarCoverage.usable}</dd>
+                      <dt className="text-text-faint">Identity-Resolved</dt>
+                      <dd className="text-text">{s.blueCollarCoverage.identityResolved}</dd>
+                      <dt className="text-text-faint">Eligible</dt>
+                      <dd className="text-text">{s.blueCollarCoverage.eligible}</dd>
+                      <dt className="font-semibold text-text-faint">Optimizer-Ready</dt>
+                      <dd className="font-semibold text-green">{s.blueCollarCoverage.optimizerReady}</dd>
                     </dl>
                   </div>
                 )}

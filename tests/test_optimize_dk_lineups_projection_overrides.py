@@ -140,3 +140,64 @@ def test_load_projection_overrides_reads_json_file(tmp_path):
     path.write_text(json.dumps({"h1": {"projection": 11.0}}), encoding="utf-8")
     loaded = opt_script._load_projection_overrides(str(path))
     assert loaded == {"h1": {"projection": 11.0}}
+
+
+# ---------------------------------------------------------------------------
+# M32.7 -- OPTIMIZER SAFETY: "Unconfirmed hitters remain optimizer_eligible
+# = false. No optimizer source may bypass this. [Projection] availability
+# must NOT imply optimizer eligibility." Covers BlueCollar and any other
+# strict source (e.g. Big Money ML) identically, since the gate is
+# entirely source-agnostic (optimizer_eligible is checked before any
+# override is even consulted -- see _build_optimizer_players's own
+# comment at the top of its loop).
+# ---------------------------------------------------------------------------
+
+
+def _pool_doc_with_unconfirmed_hitter():
+    doc = _pool_doc()
+    doc["players"].append({
+        "dk_player_id": "d3", "mlb_player_id": "h2", "name": "Bench Hitter", "team": "BOS",
+        "opponent": "TOR", "game_id": "g1", "player_type": "hitter", "dk_positions": ["OF"],
+        "salary": 3000, "projection": None, "ceiling": None, "floor": None, "risk_score": None,
+        "confidence": None, "lineup_status": "lineup_not_confirmed",
+        "eligibility_status": "LINEUP_UNCONFIRMED", "optimizer_eligible": False,
+    })
+    return doc
+
+
+def test_an_unconfirmed_hitter_with_a_usable_override_still_never_enters_the_optimizer_pool():
+    """The exact scenario the milestone calls out by name: a BlueCollar
+    (or any) projection source can have a perfectly usable, positive
+    projection for a LINEUP_UNCONFIRMED hitter -- that availability must
+    NEVER imply optimizer eligibility. Non-strict mode."""
+    overrides = {"h1": {"projection": 14.5, "ceiling": 22.0, "floor": 6.0}, "h2": {"projection": 9.5, "ceiling": None, "floor": None}}
+    players, _skipped, _excluded = opt_script._build_optimizer_players(_pool_doc_with_unconfirmed_hitter(), overrides)
+    assert all(p.key != "d3" for p in players)
+
+
+def test_an_unconfirmed_hitter_with_a_usable_override_never_enters_the_pool_in_strict_mode_either():
+    overrides = {
+        "h1": {"projection": 14.5, "ceiling": 22.0, "floor": 6.0},
+        "p1": {"projection": 25.0, "ceiling": 35.0, "floor": 10.0},
+        "h2": {"projection": 9.5, "ceiling": None, "floor": None},
+    }
+    players, _skipped, excluded = opt_script._build_optimizer_players(_pool_doc_with_unconfirmed_hitter(), overrides, strict_source=True)
+    assert all(p.key != "d3" for p in players)
+    # Never even reaches the strict-source "excluded for missing
+    # projection" bucket -- it's filtered out earlier, by eligibility,
+    # for an entirely different reason.
+    assert "Bench Hitter" not in excluded
+
+
+def test_bench_and_scratched_players_are_equally_excluded_regardless_of_override_presence():
+    for status in ("BENCH", "RELIEF_PITCHER", "SCRATCHED", "UNMATCHED", "AMBIGUOUS"):
+        doc = _pool_doc()
+        doc["players"].append({
+            "dk_player_id": "dX", "mlb_player_id": "hX", "name": "Excluded Player", "team": "BOS",
+            "opponent": "TOR", "game_id": "g1", "player_type": "hitter", "dk_positions": ["OF"],
+            "salary": 3000, "projection": None, "ceiling": None, "floor": None, "risk_score": None,
+            "confidence": None, "lineup_status": "x", "eligibility_status": status, "optimizer_eligible": False,
+        })
+        overrides = {"hX": {"projection": 99.0, "ceiling": 99.0, "floor": 99.0}}
+        players, _skipped, _excluded = opt_script._build_optimizer_players(doc, overrides, strict_source=True)
+        assert all(p.key != "dX" for p in players), f"status={status} leaked into the optimizer pool"
