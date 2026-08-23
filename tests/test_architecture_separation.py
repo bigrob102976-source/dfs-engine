@@ -386,6 +386,45 @@ def test_optimize_dk_lineups_strict_source_never_falls_back_to_independent_proje
 
 
 # ---------------------------------------------------------------------------
+# Milestone 32.5 -- forward RESULTS + LINEUP GRADING is evaluation-only.
+# The generic pregame-file scan above already proves no pregame package
+# ever imports evaluation.* at all (including these new modules, by
+# directory-scan construction); these tests add the narrower, explicit
+# "never retrains" guarantee this milestone's own instructions require.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("module_file", [
+    "evaluation/ml_forward_grading.py",
+    "evaluation/ml_forward_persistence.py",
+    "evaluation/ml_forward_history.py",
+    "scripts/collect_ml_forward_results.py",
+])
+def test_ml_forward_grading_never_imports_training_modules(module_file):
+    """Milestone 32.5 is evaluation-only: none of its new modules may
+    import historical_models.*.train, and none may call .fit(/
+    fit_transform( -- the frozen Pitcher/Hitter Model V1 artifacts are
+    read-only inputs here, never retrained or refit."""
+    text = (PROJECT_ROOT / module_file).read_text(encoding="utf-8")
+    imported = _imported_module_names(PROJECT_ROOT / module_file)
+    assert "historical_models.pitcher_v1.train" not in imported
+    assert "historical_models.hitter_v1.train" not in imported
+    for forbidden in ("fit(", "fit_transform"):
+        assert forbidden not in text, f"{module_file} contains {forbidden!r} -- M32.5 must never retrain/refit a model."
+
+
+def test_ml_forward_grading_never_imports_optimizer_ownership_or_native_ai_internals():
+    """Evaluation-only: this module reads already-persisted snapshots
+    (big_money_ml/, results/, lineups/) but never reaches into the
+    optimizer's or ownership's own internal solving/scoring logic."""
+    forbidden_prefixes = ("optimizer.constraints", "optimizer.lineup_generator", "ownership.")
+    for module_file in ("evaluation/ml_forward_grading.py", "evaluation/ml_forward_persistence.py", "evaluation/ml_forward_history.py"):
+        imported = _imported_module_names(PROJECT_ROOT / module_file)
+        forbidden = {name for name in imported if any(name == p or name.startswith(p) for p in forbidden_prefixes)}
+        assert not forbidden, f"{module_file} imports forbidden module(s): {forbidden}"
+
+
+# ---------------------------------------------------------------------------
 # Milestone 32.3B -- Big Money ML HITTER shadow inference isolation.
 #
 # All the generic big_money_ml/ checks above already cover every file in

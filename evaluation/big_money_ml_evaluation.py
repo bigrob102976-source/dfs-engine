@@ -247,6 +247,26 @@ def build_all_hitter_projection_sources(
     return sources
 
 
+def build_all_combined_projection_sources(
+    slate_date: str, ml_root=DEFAULT_ML_PROJECTION_ROOT, fantasypros_root=DEFAULT_FANTASYPROS_ROOT, **other_source_roots,
+) -> Dict[str, Dict[str, float]]:
+    """Milestone 32.5 -- {source_label: {player_id: value}} POOLED across
+    pitchers and hitters (mlb_player_id spaces never collide). Used for
+    "combined" forward metrics -- MAE/RMSE can be validly derived from
+    separate hitter/pitcher metrics via N-weighting, but Pearson/
+    Spearman/top-N CANNOT (they aren't linear), so this builds one
+    unified sample and lets compare_projection_sources recompute every
+    metric directly on the pooled pairs, never approximated."""
+    pitcher_sources = build_all_pitcher_projection_sources(slate_date, ml_root=ml_root, fantasypros_root=fantasypros_root, **other_source_roots)
+    hitter_sources = build_all_hitter_projection_sources(slate_date, ml_root=ml_root, fantasypros_root=fantasypros_root, **other_source_roots)
+    combined: Dict[str, Dict[str, float]] = {}
+    for source in set(pitcher_sources) | set(hitter_sources):
+        merged = dict(pitcher_sources.get(source, {}))
+        merged.update(hitter_sources.get(source, {}))
+        combined[source] = merged
+    return combined
+
+
 def evaluate_forward_hitter_performance(slate_dates: List[str], results_root=DEFAULT_RESULTS_ROOT, ml_root=DEFAULT_ML_PROJECTION_ROOT) -> dict:
     """Hitter equivalent of evaluate_forward_performance() -- same
     pooling/weighting discipline, same SHARED SAMPLE N reporting per

@@ -40,6 +40,9 @@ export const ARTIFACT_DIRS = {
   // player's real stat line doesn't depend on which DK slate you view
   // it through; see evaluation/results_collector.py).
   results: "results",
+  // Milestone 32.5: immutable, per-(date, slate_id) Big Money ML forward
+  // grading documents (evaluation/ml_forward_persistence.py's output).
+  mlForwardResults: "ml_forward_results",
 } as const;
 
 export function artifactPath(...segments: string[]): string {
