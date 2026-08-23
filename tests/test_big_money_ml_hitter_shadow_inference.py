@@ -332,3 +332,212 @@ def test_frozen_artifact_must_be_after_lineup_class(tmp_path, monkeypatch):
             "2026-08-22", artifact_dir=artifact_dir,
             dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
         )
+
+
+# ---------------------------------------------------------------------------
+# M32.7A -- real weather threaded from a persisted SlateEnvironmentReport
+# into the live hitter feature builder via game_id.
+# ---------------------------------------------------------------------------
+
+
+def _reading(temperature_f=72.0, wind_speed_mph=8.0, wind_direction_degrees=180.0, precipitation_amount_mm=0.0, humidity_percent=55.0):
+    return {
+        "temperature_f": temperature_f, "humidity_percent": humidity_percent, "wind_speed_mph": wind_speed_mph,
+        "wind_direction_degrees": wind_direction_degrees, "feels_like_f": None, "rain_percent": None,
+        "air_density": None, "precipitation_probability_percent": None,
+        "precipitation_amount_mm": precipitation_amount_mm, "weather_code": None, "wind_gusts_mph": None,
+    }
+
+
+def _weather_snapshot(game_id, is_mock=False, roof_status="open", first_pitch=None, current=None):
+    return {
+        "game_id": game_id, "provider_name": "open_meteo", "is_mock": is_mock,
+        "retrieved_at": "2026-08-22T10:00:00Z", "roof_status": roof_status,
+        "delay_risk_percent": None, "postponement_risk_percent": None,
+        "current": current or _reading(temperature_f=999.0),  # decoy -- must never be read
+        "first_pitch": first_pitch if first_pitch is not None else _reading(),
+        "mid_game": _reading(), "late_game": _reading(),
+        "weather_risk_percent": None, "weather_status": None,
+    }
+
+
+def _write_environment_report(root, date, games):
+    """games: list of (game_id, weather_snapshot_dict_or_None)."""
+    folder = root / date
+    folder.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "slate_date": date, "generated_at": f"{date}T09:00:00Z", "engine_version": "test",
+        "games": [
+            {
+                "game_id": game_id, "home_team": "NYY", "away_team": "BOS", "game_datetime_utc": None,
+                "venue_name": None, "environment_score": {"overall": 50, "pitcher": 50, "hitter": 50, "stack": 50},
+                "summary": {"headline": "", "bullet_points": []},
+                "future_adjustment_preview": {"weather_points": None, "vegas_points": None, "bullpen_points": None, "enabled": False},
+                "weather": weather, "weather_analysis": None, "vegas": None, "ballpark": None, "umpire": None,
+                "bullpen_home": None, "bullpen_away": None, "travel_home": None, "travel_away": None,
+                "mlb_game_status": None, "game_status": "UNKNOWN", "vegas_live": None,
+            }
+            for game_id, weather in games
+        ],
+        "vegas_slate_analysis": None, "warnings": [],
+    }
+    (folder / "environment_20260822T090000.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_real_weather_from_environment_snapshot_reaches_the_live_feature_builder(tmp_path, frozen_artifact_dir, monkeypatch):
+    """End-to-end M32.7A proof: a real, persisted SlateEnvironmentReport's
+    weather for this hitter's own game_id is passed into
+    build_live_pregame_hitter_features -- not omitted, not fabricated."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"
+    _write_pool(dfs_root, "2026-08-22", [_hitter_row("20", game_id="g1")])
+    _write_games(research_root, "2026-08-22", [_game(game_id="g1")])
+    _write_pitchers(research_root, "2026-08-22", [_probable_pitcher("999", game_id="g1")])
+    snapshot = _weather_snapshot("g1", first_pitch=_reading(temperature_f=81.0, wind_speed_mph=12.5))
+    _write_environment_report(env_root, "2026-08-22", [("g1", snapshot)])
+
+    captured = {}
+    original = hitter_shadow_inference.build_live_pregame_hitter_features
+
+    def spy(**kwargs):
+        captured["weather_snapshot"] = kwargs.get("weather_snapshot")
+        return original(**kwargs)
+
+    monkeypatch.setattr(hitter_shadow_inference, "build_live_pregame_hitter_features", spy)
+
+    doc = run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    assert captured["weather_snapshot"] == snapshot
+    assert doc.players[0].projection_status == "LIVE_PREGAME"
+
+
+def test_weather_matched_by_game_id_not_leaked_across_games(tmp_path, frozen_artifact_dir, monkeypatch):
+    """Two hitters in two different games must each get their OWN
+    game's weather, never the other game's."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"
+    _write_pool(dfs_root, "2026-08-22", [
+        _hitter_row("21", team="ATL", opponent="NYM", game_id="gA"),
+        _hitter_row("22", team="BOS", opponent="TB", game_id="gB"),
+    ])
+    _write_games(research_root, "2026-08-22", [
+        _game(game_id="gA", home="ATL", away="NYM"), _game(game_id="gB", home="BOS", away="TB"),
+    ])
+    _write_pitchers(research_root, "2026-08-22", [
+        _probable_pitcher("991", team_abbr="NYM", game_id="gA"), _probable_pitcher("992", team_abbr="TB", game_id="gB"),
+    ])
+    snapshot_a = _weather_snapshot("gA", first_pitch=_reading(temperature_f=60.0))
+    snapshot_b = _weather_snapshot("gB", first_pitch=_reading(temperature_f=95.0))
+    _write_environment_report(env_root, "2026-08-22", [("gA", snapshot_a), ("gB", snapshot_b)])
+
+    captured = {}
+    original = hitter_shadow_inference.build_live_pregame_hitter_features
+
+    def spy(**kwargs):
+        captured[kwargs["player_id"]] = kwargs.get("weather_snapshot")
+        return original(**kwargs)
+
+    monkeypatch.setattr(hitter_shadow_inference, "build_live_pregame_hitter_features", spy)
+
+    run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    assert captured["21"]["first_pitch"]["temperature_f"] == 60.0
+    assert captured["22"]["first_pitch"]["temperature_f"] == 95.0
+
+
+def test_no_environment_snapshot_yet_still_generates_with_honest_missing_weather(tmp_path, frozen_artifact_dir):
+    """No environment_snapshot_root data at all for this slate must not
+    block inference -- weather stays honestly missing (weather_available
+    False), same behavior as before M32.7A, never a hard failure."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"  # never written -- no environment snapshot exists
+    _write_pool(dfs_root, "2026-08-22", [_hitter_row("23")])
+    _write_games(research_root, "2026-08-22", [_game()])
+    _write_pitchers(research_root, "2026-08-22", [_probable_pitcher("999")])
+
+    doc = run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    assert doc.players[0].projection_status == "LIVE_PREGAME"
+    assert doc.players[0].projection is not None
+
+
+def test_mock_weather_snapshot_treated_as_unavailable_not_wired_into_inference(tmp_path, frozen_artifact_dir, monkeypatch):
+    """A game whose only persisted weather is from a mock provider
+    (is_mock=True) must reach the feature builder as unavailable, not as
+    if it were real -- the mapping itself (_map_weather_features) already
+    unit-tests this; this proves the orchestration layer does not
+    special-case or filter it out before passing it along, either."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"
+    _write_pool(dfs_root, "2026-08-22", [_hitter_row("24", game_id="g1")])
+    _write_games(research_root, "2026-08-22", [_game(game_id="g1")])
+    _write_pitchers(research_root, "2026-08-22", [_probable_pitcher("999", game_id="g1")])
+    mock_snapshot = _weather_snapshot("g1", is_mock=True)
+    _write_environment_report(env_root, "2026-08-22", [("g1", mock_snapshot)])
+
+    captured = {}
+    original = hitter_shadow_inference.build_live_pregame_hitter_features
+
+    def spy(**kwargs):
+        captured["weather_snapshot"] = kwargs.get("weather_snapshot")
+        return original(**kwargs)
+
+    monkeypatch.setattr(hitter_shadow_inference, "build_live_pregame_hitter_features", spy)
+
+    run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    assert captured["weather_snapshot"]["is_mock"] is True  # passed through as-is
+    assert live_hitter_features._map_weather_features(captured["weather_snapshot"])["weather_available"] is False
+
+
+def test_weather_influenced_snapshot_still_persists_and_reloads(tmp_path, frozen_artifact_dir):
+    """ML snapshot persistence (save/reload round-trip) still works once
+    real weather is flowing through the feature vector -- no new field
+    breaks the existing MLHitterProjectionDocument serialization."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"
+    _write_pool(dfs_root, "2026-08-22", [_hitter_row("25", game_id="g1")])
+    _write_games(research_root, "2026-08-22", [_game(game_id="g1")])
+    _write_pitchers(research_root, "2026-08-22", [_probable_pitcher("999", game_id="g1")])
+    _write_environment_report(env_root, "2026-08-22", [("g1", _weather_snapshot("g1"))])
+
+    run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    reloaded = load_latest_ml_hitter_projection_snapshot("2026-08-22", output_root=ml_root)
+    assert reloaded is not None
+    assert reloaded["players"][0]["player_id"] == "25"
+    assert reloaded["players"][0]["projection_status"] == "LIVE_PREGAME"
+
+
+def test_weather_does_not_affect_pregame_timestamp_safety(tmp_path, frozen_artifact_dir):
+    """Weather threading must not change the existing pregame-timestamp
+    guarantee: feature_timestamp is still strictly before game start."""
+    dfs_root, research_root, ml_root = tmp_path / "dfs_input", tmp_path / "research_output", tmp_path / "ml_snap"
+    env_root = tmp_path / "env_snap"
+    _write_pool(dfs_root, "2026-08-22", [_hitter_row("26", game_id="g1")])
+    _write_games(research_root, "2026-08-22", [_game(game_id="g1")])
+    _write_pitchers(research_root, "2026-08-22", [_probable_pitcher("999", game_id="g1")])
+    _write_environment_report(env_root, "2026-08-22", [("g1", _weather_snapshot("g1"))])
+
+    doc = run_ml_hitter_shadow_inference(
+        "2026-08-22", artifact_dir=frozen_artifact_dir,
+        dfs_input_root=dfs_root, research_output_root=str(research_root), ml_projection_root=ml_root,
+        environment_snapshot_root=env_root,
+    )
+    assert doc.players[0].feature_timestamp < doc.players[0].game_scheduled_start_utc
+    assert not any("not strictly before game start" in w for w in doc.players[0].warnings)

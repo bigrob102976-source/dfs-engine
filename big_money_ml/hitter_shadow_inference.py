@@ -39,6 +39,7 @@ from big_money_ml.lock import FREEZE_EXISTING, GENERATE, NO_VALID_PREGAME, deter
 from big_money_ml.models import INVALID_FEATURE_PARITY, LIVE_PREGAME, MISSING, PREGAME_FROZEN, MLHitterProjection, MLHitterProjectionDocument
 from big_money_ml.persistence import load_latest_ml_hitter_projection_snapshot, save_ml_hitter_projection_document
 from big_money_ml.shadow_inference import _load_games_by_id
+from research.game_environment.storage import DEFAULT_ENVIRONMENT_SNAPSHOT_ROOT, load_latest_environment_report
 
 NO_VALID_LIVE_ML_PROJECTION = "NO VALID LIVE ML PROJECTION"
 
@@ -73,6 +74,24 @@ def _load_probable_starters_by_team_and_game(slate_date: str, research_output_ro
     return out
 
 
+def _load_weather_by_game_id(slate_date: str, environment_snapshot_root=DEFAULT_ENVIRONMENT_SNAPSHOT_ROOT) -> Dict[str, dict]:
+    """M32.7A: {game_id: WeatherSnapshot-dict} from the LATEST persisted
+    SlateEnvironmentReport for `slate_date` -- the real, already-fetched
+    Open-Meteo forecast (scripts/build_game_environment_report.py),
+    never a new fetch performed here. Returns {} (never raises) when no
+    environment snapshot has been generated yet for this slate -- an
+    honest, expected pregame state, same discipline as every other
+    optional live input in this module."""
+    report = load_latest_environment_report(slate_date, output_root=environment_snapshot_root)
+    if not report:
+        return {}
+    return {
+        str(g["game_id"]): g.get("weather")
+        for g in report.get("games", [])
+        if g.get("game_id") is not None
+    }
+
+
 def _existing_player_records(slate_date: str, output_root=None) -> Dict[str, dict]:
     kwargs = {} if output_root is None else {"output_root": output_root}
     doc = load_latest_ml_hitter_projection_snapshot(slate_date, **kwargs)
@@ -105,7 +124,7 @@ def _missing_record(p, model_version: str, game_scheduled_start_utc: Optional[st
 def run_ml_hitter_shadow_inference(
     slate_date: str, artifact_dir=None, now_utc: Optional[datetime] = None,
     research_output_root: str = "research_output", dfs_input_root=None,
-    ml_projection_root=None,
+    ml_projection_root=None, environment_snapshot_root=DEFAULT_ENVIRONMENT_SNAPSHOT_ROOT,
 ) -> MLHitterProjectionDocument:
     now_utc = now_utc or datetime.now(timezone.utc)
     generated_at = now_utc.isoformat()
@@ -135,6 +154,7 @@ def run_ml_hitter_shadow_inference(
     games_by_id = _load_games_by_id(slate_date, research_output_root=research_output_root)
     probable_starters = _load_probable_starters_by_team_and_game(slate_date, research_output_root=research_output_root)
     existing_by_player = _existing_player_records(slate_date, output_root=ml_projection_root)
+    weather_by_game_id = _load_weather_by_game_id(slate_date, environment_snapshot_root=environment_snapshot_root)
     statcast_buffer = build_live_statcast_buffer(slate_date)
     # Milestone 32.4 performance optimization: shared across every
     # hitter in this run so hitters facing the same opposing starter
@@ -191,6 +211,7 @@ def run_ml_hitter_shadow_inference(
             as_of_date=slate_date, venue_id=game.venue_id, statcast_buffer=statcast_buffer,
             opposing_starter_id=opposing_starter_id, batting_order_actual=p.batting_order,
             opposing_pitcher_cache=opposing_pitcher_cache,
+            weather_snapshot=weather_by_game_id.get(str(p.game_id)),
         )
 
         try:

@@ -23,11 +23,15 @@ def test_parity_report_has_no_incompatible_features():
     assert incompatible == [], f"Unexpected INCOMPATIBLE features: {[r.feature for r in incompatible]}"
 
 
-def test_parity_report_marks_weather_family_as_missing_not_fabricated():
+def test_parity_report_marks_weather_family_as_exact_after_m32_7a_live_mapping():
+    """M32.7A: weather is now mapped from the real, already-persisted
+    Game Environment snapshot (see big_money_ml.live_hitter_features::
+    _map_weather_features) -- EXACT, same field-rename-only transformation
+    discipline as every other EXACT family, not MISSING/fabricated."""
     rows = build_hitter_feature_parity_report()
     by_column = {r.feature: r for r in rows}
     for col in ("weather_temperature_f", "weather_wind_speed_mph", "weather_wind_direction_deg", "weather_precipitation", "weather_humidity_pct", "weather_available"):
-        assert by_column[col].parity_status == MISSING
+        assert by_column[col].parity_status == EXACT
 
 
 def test_parity_report_marks_venue_roof_type_as_exact_despite_weather_family_grouping():

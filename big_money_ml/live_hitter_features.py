@@ -25,8 +25,15 @@ already-evaluation-free helpers (LiveStatcastBuffer,
 build_live_statcast_buffer, _unwrap_game_log, _person_handedness) by
 import rather than duplicating them a third time.
 
-Weather is deliberately NOT fetched here (see hitter_feature_parity.py
--- MISSING, not fabricated); every weather_* feature is left None.
+M32.7A -- weather is now mapped from the REAL, already-persisted
+research/game_environment/ snapshot (Open-Meteo, same provider the
+AFTER_LINEUP model's weather_* columns were trained against -- see
+historical_mlb/hitter_features.py's identical field semantics) when a
+caller supplies one via `weather_snapshot`; see _map_weather_features()
+below for the exact per-field mapping and its rationale. Omitting the
+argument (or passing a genuinely missing/mock snapshot) preserves the
+prior, honest MISSING behavior -- weather_available stays False and
+every weather_* feature stays None, never fabricated.
 """
 
 from dataclasses import dataclass, field
@@ -49,6 +56,67 @@ _ROLLING_ATTR_BY_STAT = {
 }
 
 
+_MISSING_WEATHER_FEATURES: Dict[str, object] = {
+    "weather_available": False,
+    "weather_temperature_f": None,
+    "weather_wind_speed_mph": None,
+    "weather_wind_direction_deg": None,
+    "weather_precipitation": None,
+    "weather_humidity_pct": None,
+}
+
+
+def _map_weather_features(weather_snapshot: Optional[dict]) -> Dict[str, object]:
+    """Maps ONE game's persisted WeatherSnapshot dict (research/
+    game_environment/models.py::WeatherSnapshot.to_dict(), as stored in
+    a SlateEnvironmentReport's `games[i]["weather"]`) onto the six
+    weather_* columns Hitter Model V1's AFTER_LINEUP feature set
+    expects. Every mapping below is a same-semantics rename, never a
+    reinterpretation -- verified against historical_mlb/hitter_features.py's
+    training-time field definitions (Open-Meteo's own raw hourly
+    columns: temperature_2m, wind_speed_10m, wind_direction_10m,
+    precipitation, relative_humidity_2m) and
+    historical_mlb/manifest.py's documented "at game hour" semantics:
+
+        weather_temperature_f    <- first_pitch.temperature_f
+        weather_wind_speed_mph   <- first_pitch.wind_speed_mph
+        weather_wind_direction_deg <- first_pitch.wind_direction_degrees
+        weather_precipitation    <- first_pitch.precipitation_amount_mm
+            (Open-Meteo's raw "precipitation" hourly field is a forecast
+            AMOUNT, not a probability -- precipitation_probability_percent
+            is a genuinely different signal the model was never trained
+            on and is never used here.)
+        weather_humidity_pct     <- first_pitch.humidity_percent
+
+    `first_pitch` (not `current`) is used because it is the reading
+    OpenMeteoWeatherProvider.get_weather() itself selects for the
+    forecast hour nearest this specific game's scheduled start (see
+    research/game_environment/weather.py) -- matching "at game hour",
+    not "right now" (which could be many hours away from first pitch).
+
+    weather_available mirrors the exact training-time definition
+    (`weather is not None`) with one addition this live path needs that
+    training never had to consider: a MOCK provider's snapshot (
+    `is_mock: true` -- e.g. GAME_ENVIRONMENT_PROVIDER=mock) is treated
+    identically to no snapshot at all. Real weather only, never mock,
+    never fabricated. A closed-dome/indoor game's snapshot (roof_status
+    "dome"/"closed") is left exactly as the existing, real (`is_mock:
+    false`) OpenMeteoWeatherProvider already represents it -- a
+    documented constant climate-controlled reading, not invented here."""
+    if not weather_snapshot or weather_snapshot.get("is_mock", True):
+        return dict(_MISSING_WEATHER_FEATURES)
+
+    first_pitch = weather_snapshot.get("first_pitch") or {}
+    return {
+        "weather_available": True,
+        "weather_temperature_f": first_pitch.get("temperature_f"),
+        "weather_wind_speed_mph": first_pitch.get("wind_speed_mph"),
+        "weather_wind_direction_deg": first_pitch.get("wind_direction_degrees"),
+        "weather_precipitation": first_pitch.get("precipitation_amount_mm"),
+        "weather_humidity_pct": first_pitch.get("humidity_percent"),
+    }
+
+
 @dataclass
 class LivePregameHitterFeatureResult:
     player_id: str
@@ -68,6 +136,7 @@ def build_live_pregame_hitter_features(
     opposing_starter_id: str,
     batting_order_actual: int,
     opposing_pitcher_cache: Optional[Dict[str, dict]] = None,
+    weather_snapshot: Optional[dict] = None,
 ) -> LivePregameHitterFeatureResult:
     """Mirrors historical_mlb.hitter_features.build_hitter_game_row's
     PREGAME portion exactly (same sub-function calls, same argument
@@ -87,7 +156,16 @@ def build_live_pregame_hitter_features(
     Omitting it (the default) preserves the exact prior always-fetch
     behavior -- purely additive, never weakens data freshness (the cache
     only ever lives for the duration of one Python process's run, never
-    persisted, never reused across slate refreshes)."""
+    persisted, never reused across slate refreshes).
+
+    `weather_snapshot` (M32.7A): this GAME's own WeatherSnapshot dict
+    (research/game_environment/models.py, already-persisted, real --
+    see hitter_shadow_inference.py, which resolves it by game_id from
+    the latest SlateEnvironmentReport before calling this function).
+    Omitting it (the default, None) is the honest "no weather data
+    available yet for this slate" case -- every weather_* feature stays
+    None, exactly the prior behavior. See _map_weather_features() above
+    for the exact field-by-field mapping."""
     warnings: List[str] = []
     season = as_of_date[:4]
 
@@ -169,13 +247,11 @@ def build_live_pregame_hitter_features(
 
     row["batting_order_actual"] = batting_order_actual
 
-    # Weather: MISSING in live V1 (see hitter_feature_parity.py) -- never fabricated.
-    row["weather_available"] = False
-    row["weather_temperature_f"] = None
-    row["weather_wind_speed_mph"] = None
-    row["weather_wind_direction_deg"] = None
-    row["weather_precipitation"] = None
-    row["weather_humidity_pct"] = None
+    # Weather (M32.7A): mapped from the real, already-persisted
+    # GameEnvironmentReport when the caller supplies one -- see
+    # _map_weather_features() above. Honestly MISSING (never fabricated)
+    # when no real snapshot is available yet for this game.
+    row.update(_map_weather_features(weather_snapshot))
     row["venue_roof_type"] = venue_roof_type
 
     return LivePregameHitterFeatureResult(player_id=str(player_id), features=row, warnings=warnings)
