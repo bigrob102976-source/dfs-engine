@@ -32,6 +32,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
-  const errors = await validateBuildRequest(parsed.request);
-  return NextResponse.json({ errors });
+  const { errors, coverage } = await validateBuildRequest(parsed.request);
+  return NextResponse.json({ errors, coverage });
 }

@@ -177,9 +177,34 @@ export interface OptimizerBuildRequest {
   projectionSource: ProjectionSource;
 }
 
+/** Milestone 32.6 Part 2/3: how much of the pool actually made it into
+ * the solver's eligible-player list, and why the rest didn't -- mirrors
+ * scripts/optimize_dk_lineups.py::_coverage_summary() exactly. Powers
+ * both the "Coverage: X/Y eligible players" indicator (Part 3) and the
+ * Stage/Reason diagnostics that now precede the generic per-position
+ * roster-shortfall messages in `errors` (Part 2) when the pool shrank
+ * because of missing projections rather than a genuine roster/salary/
+ * stack conflict. `null` only when validation never reached the point
+ * of building a player list at all (e.g. "no pool loaded for this slate"). */
+export interface OptimizerCoverageSummary {
+  poolSize: number;
+  optimizerEligible: number;
+  usableForBuild: number;
+  skippedMissingProjection: number;
+  excludedMissingSource: number;
+  projectionSource: ProjectionSource;
+  strictSource: boolean;
+}
+
+export interface OptimizerValidationResult {
+  errors: string[];
+  coverage: OptimizerCoverageSummary | null;
+}
+
 export interface OptimizerBuildResult {
   ok: boolean;
   errors: string[];
+  coverage: OptimizerCoverageSummary | null;
   lineupSetPath: string | null;
   csvPath: string | null;
   lineupsRequested: number;

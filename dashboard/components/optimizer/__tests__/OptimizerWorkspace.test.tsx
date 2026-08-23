@@ -9,8 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // (empty URL here means "no explicit date" too) and calls useRouter()
 // to commit an explicit date-input change to the URL.
 const mockRouterPush = vi.fn();
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mockSearchParams,
   useRouter: () => ({ push: mockRouterPush }),
 }));
 
@@ -174,6 +175,7 @@ function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit)
 
 beforeEach(() => {
   window.localStorage.clear();
+  mockSearchParams = new URLSearchParams();
 });
 
 afterEach(() => {
@@ -717,6 +719,50 @@ describe("OptimizerWorkspace", () => {
         const body = JSON.parse(validateCall!.init!.body as string);
         expect(body.projectionSource).not.toBe("big_money_ml");
       });
+    });
+  });
+
+  describe("Milestone 32.6 Part 4: Stack -> Optimizer handoff", () => {
+    it("applies ?stackTeam=&stackSize= from the URL and shows a visible confirmation banner", async () => {
+      mockSearchParams = new URLSearchParams("stackTeam=BOS&stackSize=1");
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument());
+
+      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+      expect(screen.getByText(/Stack: BOS/)).toBeInTheDocument();
+      expect(screen.getByText(/×1/)).toBeInTheDocument();
+      expect(screen.getByText(/Team stack rule only/)).toBeInTheDocument();
+    });
+
+    it("never locks specific players from a stack handoff -- only the team stack rule", async () => {
+      mockSearchParams = new URLSearchParams("stackTeam=BOS&stackSize=1");
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+
+      expect(screen.getByText("Locked (0)")).toBeInTheDocument();
+      expect(screen.getByText("No players locked.")).toBeInTheDocument();
+    });
+
+    it("manually changing the stack team clears the handoff banner", async () => {
+      mockSearchParams = new URLSearchParams("stackTeam=BOS&stackSize=1");
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
+      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+      expect(screen.getByText(/Stack: BOS/)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("Stack Team"), { target: { value: "" } });
+      await waitFor(() => expect(screen.queryByText(/applied from Stacks/)).not.toBeInTheDocument());
+    });
+
+    it("ignores a missing/blank stackTeam even when stackSize is present", async () => {
+      mockSearchParams = new URLSearchParams("stackSize=5");
+      installFetchMock();
+      render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument());
+      expect(screen.queryByText(/applied from Stacks/)).not.toBeInTheDocument();
     });
   });
 });

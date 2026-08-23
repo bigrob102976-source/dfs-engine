@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { GlobalSlateSelector } from "@/components/layout/GlobalSlateSelector";
+import { GlobalSlateSync } from "@/components/layout/GlobalSlateSync";
 import { Sidebar } from "@/components/Sidebar";
 import { TopNavigation } from "@/components/TopNavigation";
 import { hasProductAccess } from "@/lib/auth/betaAccess";
@@ -65,6 +66,7 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg">
+      <GlobalSlateSync />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {mockModeEnabled && (

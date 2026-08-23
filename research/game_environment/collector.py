@@ -1,14 +1,18 @@
 """Assembles ONE game's full Game Environment report from every signal
 source, and resolves which providers are configured.
 
-Provider resolution mirrors dfs/providers/config.py's DFS-salary
-pattern for weather/bullpen (GAME_ENVIRONMENT_PROVIDER unset ->
-automatic mock fallback, so the engine is useful with zero setup) but
-deliberately does NOT auto-fallback umpire data to mock -- the
-milestone is explicit that umpire status must be UNKNOWN rather than
-guessed unless a provider is genuinely configured (see umpires.py's
-module docstring). Set GAME_ENVIRONMENT_UMPIRE_PROVIDER=mock to opt
-into the mock umpire provider for testing/demo purposes.
+Provider resolution: weather (Milestone 32.6) defaults to the REAL,
+keyless Open-Meteo provider when GAME_ENVIRONMENT_PROVIDER is unset --
+production/live slates never silently use mock weather; set
+GAME_ENVIRONMENT_PROVIDER=mock to opt into mock weather for local dev/
+testing. Bullpen still mirrors dfs/providers/config.py's DFS-salary
+pattern (GAME_ENVIRONMENT_PROVIDER unset -> automatic mock fallback --
+no free real-data equivalent exists for bullpen usage yet). Umpire data
+deliberately does NOT auto-fallback to mock at all -- the milestone is
+explicit that umpire status must be UNKNOWN rather than guessed unless
+a provider is genuinely configured (see umpires.py's module docstring).
+Set GAME_ENVIRONMENT_UMPIRE_PROVIDER=mock to opt into the mock umpire
+provider for testing/demo purposes.
 
 Milestone 24: Vegas resolution is DIFFERENT from weather/bullpen and
 deliberately does NOT default to mock. Real market data (SportsGameOdds)
@@ -43,20 +47,32 @@ from research.game_environment.vegas import (
     TheOddsAPIVegasProvider,
     VegasProvider,
 )
-from research.game_environment.weather import MockWeatherProvider, WeatherProvider
+from research.game_environment.weather import MockWeatherProvider, OpenMeteoWeatherProvider, WeatherProvider
 
-WEATHER_PROVIDER_FACTORIES: Dict[str, Callable[[], WeatherProvider]] = {"mock": MockWeatherProvider}
+WEATHER_PROVIDER_FACTORIES: Dict[str, Callable[[], WeatherProvider]] = {
+    "mock": MockWeatherProvider,
+    "open_meteo": OpenMeteoWeatherProvider,
+}
 BULLPEN_PROVIDER_FACTORIES: Dict[str, Callable[[], BullpenProvider]] = {"mock": MockBullpenProvider}
 UMPIRE_PROVIDER_FACTORIES: Dict[str, Callable[[], UmpireProvider]] = {"mock": MockUmpireProvider}
 
 DEFAULT_FALLBACK_KEY = "mock"
+# Milestone 32.6 Part 5: weather's own automatic default is the REAL,
+# keyless Open-Meteo provider -- production/live slates must never use
+# mock weather (see weather.py's module docstring). This is deliberately
+# a SEPARATE constant from DEFAULT_FALLBACK_KEY above (which stays
+# "mock" for bullpen/umpire -- out of this milestone's scope, and those
+# providers have no free real-data equivalent to default to). Setting
+# GAME_ENVIRONMENT_PROVIDER=mock explicitly still opts back into mock
+# weather for local dev/testing.
+WEATHER_DEFAULT_KEY = "open_meteo"
 
 
 def get_configured_weather_provider() -> Tuple[WeatherProvider, str]:
     name = (os.environ.get("GAME_ENVIRONMENT_PROVIDER") or "").strip().lower()
     if not name:
-        return WEATHER_PROVIDER_FACTORIES[DEFAULT_FALLBACK_KEY](), "automatic_fallback"
-    factory = WEATHER_PROVIDER_FACTORIES.get(name, WEATHER_PROVIDER_FACTORIES[DEFAULT_FALLBACK_KEY])
+        return WEATHER_PROVIDER_FACTORIES[WEATHER_DEFAULT_KEY](), "automatic_default"
+    factory = WEATHER_PROVIDER_FACTORIES.get(name, WEATHER_PROVIDER_FACTORIES[WEATHER_DEFAULT_KEY])
     return factory(), "explicit"
 
 

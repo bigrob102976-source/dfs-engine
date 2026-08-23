@@ -111,6 +111,58 @@ def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None, 
     return players, skipped, excluded_missing_source
 
 
+def _coverage_summary(pool_doc: dict, players: list, skipped: list, excluded_missing_source: list, projection_source: str, strict_source: bool) -> dict:
+    """Milestone 32.6 Part 2: the counts `--validate-only` needs to show a
+    real Stage/Reason diagnostic instead of the generic per-position
+    "Only 0 eligible P player(s) available" wall of text -- those numbers
+    (skipped/excluded) were already computed by _build_optimizer_players
+    but, before this milestone, were only ever printed as plain stdout
+    text and ONLY in the non-validate-only branch, so the dashboard's
+    pre-flight check (which always runs --validate-only) never saw them
+    at all. Also doubles as the Projection Source dropdown's
+    "Coverage: X/Y eligible players" indicator (Part 3)."""
+    pool_size = len(pool_doc.get("players", []))
+    optimizer_eligible = len(players) + len(skipped) + len(excluded_missing_source)
+    return {
+        "pool_size": pool_size,
+        "optimizer_eligible": optimizer_eligible,
+        "usable_for_build": len(players),
+        "skipped_missing_projection": len(skipped),
+        "excluded_missing_source": len(excluded_missing_source),
+        "projection_source": projection_source,
+        "strict_source": strict_source,
+    }
+
+
+def _coverage_diagnostics(coverage: dict) -> list:
+    """A leading, human-readable Stage/Reason line for each way the
+    player pool shrank before it ever reached position/salary/stack
+    checks -- prepended to pre_solve_diagnostics()'s generic roster-slot
+    counts (which, on their own, just say "0 eligible P available" with
+    no indication WHY), never replacing them."""
+    reasons = []
+    if coverage["excluded_missing_source"] > 0:
+        reasons.append(
+            f"Stage: Projection Source / Reason: {coverage['excluded_missing_source']} otherwise-eligible "
+            f"player(s) have no {coverage['projection_source']} projection for this slate -- strict source "
+            f"selected, never mixed with another source. Choose a different Projection Source or wait for "
+            f"{coverage['projection_source']} to be generated for this slate."
+        )
+    if coverage["skipped_missing_projection"] > 0:
+        reasons.append(
+            f"Stage: Player Pool / Reason: {coverage['skipped_missing_projection']} otherwise-eligible player(s) "
+            f"have no projection/ceiling at all for this slate yet -- research has not been generated for this "
+            f"date. Run Admin Refresh Data for this slate's date first."
+        )
+    if coverage["usable_for_build"] == 0 and coverage["optimizer_eligible"] == 0:
+        reasons.append(
+            f"Stage: Player Pool / Reason: 0 of {coverage['pool_size']} pool player(s) are optimizer-eligible "
+            f"(confirmed starting pitcher / confirmed starting hitter) yet -- lineups have not been posted for "
+            f"this slate's games."
+        )
+    return reasons
+
+
 def _load_ownership(ownership_path: str):
     with Path(ownership_path).open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -278,8 +330,9 @@ def main() -> None:
         leverage_errors.append("--objective leverage requires --ownership (no player has a leverage_score).")
 
     if args.validate_only:
-        errors = list(leverage_errors) + pre_solve_diagnostics(players, settings)
-        print(json.dumps({"errors": errors}))
+        coverage = _coverage_summary(pool_doc, players, skipped, excluded_missing_source, args.projection_source, args.strict_projection_source)
+        errors = _coverage_diagnostics(coverage) + list(leverage_errors) + pre_solve_diagnostics(players, settings)
+        print(json.dumps({"errors": errors, "coverage": coverage}))
         return
 
     if leverage_errors:

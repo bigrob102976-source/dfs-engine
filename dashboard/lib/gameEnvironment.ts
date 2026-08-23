@@ -9,6 +9,13 @@ export interface WeatherReading {
   feels_like_f: number | null;
   rain_percent: number | null;
   air_density: number | null;
+  // Milestone 32.6 Part 5: real-forecast-only fields (Open-Meteo) --
+  // null for every reading built before this milestone and for
+  // MockWeatherProvider readings, which never invent these.
+  precipitation_probability_percent: number | null;
+  precipitation_amount_mm: number | null;
+  weather_code: number | null;
+  wind_gusts_mph: number | null;
 }
 
 export interface WeatherSnapshot {
@@ -23,6 +30,11 @@ export interface WeatherSnapshot {
   first_pitch: WeatherReading;
   mid_game: WeatherReading;
   late_game: WeatherReading;
+  // Milestone 32.6 Part 6: WEATHER RISK -- see
+  // research/game_environment/weather_risk.py for the methodology.
+  // null only when no provider ran (never a fabricated 0).
+  weather_risk_percent: number | null;
+  weather_status: string | null;
 }
 
 export interface WeatherConclusion {

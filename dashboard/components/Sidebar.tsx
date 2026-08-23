@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
@@ -29,8 +29,22 @@ const STORAGE_KEY = "bigmoney-sidebar-collapsed";
  * when expanded -- the one place brand gold appears outside badges. */
 export function Sidebar() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [collapsed, setCollapsed] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+
+  // Milestone 32.6 -- GLOBAL SLATE CONTEXT: every nav link carries the
+  // currently-selected ?slate= (and ?date=, when present) forward, so
+  // clicking Pitchers/Hitters/Stacks/etc. from the sidebar never drops
+  // the user's slate selection back to "Full Day." The GlobalSlateSelector
+  // (top nav) is still the only thing that ever WRITES a new slate
+  // choice -- this only carries the existing choice across navigation.
+  const slateId = searchParams?.get("slate");
+  const dateParam = searchParams?.get("date");
+  const carryParams = new URLSearchParams();
+  if (slateId) carryParams.set("slate", slateId);
+  if (dateParam) carryParams.set("date", dateParam);
+  const carryQuery = carryParams.toString();
 
   useEffect(() => {
     Promise.resolve().then(() => {
@@ -82,10 +96,11 @@ export function Sidebar() {
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
           const active = item.href === "/dashboard" ? pathname === item.href : pathname?.startsWith(item.href);
+          const href = carryQuery ? `${item.href}?${carryQuery}` : item.href;
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={href}
               title={collapsed ? item.label : undefined}
               aria-current={active ? "page" : undefined}
               className={`flex items-center gap-2.5 rounded-[var(--radius-control)] px-2.5 py-1.5 text-sm transition-colors duration-150 ${

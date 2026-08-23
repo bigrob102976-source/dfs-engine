@@ -25,7 +25,7 @@ export default async function TopPitchersPage(props: PageProps<"/dashboard/pitch
   const slateCtx = await resolveSlateContext(date, slateId);
   const pitcherSnapshot = date ? loadLatestPitcherSnapshot(date).data : null;
   const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
-  const pool = date ? loadLatestDKPlayerPool(date).data : null;
+  const pool = date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data : null;
 
   const allRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, pool);
   const gameFiltered = filterByGameIds(allRows, effectiveGameIds(slateCtx));

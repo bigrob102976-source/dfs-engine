@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import { writeStoredSlateId } from "@/lib/globalSlateStorage";
 import type { SlateOption } from "@/lib/orchestrator/types";
 import { formatSlateLabel } from "@/lib/slateFilters";
 
@@ -24,6 +25,10 @@ export function GlobalSlateSelector({ slates }: { slates: SlateOption[] }) {
   const selectedSlateId = searchParams.get("slate") ?? "";
 
   function handleChange(nextSlateId: string) {
+    // Milestone 32.6: an explicit "Full Day (All Games)" choice clears
+    // the stored preference too, so GlobalSlateSync never re-restores
+    // the slate the user just backed out of on the next navigation.
+    writeStoredSlateId(nextSlateId || null);
     const params = new URLSearchParams(searchParams.toString());
     if (nextSlateId) {
       params.set("slate", nextSlateId);

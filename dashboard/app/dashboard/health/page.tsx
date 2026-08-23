@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { qualityReportToRows, ratioHealth, type CompletenessRow, type HealthColor } from "@/lib/health";
 import { loadLatestBatterSnapshot, loadLatestDkMatchReport, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
+import { formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 
 export const dynamic = "force-dynamic";
 
@@ -33,12 +34,17 @@ function NotImplementedRow({ label }: { label: string }) {
   );
 }
 
-export default function ModelHealthPage() {
+export default async function ModelHealthPage(props: PageProps<"/dashboard/health">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
+
   const date = getTodayChicagoDate();
+  const slateCtx = await resolveSlateContext(date, slateId);
   const pitcherSnapshot = date ? loadLatestPitcherSnapshot(date).data : null;
   const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
-  const ownership = date ? loadLatestOwnershipSnapshot(date).data : null;
-  const matchReport = date ? loadLatestDkMatchReport(date).data : null;
+  const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
+  const matchReport = date ? loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data : null;
+  const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 
   const pitcherTotal = pitcherSnapshot?.pitcher_count ?? 0;
   const hitterTotal = batterSnapshot?.hitter_count ?? 0;
@@ -57,7 +63,7 @@ export default function ModelHealthPage() {
         title="Model Health"
         description={
           date
-            ? `Completeness for slate ${date}, read directly from the Research Quality Report already computed by the Python pipeline.`
+            ? `Completeness for slate ${date}, read directly from the Research Quality Report already computed by the Python pipeline.${slateDescription}`
             : "No slate loaded yet."
         }
       />

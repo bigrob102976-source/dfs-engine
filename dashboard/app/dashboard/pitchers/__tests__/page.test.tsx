@@ -148,4 +148,39 @@ describe("TopPitchersPage (Milestone 26 slate filtering)", () => {
     expect(screen.getByText("Turbo Ace")).toBeInTheDocument();
     expect(screen.queryByText("Main Ace")).not.toBeInTheDocument();
   });
+
+  it("scopes the DK player pool (salary/positions) to the selected slate, not just the game-id filter", async () => {
+    // A same-date, different-slate pool export can reuse the same numeric
+    // dk_player_id for a completely different player/salary (confirmed via
+    // real DK Main/Turbo CSVs) -- loadLatestDKPlayerPool MUST be scoped by
+    // slateId, not just "whichever pool file is newest on disk".
+    writeJson(tmpDir, `dfs_input/${DATE}/dk_player_pool_20260817T180000.json`, {
+      slate_date: DATE, generated_at_utc: `${DATE}T18:00:00Z`, pitcher_snapshot_path: null, batter_snapshot_path: null,
+      player_count: 1, selected_slate_id: "main",
+      players: [{
+        dk_player_id: "1", mlb_player_id: "p-main", name: "Main Ace", team: "BOS", player_type: "pitcher",
+        dk_positions: ["P"], salary: 11000, opponent: "NYY", game_id: "g-main", batting_order: null,
+        projection: 20, ceiling: 30, floor: 8, overall_score: 80, risk_score: 20, confidence: 90,
+        tags: [], reasons: [], lineup_status: "active", match_status: "matched",
+        eligibility_status: "STARTING_PITCHER", optimizer_eligible: true,
+      }],
+    });
+    writeJson(tmpDir, `dfs_input/${DATE}/dk_player_pool_20260817T190000.json`, {
+      slate_date: DATE, generated_at_utc: `${DATE}T19:00:00Z`, pitcher_snapshot_path: null, batter_snapshot_path: null,
+      player_count: 1, selected_slate_id: "turbo",
+      players: [{
+        dk_player_id: "1", mlb_player_id: "p-turbo", name: "Turbo Ace", team: "SD", player_type: "pitcher",
+        dk_positions: ["P"], salary: 7500, opponent: "LAD", game_id: "g-turbo", batting_order: null,
+        projection: 18, ceiling: 28, floor: 6, overall_score: 75, risk_score: 25, confidence: 85,
+        tags: [], reasons: [], lineup_status: "active", match_status: "matched",
+        eligibility_status: "STARTING_PITCHER", optimizer_eligible: true,
+      }],
+    });
+
+    const TopPitchersPageFresh = (await import("../page")).default;
+    const mainJsx = await TopPitchersPageFresh({ searchParams: Promise.resolve({ slate: "main" }) } as never);
+    render(mainJsx);
+    expect(screen.getByText("11000")).toBeInTheDocument();
+    expect(screen.queryByText("7500")).not.toBeInTheDocument();
+  });
 });

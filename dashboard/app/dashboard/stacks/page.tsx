@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { MissingDataState } from "@/components/MissingDataState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
@@ -10,6 +12,21 @@ export const dynamic = "force-dynamic";
 
 function fmt(v: number | null): string {
   return v === null ? "--" : v.toFixed(1);
+}
+
+/** Milestone 32.6 Part 4: "USE THIS STACK" hands off a TEAM STACK RULE
+ * only (stackTeam + stackSize) -- never specific locked players, since
+ * this page's stacks are a team-level recommendation, not an exact
+ * lineup. Preserves the current global slate; the Optimizer's own
+ * Projection Source is preserved automatically too, since
+ * OptimizerWorkspace always hydrates it from localStorage regardless of
+ * how the page was reached (see workspaceStorage.ts). */
+function buildUseThisStackHref(team: string, size: number, slateId: string | undefined): string {
+  const params = new URLSearchParams();
+  if (slateId) params.set("slate", slateId);
+  params.set("stackTeam", team);
+  params.set("stackSize", String(size));
+  return `/dashboard/optimizer?${params.toString()}`;
 }
 
 export default async function StacksPage(props: PageProps<"/dashboard/stacks">) {
@@ -49,8 +66,23 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {stacks.map((s) => (
             <div key={s.team} className="rounded-[var(--radius-card)] border border-border bg-bg-panel p-4 shadow-[var(--shadow-card)]">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-text">{s.team}</span>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-text">
+                  {s.team}
+                  {s.status === "CONFIRMED" && s.confirmedHitterCount >= 2 && (
+                    <span className="ml-1.5 text-[11px] font-normal text-text-faint">{Math.min(5, s.confirmedHitterCount)}-MAN STACK</span>
+                  )}
+                </span>
+                {s.status === "CONFIRMED" && s.confirmedHitterCount >= 2 && (
+                  <Link
+                    href={buildUseThisStackHref(s.team, Math.min(5, s.confirmedHitterCount), slateCtx.selected?.slateId)}
+                    className="rounded bg-accent-dim px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-accent hover:bg-accent/20"
+                  >
+                    Use This Stack
+                  </Link>
+                )}
+              </div>
+              <div className="mb-3 flex items-center justify-end">
                 <span className="text-[11px] text-text-faint">
                   {s.status === "WAITING_FOR_LINEUP" ? (
                     <span className="font-semibold uppercase text-yellow">Waiting For Lineup</span>

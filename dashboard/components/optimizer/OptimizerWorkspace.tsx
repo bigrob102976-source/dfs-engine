@@ -9,7 +9,7 @@ import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules"
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
 import { resolveExternalSourceLabel } from "@/lib/projectionLabels";
 import type { BigMoneyMlCoverage } from "@/lib/bigMoneyMlOptimizer";
-import type { OptimizerBuildResult, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
+import type { OptimizerBuildResult, OptimizerCoverageSummary, OptimizerPoolResult, ProjectionSource, SlateOption } from "@/lib/optimizerWorkspace/types";
 import { loadWorkspaceState, saveWorkspaceState } from "@/lib/optimizerWorkspace/workspaceStorage";
 import { isValidSlateDateString } from "@/lib/slateDate";
 
@@ -27,6 +27,16 @@ const SLATE_STATUS_MESSAGES: Record<string, string> = {
   unavailable: "DFS provider unavailable.",
   auth_failed: "DFS provider authentication failed.",
   no_slate: "DFS provider returned no slate for today.",
+};
+
+// Milestone 32.6 Part 3: short, honest per-source explanation shown
+// under the Projection Source selector once a source is picked -- copy
+// as specified by the milestone, verbatim.
+const PROJECTION_SOURCE_EXPLANATIONS: Partial<Record<ProjectionSource, string>> = {
+  big_money_ml: "History-trained models / Experimental / Owner Test",
+  native: "Deterministic Big Money projection engine",
+  ai: "Context-adjusted Big Money projection",
+  fantasypros: "External comparison source",
 };
 
 function formatTime(iso: string | null): string {
@@ -85,6 +95,12 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
   const [maxExposure, setMaxExposure] = useState<Record<string, number>>({});
   const [stackSize, setStackSize] = useState<number | null>(null);
   const [stackTeam, setStackTeam] = useState<string | null>(null);
+  // Milestone 32.6 Part 4: set only when the current stackTeam/stackSize
+  // came from a Stacks page "Use This Stack" handoff (?stackTeam=&
+  // stackSize= in the URL) -- shown as a one-time confirmation banner,
+  // never persisted, so a later manual edit in the Stacking panel just
+  // clears it naturally without extra bookkeeping.
+  const [stackHandoff, setStackHandoff] = useState<{ team: string; size: number } | null>(null);
   const [allowPitcherVsHitter, setAllowPitcherVsHitter] = useState(false);
   const [minSalary, setMinSalary] = useState<number | null>(null);
   const [minUnique, setMinUnique] = useState(2);
@@ -102,6 +118,14 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
   const [mlCoverage, setMlCoverage] = useState<BigMoneyMlCoverage | null>(null);
 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  // Milestone 32.6 Part 2/3: pool-eligibility coverage for whichever
+  // Projection Source is currently selected (any source, not just Big
+  // Money ML) -- powers the "Coverage: X/Y eligible players" indicator
+  // and lets the build-blocker panel below distinguish "no players have
+  // this projection source yet" from a genuine roster/salary/stack
+  // conflict, straight from the same --validate-only call this workspace
+  // already makes.
+  const [poolCoverage, setPoolCoverage] = useState<OptimizerCoverageSummary | null>(null);
   const [building, setBuilding] = useState(false);
   const [buildResult, setBuildResult] = useState<OptimizerBuildResult | null>(null);
   const [buildErrors, setBuildErrors] = useState<string[]>([]);
@@ -187,6 +211,31 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
       if (urlDate && isValidSlateDateString(urlDate) && urlDate !== selectedDate) {
         setSelectedDate(urlDate);
         setDateInputValue(urlDate);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, searchParams]);
+
+  // 1d. Milestone 32.6 Part 4: the Stacks page's "USE THIS STACK" action
+  // links here with `?stackTeam=<team>&stackSize=<n>` -- lock in a TEAM
+  // stack RULE only (never specific players; Stacks only ever recommends
+  // at the team level, see stacks/page.tsx), same reactive pattern as
+  // 1b/1c so it applies whether this is a fresh navigation or the URL
+  // changes while the page is already open. A URL stackSize of 0 or a
+  // missing/blank stackTeam is ignored rather than clearing an existing
+  // manual selection.
+  useEffect(() => {
+    if (!hydrated) return;
+    const urlStackTeam = searchParams?.get("stackTeam");
+    const urlStackSizeRaw = searchParams?.get("stackSize");
+    const urlStackSize = urlStackSizeRaw ? Number.parseInt(urlStackSizeRaw, 10) : null;
+    Promise.resolve().then(() => {
+      if (urlStackTeam && urlStackSize && Number.isFinite(urlStackSize) && urlStackSize > 0) {
+        if (urlStackTeam !== stackTeam || urlStackSize !== stackSize) {
+          setStackTeam(urlStackTeam);
+          setStackSize(urlStackSize);
+        }
+        setStackHandoff({ team: urlStackTeam, size: urlStackSize });
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -315,16 +364,25 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
         setLocks(reconciled.state.locks);
         setExclusions(reconciled.state.exclusions);
         setMaxExposure(reconciled.state.maxExposure);
-        setReconcileWarnings(reconciled.warnings);
 
+        // Milestone 32.6 Part 4: a stack handed off from the Stacks page
+        // (or set manually) can go stale if the slate/lineups change out
+        // from under it -- reconcile by clearing it, but WARN rather than
+        // silently building without the stack the user asked for.
         const teams = new Set(newPool.players.map((p) => p.team));
-        setStackTeam((prevTeam) => (prevTeam && !teams.has(prevTeam) ? null : prevTeam));
+        const stackWarnings: string[] = [];
+        if (stackTeam && !teams.has(stackTeam)) {
+          stackWarnings.push(`Stack team ${stackTeam} is no longer on this slate's pool -- the stack constraint was cleared.`);
+          setStackTeam(null);
+          setStackHandoff(null);
+        }
+        setReconcileWarnings([...reconciled.warnings, ...stackWarnings]);
       })
       .catch(() => {
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
-  }, [locks, exclusions, maxExposure, pool, selectedDate]);
+  }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam]);
 
   useEffect(() => {
     if (!hydrated || !selectedSlateId) return;
@@ -409,7 +467,10 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
   // /api/optimizer/validate -- never the CP-SAT solver).
   useEffect(() => {
     if (!pool) {
-      Promise.resolve().then(() => setValidationErrors([]));
+      Promise.resolve().then(() => {
+        setValidationErrors([]);
+        setPoolCoverage(null);
+      });
       return;
     }
     const handle = setTimeout(() => {
@@ -419,8 +480,14 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
         body: JSON.stringify(buildRequestBody()),
       })
         .then((res) => res.json())
-        .then((data) => setValidationErrors(data.errors ?? []))
-        .catch(() => setValidationErrors([]));
+        .then((data) => {
+          setValidationErrors(data.errors ?? []);
+          setPoolCoverage(data.coverage ?? null);
+        })
+        .catch(() => {
+          setValidationErrors([]);
+          setPoolCoverage(null);
+        });
     }, 500);
     return () => clearTimeout(handle);
   }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, objective, buildRequestBody]);
@@ -643,6 +710,22 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
           <span className="text-[11px] text-text-faint">Big Money ML not generated yet for this slate -- run the shadow-inference step during Process/Refresh.</span>
         )}
 
+        {PROJECTION_SOURCE_EXPLANATIONS[projectionSource] && (
+          <span className="w-full text-[11px] text-text-faint">{PROJECTION_SOURCE_EXPLANATIONS[projectionSource]}</span>
+        )}
+        {/* Milestone 32.6 Part 3: coverage for whichever source is
+            currently selected -- from the same --validate-only call this
+            workspace already debounces, never a second/extra fetch. */}
+        {pool && poolCoverage && (
+          <span className={`w-full text-[11px] ${poolCoverage.usableForBuild < poolCoverage.optimizerEligible ? "text-yellow" : "text-text-faint"}`}>
+            Coverage: {poolCoverage.usableForBuild}/{poolCoverage.optimizerEligible} eligible players
+            {poolCoverage.usableForBuild < poolCoverage.optimizerEligible &&
+              ` -- ${poolCoverage.optimizerEligible - poolCoverage.usableForBuild} eligible player(s) missing a ${
+                poolCoverage.strictSource ? poolCoverage.projectionSource : "usable"
+              } projection${poolCoverage.strictSource ? " (strict source, never mixed)" : ""}.`}
+          </span>
+        )}
+
         <label className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
           <input type="checkbox" checked={showProjectionComparison} onChange={(e) => setShowProjectionComparison(e.target.checked)} />
           Show comparison columns
@@ -680,6 +763,18 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
             ML-only means ML-only: any optimizer-eligible player without a valid pregame ML projection is EXCLUDED from this build, never
             silently mixed with Native/AI/FantasyPros/Legacy.
           </p>
+        </div>
+      )}
+
+      {/* Milestone 32.6 Part 4: visible confirmation after a Stacks page
+          "Use This Stack" handoff -- a TEAM STACK RULE only, never
+          specific locked players (see stacks/page.tsx's own docstring). */}
+      {stackHandoff && stackTeam === stackHandoff.team && stackSize === stackHandoff.size && (
+        <div className="rounded border border-accent bg-accent-dim px-3 py-2 text-xs text-text">
+          <span className="font-semibold uppercase tracking-wide">
+            Stack: {stackHandoff.team} &times;{stackHandoff.size}
+          </span>{" "}
+          <span className="text-text-muted">applied from Stacks. Team stack rule only -- no specific players were locked.</span>
         </div>
       )}
 
@@ -742,8 +837,14 @@ export function OptimizerWorkspace({ initialDate = null, canUseBigMoneyMl = fals
             onClearExclusions={() => setExclusions([])}
             stackSize={stackSize}
             stackTeam={stackTeam}
-            onStackSizeChange={setStackSize}
-            onStackTeamChange={setStackTeam}
+            onStackSizeChange={(size) => {
+              setStackHandoff(null);
+              setStackSize(size);
+            }}
+            onStackTeamChange={(team) => {
+              setStackHandoff(null);
+              setStackTeam(team);
+            }}
             allowPitcherVsHitter={allowPitcherVsHitter}
             onAllowPitcherVsHitterChange={setAllowPitcherVsHitter}
             minSalary={minSalary}

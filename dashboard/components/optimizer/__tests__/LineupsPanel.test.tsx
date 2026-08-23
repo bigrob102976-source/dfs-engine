@@ -50,6 +50,7 @@ function result(overrides: Partial<OptimizerBuildResult> = {}): OptimizerBuildRe
   return {
     ok: true,
     errors: [],
+    coverage: null,
     lineupSetPath: "C:\\fake\\lineups\\2026-08-12\\dk_lineups_20260812T000000.json",
     csvPath: "C:\\fake\\lineups\\2026-08-12\\dk_lineups_20260812T000000.csv",
     lineupsRequested: 1,

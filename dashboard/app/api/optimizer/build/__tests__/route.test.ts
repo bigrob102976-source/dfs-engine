@@ -53,7 +53,7 @@ beforeEach(() => {
   cookieStore.clear();
   mockBuildLineups.mockReset();
   mockBuildLineups.mockResolvedValue({
-    ok: true, errors: [], lineupSetPath: "x.json", csvPath: "x.csv", lineupsRequested: 1, lineupsGenerated: 1,
+    ok: true, errors: [], coverage: null, lineupSetPath: "x.json", csvPath: "x.csv", lineupsRequested: 1, lineupsGenerated: 1,
     stoppedReason: null, lineups: [], elapsedMs: 10, excludedMissingProjectionSource: [],
   });
 });

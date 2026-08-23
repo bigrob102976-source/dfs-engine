@@ -40,6 +40,45 @@ describe("GameEnvironmentDrawer", () => {
     expect(screen.getByText("Weather is unavailable for this game.")).toBeInTheDocument();
   });
 
+  it("Milestone 32.6 Part 6: shows WEATHER RISK as a percentage with a semantic GOOD/CAUTION/BAD label, never color alone", () => {
+    const base = buildGameEnvironmentReport();
+    render(
+      <GameEnvironmentDrawer
+        game={buildGameEnvironmentReport({ weather: { ...base.weather!, weather_risk_percent: 12, weather_status: "Low disruption risk" } })}
+        sections={ALL_SECTIONS}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("GOOD")).toBeInTheDocument();
+    expect(screen.getByText("Low disruption risk")).toBeInTheDocument();
+  });
+
+  it("shows a RED/BAD label for a high weather risk", () => {
+    const base = buildGameEnvironmentReport();
+    render(
+      <GameEnvironmentDrawer
+        game={buildGameEnvironmentReport({ weather: { ...base.weather!, weather_risk_percent: 82, weather_status: "High delay/postponement risk" } })}
+        sections={ALL_SECTIONS}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("82%")).toBeInTheDocument();
+    expect(screen.getByText("BAD")).toBeInTheDocument();
+  });
+
+  it("omits Postponement Risk entirely when the provider has no genuine independent signal for it, rather than showing a fabricated 0%", () => {
+    const base = buildGameEnvironmentReport();
+    render(
+      <GameEnvironmentDrawer
+        game={buildGameEnvironmentReport({ weather: { ...base.weather!, postponement_risk_percent: null } })}
+        sections={ALL_SECTIONS}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Postponement Risk/)).not.toBeInTheDocument();
+  });
+
   it("shows an unavailable message for missing vegas", () => {
     render(<GameEnvironmentDrawer game={buildGameEnvironmentReport({ vegas: null })} sections={ALL_SECTIONS} onClose={vi.fn()} />);
     expect(screen.getByText("Vegas lines are unavailable for this game.")).toBeInTheDocument();

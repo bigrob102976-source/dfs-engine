@@ -5,12 +5,14 @@ and persist an immutable snapshot.
 
     python scripts/build_game_environment_report.py --date YYYY-MM-DD
 
-Weather/Vegas/Bullpen default to the clearly-labeled mock providers
-(no real weather/odds/bullpen-usage API is configured or credentialed
-in this environment -- see research/game_environment/collector.py's
-module docstring). Umpire data defaults to UNKNOWN for every game
-unless GAME_ENVIRONMENT_UMPIRE_PROVIDER=mock is set, since the
-milestone requires honest UNKNOWN rather than a guess.
+Weather defaults to the REAL, live Open-Meteo Forecast provider
+(Milestone 32.6 -- no API key required; set GAME_ENVIRONMENT_PROVIDER=mock
+to opt into mock weather for local dev/testing). Vegas/Bullpen default
+to the clearly-labeled mock providers unless a real odds/bullpen-usage
+API is configured -- see research/game_environment/collector.py's
+module docstring. Umpire data defaults to UNKNOWN for every game unless
+GAME_ENVIRONMENT_UMPIRE_PROVIDER=mock is set, since the milestone
+requires honest UNKNOWN rather than a guess.
 """
 
 import argparse

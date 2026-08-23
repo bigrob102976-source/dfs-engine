@@ -4,6 +4,7 @@ import type { SlateKpi } from "@/lib/commandCenter";
 const TONE_CLASS: Record<NonNullable<SlateKpi["tone"]>, string> = {
   positive: "text-green",
   negative: "text-red",
+  caution: "text-yellow",
   neutral: "text-text",
 };
 

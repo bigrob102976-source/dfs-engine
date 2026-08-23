@@ -52,7 +52,7 @@ beforeEach(() => {
   __resetDbForTests();
   cookieStore.clear();
   mockValidateBuildRequest.mockReset();
-  mockValidateBuildRequest.mockResolvedValue([]);
+  mockValidateBuildRequest.mockResolvedValue({ errors: [], coverage: null });
 });
 
 describe("POST /api/optimizer/validate -- Milestone 32.4 Big Money ML admin gating", () => {
@@ -74,5 +74,20 @@ describe("POST /api/optimizer/validate -- Milestone 32.4 Big Money ML admin gati
     const res = await POST(req(baseBody({ projectionSource: "big_money_ml" })));
     expect(res.status).toBe(200);
     expect(mockValidateBuildRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the coverage summary through in the response -- Milestone 32.6 Part 3", async () => {
+    await loginAsMember();
+    mockValidateBuildRequest.mockResolvedValue({
+      errors: [],
+      coverage: {
+        poolSize: 60, optimizerEligible: 60, usableForBuild: 60,
+        skippedMissingProjection: 0, excludedMissingSource: 0, projectionSource: "native", strictSource: false,
+      },
+    });
+    const res = await POST(req(baseBody({ projectionSource: "native" })));
+    const body = await res.json();
+    expect(body.coverage.poolSize).toBe(60);
+    expect(body.coverage.usableForBuild).toBe(60);
   });
 });

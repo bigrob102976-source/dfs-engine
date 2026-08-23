@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
+import { effectiveGameIds, filterByGameIdField, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,22 @@ function formatTimestamp(iso: string): string {
  * deterministic AI Summary research/game_environment/ builds for every
  * game on today's slate. Reads the latest immutable snapshot only -- this
  * page never computes scores itself and never touches projections,
- * ownership, or the optimizer. */
-export default function EnvironmentPage() {
+ * ownership, or the optimizer.
+ *
+ * Milestone 32.6: filtered to the globally-selected slate's game_ids,
+ * mirroring the Vegas page's already-established pattern exactly --
+ * this page was the one slate-aware page that hadn't been wired up yet
+ * (see GLOBAL SLATE CONTEXT). Full Day (the default) is unchanged. */
+export default async function EnvironmentPage(props: PageProps<"/dashboard/environment">) {
+  const searchParams = await props.searchParams;
+  const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
+
   const date = getTodayChicagoDate();
-  const report = loadLatestEnvironmentReport(date);
+  const slateCtx = await resolveSlateContext(date, slateId);
+  const gameIds = effectiveGameIds(slateCtx);
+  const fullDayReport = loadLatestEnvironmentReport(date);
+  const report = fullDayReport ? { ...fullDayReport, games: filterByGameIdField(fullDayReport.games, gameIds) } : null;
+  const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 
   if (!report || report.games.length === 0) {
     return (
@@ -41,7 +54,7 @@ export default function EnvironmentPage() {
     <div>
       <PageHeader
         title="Game Environment"
-        description={`${report.games.length} games · generated ${formatTimestamp(report.generated_at)} · engine v${report.engine_version}`}
+        description={`${report.games.length} games · generated ${formatTimestamp(report.generated_at)} · engine v${report.engine_version}${slateDescription}`}
         actions={<GenerateEnvironmentButton />}
       />
       <EnvironmentTerminal games={report.games} />

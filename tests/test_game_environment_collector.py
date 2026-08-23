@@ -9,7 +9,7 @@ from research.game_environment.vegas import (
     SportsGameOddsVegasProvider,
     VegasProvider,
 )
-from research.game_environment.weather import MockWeatherProvider, WeatherProvider
+from research.game_environment.weather import MockWeatherProvider, OpenMeteoWeatherProvider, WeatherProvider
 
 
 class _NotConfiguredWeatherProvider(WeatherProvider):
@@ -59,11 +59,24 @@ class _NotConfiguredBullpenProvider(BullpenProvider):
 # ----------------------------------------------------------------------------
 
 
-def test_weather_provider_defaults_to_automatic_mock_fallback(monkeypatch):
+def test_weather_provider_defaults_to_real_open_meteo_never_silent_mock(monkeypatch):
+    """Milestone 32.6 Part 5: unlike bullpen (which has no free real-data
+    equivalent), weather's automatic default is the REAL, keyless
+    Open-Meteo provider -- production/live slates must never silently
+    use mock weather."""
     monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
     provider, source = collector.get_configured_weather_provider()
+    assert isinstance(provider, OpenMeteoWeatherProvider)
+    assert provider.is_mock is False
+    assert source == "automatic_default"
+
+
+def test_weather_provider_explicit_mock_opt_in_still_works(monkeypatch):
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
+    provider, source = collector.get_configured_weather_provider()
     assert isinstance(provider, MockWeatherProvider)
-    assert source == "automatic_fallback"
+    assert source == "explicit"
+    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
 
 
 def test_vegas_provider_defaults_to_not_configured_never_silent_mock(monkeypatch):

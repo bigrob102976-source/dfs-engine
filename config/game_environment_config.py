@@ -123,6 +123,56 @@ TEMP_COLD_F = 50.0
 RAIN_DELAY_RISK_HIGH_PERCENT = 50.0
 POSTPONEMENT_RISK_HIGH_PERCENT = 25.0
 
+# --- WEATHER RISK (Milestone 32.6 Part 5/6) -----------------------------------
+# WEATHER RISK is a single 0-100 percentage answering "how likely is
+# weather to disrupt this game" (delay/postponement) -- deliberately
+# NOT the same question as "is this a good hitting/pitching
+# environment" (that stays a separate, un-related signal: hot weather
+# favors hitters and is NOT weather risk; see weather.py's
+# analyze_weather()). Computed from four independent 0-100 sub-scores,
+# blended by the weights below (renormalized if a sub-score is
+# unavailable, same discipline as HITTER_SCORE_WEIGHTS elsewhere in this
+# file) using the first-pitch-through-late-game window's WORST hourly
+# reading for precipitation probability/amount/weather-code severity
+# (a single bad hour is enough to threaten a delay -- averaging across
+# the window would dilute a real signal), and the single highest gust
+# reading in that same window for wind.
+WEATHER_RISK_WEIGHTS = {
+    "precipitation_probability": 0.40,
+    "precipitation_amount": 0.25,
+    "weather_code_severity": 0.25,
+    "wind_gusts": 0.10,
+}
+# precipitation_amount_mm/hour -> 0-100 sub-score: linear from 0mm=0 to
+# this ceiling=100 (clamped above it) -- a genuine downpour, not a
+# passing drizzle, is what actually threatens a delay.
+WEATHER_RISK_PRECIP_AMOUNT_CEILING_MM = 6.0
+# wind_gusts_mph -> 0-100 sub-score: linear from this floor=0 up to the
+# ceiling=100 (clamped both ends) -- ordinary gusty conditions (well
+# below the ceiling) contribute little; a genuinely dangerous gust does.
+WEATHER_RISK_WIND_GUST_FLOOR_MPH = 20.0
+WEATHER_RISK_WIND_GUST_CEILING_MPH = 45.0
+# WMO weather-code (Open-Meteo's documented vocabulary) -> 0-100
+# disruption-severity sub-score. Codes not listed default to 0 (clear/
+# cloudy/fog carry no delay risk of their own -- fog is a visibility,
+# not a play-stoppage, concern for MLB).
+WEATHER_CODE_SEVERITY = {
+    51: 15, 53: 25, 55: 35,  # drizzle: light/moderate/dense
+    56: 20, 57: 35,  # freezing drizzle: light/dense
+    61: 30, 63: 55, 65: 80,  # rain: slight/moderate/heavy
+    66: 40, 67: 70,  # freezing rain: light/heavy
+    71: 25, 73: 40, 75: 60, 77: 30,  # snow: slight/moderate/heavy/grains
+    80: 40, 81: 65, 82: 90,  # rain showers: slight/moderate/violent
+    85: 35, 86: 55,  # snow showers: slight/heavy
+    95: 85, 96: 95, 99: 100,  # thunderstorm: plain/slight hail/heavy hail
+}
+# Centralized GREEN/YELLOW/RED thresholds for the Weather Risk badge
+# (Part 7's "never bury a threshold inside a component" rule) --
+# LOW_GOOD direction (0=no concern, 100=severe concern). Initial bands
+# per the milestone spec; change here only, never in a component.
+WEATHER_RISK_GREEN_MAX = 29.99
+WEATHER_RISK_YELLOW_MAX = 59.99
+
 # --- Vegas analysis thresholds ------------------------------------------------
 
 TOTAL_HIGH_THRESHOLD = 9.5

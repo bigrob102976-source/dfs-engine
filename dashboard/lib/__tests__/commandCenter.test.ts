@@ -101,6 +101,30 @@ describe("buildSlateKpis", () => {
     expect(kpis.find((k) => k.key === "bestPitching")?.sub).toBe("OAK @ SEA");
   });
 
+  it("Milestone 32.6 Part 7 CONFIRMED BUG FIX: Highest Total is GREEN (positive), Lowest Total is RED (negative) -- high total is GOOD for a hitting environment", () => {
+    const high = game({ game_id: "high", home_team: "NYY", away_team: "BOS", vegas: { ...baseVegas(), game_id: "high", current_home: { ...baseVegas().current_home, total: 11.0 } } });
+    const mid = game({ game_id: "mid", home_team: "PHI", away_team: "ATL", vegas: { ...baseVegas(), game_id: "mid", current_home: { ...baseVegas().current_home, total: 9.0 } } });
+    const low = game({ game_id: "low", home_team: "SEA", away_team: "OAK", vegas: { ...baseVegas(), game_id: "low", current_home: { ...baseVegas().current_home, total: 6.5 } } });
+    const kpis = buildSlateKpis({ report: report([high, mid, low]), ownership: null, pitcherRows: [], stacks: [] });
+
+    expect(kpis.find((k) => k.key === "highestTotal")?.tone).toBe("positive");
+    expect(kpis.find((k) => k.key === "lowestTotal")?.tone).toBe("negative");
+  });
+
+  it("Milestone 32.6 Part 6/7: Weather Risk Game KPI uses the real GREEN/YELLOW/RED bands, including CAUTION", () => {
+    const lowRisk = game({ weather: { ...buildGameEnvironmentReport().weather!, game_id: "low-risk", delay_risk_percent: 10, postponement_risk_percent: null } });
+    const kpisGreen = buildSlateKpis({ report: report([lowRisk]), ownership: null, pitcherRows: [], stacks: [] });
+    expect(kpisGreen.find((k) => k.key === "weatherRiskGame")?.tone).toBe("positive");
+
+    const cautionRisk = game({ weather: { ...buildGameEnvironmentReport().weather!, game_id: "caution-risk", delay_risk_percent: 45, postponement_risk_percent: null } });
+    const kpisCaution = buildSlateKpis({ report: report([cautionRisk]), ownership: null, pitcherRows: [], stacks: [] });
+    expect(kpisCaution.find((k) => k.key === "weatherRiskGame")?.tone).toBe("caution");
+
+    const highRisk = game({ weather: { ...buildGameEnvironmentReport().weather!, game_id: "high-risk", delay_risk_percent: 80, postponement_risk_percent: null } });
+    const kpisRed = buildSlateKpis({ report: report([highRisk]), ownership: null, pitcherRows: [], stacks: [] });
+    expect(kpisRed.find((k) => k.key === "weatherRiskGame")?.tone).toBe("negative");
+  });
+
   it("computes Highest Owned Stack from ownership.team_popularity", () => {
     const ownership: OwnershipSnapshot = {
       slate_date: "2026-08-14", model_version: "1", player_count: 0, players: [],

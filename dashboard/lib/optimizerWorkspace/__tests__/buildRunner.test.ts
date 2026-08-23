@@ -115,8 +115,9 @@ afterEach(async () => {
 describe("validateBuildRequest", () => {
   it("returns a clear error when no pool has been loaded for the slate", async () => {
     const { validateBuildRequest } = await import("../buildRunner");
-    const errors = await validateBuildRequest(baseRequest());
+    const { errors, coverage } = await validateBuildRequest(baseRequest());
     expect(errors[0]).toMatch(/select a slate first/i);
+    expect(coverage).toBeNull();
   });
 
   it("parses the errors array printed by --validate-only", async () => {
@@ -132,7 +133,7 @@ describe("validateBuildRequest", () => {
     );
 
     const { validateBuildRequest } = await import("../buildRunner");
-    const errors = await validateBuildRequest(baseRequest({ stackSize: 5, stackTeam: "ZZZ" }));
+    const { errors } = await validateBuildRequest(baseRequest({ stackSize: 5, stackTeam: "ZZZ" }));
     expect(errors).toEqual(["--stack-team ZZZ only has 0 eligible hitter(s) (need 5)."]);
 
     const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
@@ -148,7 +149,40 @@ describe("validateBuildRequest", () => {
     __setPythonRunnerForTests(makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls));
 
     const { validateBuildRequest } = await import("../buildRunner");
-    expect(await validateBuildRequest(baseRequest())).toEqual([]);
+    expect((await validateBuildRequest(baseRequest())).errors).toEqual([]);
+  });
+
+  it("parses the coverage summary printed by --validate-only -- Milestone 32.6 Part 2/3", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    await seedCachedPool(calls);
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(
+      makeFakeRunner(
+        {
+          "scripts/optimize_dk_lineups.py": () =>
+            ok(
+              JSON.stringify({
+                errors: ["Stage: Player Pool / Reason: 731 otherwise-eligible player(s) have no projection/ceiling at all for this slate yet -- research has not been generated for this date."],
+                coverage: {
+                  pool_size: 746, optimizer_eligible: 15, usable_for_build: 0,
+                  skipped_missing_projection: 15, excluded_missing_source: 0,
+                  projection_source: "native", strict_source: false,
+                },
+              }),
+            ),
+        },
+        calls,
+      ),
+    );
+
+    const { validateBuildRequest } = await import("../buildRunner");
+    const { errors, coverage } = await validateBuildRequest(baseRequest());
+    expect(errors[0]).toMatch(/Stage: Player Pool/);
+    expect(coverage).toEqual({
+      poolSize: 746, optimizerEligible: 15, usableForBuild: 0,
+      skippedMissingProjection: 15, excludedMissingSource: 0,
+      projectionSource: "native", strictSource: false,
+    });
   });
 });
 
@@ -432,7 +466,7 @@ describe("buildLineups", () => {
         makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
       );
       const { validateBuildRequest } = await import("../buildRunner");
-      const errors = await validateBuildRequest(baseRequest({ projectionSource: "adjusted" }));
+      const { errors } = await validateBuildRequest(baseRequest({ projectionSource: "adjusted" }));
       expect(errors).toEqual([]);
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");
@@ -482,7 +516,7 @@ describe("buildLineups", () => {
         makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
       );
       const { validateBuildRequest } = await import("../buildRunner");
-      const errors = await validateBuildRequest(baseRequest({ projectionSource: "native" }));
+      const { errors } = await validateBuildRequest(baseRequest({ projectionSource: "native" }));
       expect(errors).toEqual([]);
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");
@@ -534,7 +568,7 @@ describe("buildLineups", () => {
         makeFakeRunner({ "scripts/optimize_dk_lineups.py": () => ok(JSON.stringify({ errors: [] })) }, calls),
       );
       const { validateBuildRequest } = await import("../buildRunner");
-      const errors = await validateBuildRequest(baseRequest({ projectionSource: "fantasypros" }));
+      const { errors } = await validateBuildRequest(baseRequest({ projectionSource: "fantasypros" }));
       expect(errors).toEqual([]);
       const call = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py")!;
       expect(call.args).not.toContain("--projection-overrides");

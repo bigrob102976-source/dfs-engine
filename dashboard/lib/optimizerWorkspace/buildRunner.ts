@@ -13,7 +13,21 @@ import { runPythonScript, tail } from "../orchestrator/pythonRunner";
 import type { LineupSet } from "../types";
 import { parseLastJsonLine } from "./jsonLine";
 import { getCachedPoolPath } from "./poolCache";
-import type { OptimizerBuildRequest, OptimizerBuildResult } from "./types";
+import type { OptimizerBuildRequest, OptimizerBuildResult, OptimizerCoverageSummary, OptimizerValidationResult } from "./types";
+
+function parseCoverage(doc: Record<string, unknown> | null): OptimizerCoverageSummary | null {
+  const raw = doc?.coverage as Record<string, unknown> | undefined;
+  if (!raw) return null;
+  return {
+    poolSize: Number(raw.pool_size ?? 0),
+    optimizerEligible: Number(raw.optimizer_eligible ?? 0),
+    usableForBuild: Number(raw.usable_for_build ?? 0),
+    skippedMissingProjection: Number(raw.skipped_missing_projection ?? 0),
+    excludedMissingSource: Number(raw.excluded_missing_source ?? 0),
+    projectionSource: raw.projection_source as OptimizerCoverageSummary["projectionSource"],
+    strictSource: Boolean(raw.strict_source),
+  };
+}
 
 /** Milestone 17's Projection Source selector: "independent" (the
  * default -- Big Money's own projections, exactly as before this
@@ -160,10 +174,10 @@ function extractConfigurationError(stdout: string): string | null {
  * optimizer/constraints.py) via `--validate-only`, which never invokes
  * the CP-SAT solver. Returns [] when nothing was found wrong -- not a
  * feasibility guarantee, just the absence of a cheaply-detectable blocker. */
-export async function validateBuildRequest(request: OptimizerBuildRequest): Promise<string[]> {
+export async function validateBuildRequest(request: OptimizerBuildRequest): Promise<OptimizerValidationResult> {
   const cached = getCachedPoolPath(request.date, request.slateId);
   if (!cached) {
-    return ["No player pool loaded for this slate yet -- select a slate first."];
+    return { errors: ["No player pool loaded for this slate yet -- select a slate first."], coverage: null };
   }
   const overridesPath = writeProjectionOverridesFile(request);
   try {
@@ -171,9 +185,9 @@ export async function validateBuildRequest(request: OptimizerBuildRequest): Prom
     const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
     const doc = parseLastJsonLine(result.stdout);
     if (!doc) {
-      return [`Unexpected validation failure: ${tail(result.stdout + result.stderr, 500)}`];
+      return { errors: [`Unexpected validation failure: ${tail(result.stdout + result.stderr, 500)}`], coverage: null };
     }
-    return Array.isArray(doc.errors) ? (doc.errors as string[]) : [];
+    return { errors: Array.isArray(doc.errors) ? (doc.errors as string[]) : [], coverage: parseCoverage(doc) };
   } finally {
     cleanupProjectionOverridesFile(overridesPath);
   }
@@ -192,6 +206,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     return {
       ok: false,
       errors: ["No player pool loaded for this slate yet -- select a slate first."],
+      coverage: null,
       lineupSetPath: null,
       csvPath: null,
       lineupsRequested: request.lineups,
@@ -203,11 +218,12 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     };
   }
 
-  const preErrors = await validateBuildRequest(request);
-  if (preErrors.length > 0) {
+  const pre = await validateBuildRequest(request);
+  if (pre.errors.length > 0) {
     return {
       ok: false,
-      errors: preErrors,
+      errors: pre.errors,
+      coverage: pre.coverage,
       lineupSetPath: null,
       csvPath: null,
       lineupsRequested: request.lineups,
@@ -236,6 +252,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     return {
       ok: false,
       errors: [configError ?? `Build failed: ${tail(result.stdout + result.stderr, 1000)}`],
+      coverage: pre.coverage,
       lineupSetPath: null,
       csvPath: null,
       lineupsRequested: request.lineups,
@@ -253,6 +270,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
   return {
     ok: true,
     errors: [],
+    coverage: pre.coverage,
     lineupSetPath: after.path,
     csvPath: fs.existsSync(csvPath) ? csvPath : null,
     lineupsRequested: doc?.lineups_requested ?? request.lineups,

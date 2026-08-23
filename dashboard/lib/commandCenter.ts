@@ -2,6 +2,7 @@ import type { AiPlayerProjection } from "./aiProjections";
 import type { NativePlayerProjection } from "./nativeProjections";
 import type { GameEnvironmentReport, SlateEnvironmentReport } from "./gameEnvironment";
 import { weatherRiskValue } from "./environmentSortFilter";
+import { percentileTone, weatherRiskTone } from "./semanticColor";
 import { buildStackSummaries, type StackSummary } from "./stacks";
 import type { OwnershipSnapshot, TeamPopularity } from "./types";
 import type { PlayerRow } from "./types";
@@ -29,7 +30,19 @@ export interface SlateKpi {
    * cards (a team/player name) omit it and render `value` directly. */
   numeric?: number | null;
   sub?: string;
-  tone?: "positive" | "negative" | "neutral";
+  tone?: "positive" | "negative" | "neutral" | "caution";
+}
+
+/** Milestone 32.6 Part 7: `lib/semanticColor.ts`'s green/yellow/red maps
+ * onto this file's existing positive/caution/negative/neutral SlateKpi
+ * tones (kept as a small local shim rather than widening SlateKpi.tone
+ * itself to the raw SemanticTone union, since "neutral" -- no data --
+ * has no equivalent in the 3-color system and must stay representable). */
+function slateKpiTone(tone: "green" | "yellow" | "red" | null): SlateKpi["tone"] {
+  if (tone === "green") return "positive";
+  if (tone === "yellow") return "caution";
+  if (tone === "red") return "negative";
+  return "neutral";
 }
 
 function fmt1(v: number | null | undefined): string {
@@ -95,6 +108,7 @@ export function buildSlateKpis({ report, ownership, pitcherRows, stacks }: Slate
 
   const highestTotalGame = analysis?.highest_total_game_id ? (games.find((g) => g.game_id === analysis.highest_total_game_id) ?? null) : null;
   const lowestTotalGame = analysis?.lowest_total_game_id ? (games.find((g) => g.game_id === analysis.lowest_total_game_id) ?? null) : null;
+  const allTotals = withVegas.map((g) => g.vegas!.current_home.total).filter((v): v is number => v !== null);
 
   const bestHitting = games.reduce<GameEnvironmentReport | null>(
     (best, g) => (best === null || g.environment_score.hitter > best.environment_score.hitter ? g : best),
@@ -140,8 +154,30 @@ export function buildSlateKpis({ report, ownership, pitcherRows, stacks }: Slate
 
   return [
     { key: "games", label: "Games", value: games.length, numeric: games.length },
-    { key: "highestTotal", label: "Highest Total", value: fmt1(highestTotalGame?.vegas?.current_home.total), numeric: highestTotalGame?.vegas?.current_home.total ?? null, sub: matchup(highestTotalGame), tone: "negative" },
-    { key: "lowestTotal", label: "Lowest Total", value: fmt1(lowestTotalGame?.vegas?.current_home.total), numeric: lowestTotalGame?.vegas?.current_home.total ?? null, sub: matchup(lowestTotalGame), tone: "positive" },
+    // Milestone 32.6 Part 7: CONFIRMED BUG FIX -- these two tiles had
+    // GREEN/RED backwards (highest total was red, lowest was green).
+    // Game Total is HIGH_GOOD for a hitting/offensive-environment view
+    // (this KPI row is exactly that): high total -> GREEN, low -> RED,
+    // ranked relative to the rest of THIS slate's own totals (no
+    // hardcoded baseball number) via lib/semanticColor.ts::percentileTone.
+    {
+      key: "highestTotal", label: "Highest Total", value: fmt1(highestTotalGame?.vegas?.current_home.total),
+      numeric: highestTotalGame?.vegas?.current_home.total ?? null, sub: matchup(highestTotalGame),
+      tone: slateKpiTone(
+        allTotals.length > 1 && highestTotalGame?.vegas?.current_home.total != null
+          ? percentileTone(highestTotalGame.vegas.current_home.total, allTotals, "HIGH_GOOD").tone
+          : null,
+      ),
+    },
+    {
+      key: "lowestTotal", label: "Lowest Total", value: fmt1(lowestTotalGame?.vegas?.current_home.total),
+      numeric: lowestTotalGame?.vegas?.current_home.total ?? null, sub: matchup(lowestTotalGame),
+      tone: slateKpiTone(
+        allTotals.length > 1 && lowestTotalGame?.vegas?.current_home.total != null
+          ? percentileTone(lowestTotalGame.vegas.current_home.total, allTotals, "HIGH_GOOD").tone
+          : null,
+      ),
+    },
     { key: "bestHitting", label: "Best Hitting Environment", value: bestHitting ? bestHitting.environment_score.hitter.toFixed(0) : "--", numeric: bestHitting ? bestHitting.environment_score.hitter : null, sub: matchup(bestHitting) },
     { key: "bestPitching", label: "Best Pitching Environment", value: bestPitching ? bestPitching.environment_score.pitcher.toFixed(0) : "--", numeric: bestPitching ? bestPitching.environment_score.pitcher : null, sub: matchup(bestPitching) },
     { key: "topStack", label: "Top Stack", value: topStack ? topStack.team : "--", sub: topStack ? `${fmt1(topStack.averageProjection)} proj/player` : undefined },
@@ -168,7 +204,9 @@ export function buildSlateKpis({ report, ownership, pitcherRows, stacks }: Slate
       value: weatherRiskValueTop !== null ? weatherRiskValueTop.toFixed(0) : "--",
       numeric: weatherRiskValueTop,
       sub: matchup(weatherRiskGame),
-      tone: weatherRiskValueTop && weatherRiskValueTop >= 25 ? "negative" : "neutral",
+      // Milestone 32.6 Part 6/7: real GREEN/YELLOW/RED banding (was a
+      // crude single threshold with no YELLOW/caution state at all).
+      tone: slateKpiTone(weatherRiskTone(weatherRiskValueTop)?.tone ?? null),
     },
     { key: "averageSlateScore", label: "Average Slate Score", value: averageSlateScore !== null ? averageSlateScore.toFixed(0) : "--", numeric: averageSlateScore },
   ];

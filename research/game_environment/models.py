@@ -28,6 +28,15 @@ class WeatherReading:
     feels_like_f: Optional[float] = None
     rain_percent: Optional[float] = None
     air_density: Optional[float] = None  # kg/m^3, when computable (needs temp+humidity+altitude)
+    # Milestone 32.6 -- real forecast fields a live provider (Open-Meteo)
+    # supplies that the mock provider never modeled. Optional/None for
+    # every reading built before this milestone (old persisted snapshots
+    # still deserialize) and for MockWeatherProvider readings, which
+    # leave these unset rather than inventing them.
+    precipitation_probability_percent: Optional[float] = None  # 0-100, forecast chance of any precipitation
+    precipitation_amount_mm: Optional[float] = None  # forecast liquid-equivalent precipitation for this hour
+    weather_code: Optional[int] = None  # WMO code (Open-Meteo's documented vocabulary)
+    wind_gusts_mph: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -49,6 +58,16 @@ class WeatherSnapshot:
     first_pitch: WeatherReading = field(default_factory=WeatherReading)
     mid_game: WeatherReading = field(default_factory=WeatherReading)
     late_game: WeatherReading = field(default_factory=WeatherReading)
+    # Milestone 32.6 Part 6 -- WEATHER RISK: a single 0-100 percentage
+    # answering "how likely is weather to disrupt this game" (delay/
+    # postponement), distinct from delay_risk_percent/postponement_risk_percent
+    # above (which a real provider may leave None when it has no genuine
+    # postponement-specific signal) -- see weather_risk.py for the
+    # documented methodology. `weather_status` is the short human-readable
+    # label the UI shows next to the percentage (e.g. "Low disruption
+    # risk", "Rain possible", "High delay/postponement risk").
+    weather_risk_percent: Optional[float] = None
+    weather_status: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)

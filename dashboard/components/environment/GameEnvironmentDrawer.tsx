@@ -5,6 +5,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { SectionHeader } from "@/components/ui/Header";
 import type { EnvironmentSections } from "@/lib/environmentDisplaySettings";
 import type { GameEnvironmentReport, WeatherReading, WeatherSnapshot } from "@/lib/gameEnvironment";
+import { toneBadgeClass, toneLabel, weatherRiskTone } from "@/lib/semanticColor";
 
 function fmt(value: number | null | undefined, digits = 1): string {
   return value === null || value === undefined ? "--" : value.toFixed(digits);
@@ -89,16 +90,30 @@ export function GameEnvironmentDrawer({
           <SectionHeader title="Weather" />
           {game.weather ? (
             <>
-              <div className="mb-2 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-muted">
+              <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-text-muted">
                 <span>
                   Roof: <span className="text-text">{game.weather.roof_status}</span>
                 </span>
-                <span>
-                  Delay Risk: <span className="text-text">{fmt(game.weather.delay_risk_percent, 0)}%</span>
-                </span>
-                <span>
-                  Postponement Risk: <span className="text-text">{fmt(game.weather.postponement_risk_percent, 0)}%</span>
-                </span>
+                {(() => {
+                  const risk = weatherRiskTone(game.weather.weather_risk_percent);
+                  return (
+                    <span className="flex items-center gap-1.5">
+                      Weather Risk:
+                      <span className="text-text">{fmt(game.weather.weather_risk_percent, 0)}%</span>
+                      {risk && (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${toneBadgeClass(risk.tone)}`}>
+                          {toneLabel(risk.tone)}
+                        </span>
+                      )}
+                      {game.weather.weather_status && <span className="text-text-faint">{game.weather.weather_status}</span>}
+                    </span>
+                  );
+                })()}
+                {game.weather.postponement_risk_percent !== null && (
+                  <span>
+                    Postponement Risk: <span className="text-text">{fmt(game.weather.postponement_risk_percent, 0)}%</span>
+                  </span>
+                )}
               </div>
               <table className="w-full text-xs">
                 <thead>

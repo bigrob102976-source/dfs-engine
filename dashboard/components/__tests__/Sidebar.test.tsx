@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUsePathname = vi.fn();
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
+  useSearchParams: () => mockSearchParams,
 }));
 
 import { Sidebar } from "../Sidebar";
@@ -11,6 +13,7 @@ import { Sidebar } from "../Sidebar";
 beforeEach(() => {
   window.localStorage.clear();
   mockUsePathname.mockReturnValue("/dashboard");
+  mockSearchParams = new URLSearchParams();
 });
 
 afterEach(() => {
@@ -80,5 +83,23 @@ describe("Sidebar", () => {
   it("is a properly labeled landmark for accessibility", () => {
     render(<Sidebar />);
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+  });
+
+  it("carries the current ?slate= and ?date= forward on every nav link -- Milestone 32.6", () => {
+    mockSearchParams = new URLSearchParams("slate=dkunofficial-152547&date=2026-08-21");
+    render(<Sidebar />);
+    expect(screen.getByText("Pitchers").closest("a")).toHaveAttribute(
+      "href",
+      "/dashboard/pitchers?slate=dkunofficial-152547&date=2026-08-21",
+    );
+    expect(screen.getByText("Optimizer").closest("a")).toHaveAttribute(
+      "href",
+      "/dashboard/optimizer?slate=dkunofficial-152547&date=2026-08-21",
+    );
+  });
+
+  it("renders bare links with no query string when no slate/date is selected", () => {
+    render(<Sidebar />);
+    expect(screen.getByText("Hitters").closest("a")).toHaveAttribute("href", "/dashboard/hitters");
   });
 });

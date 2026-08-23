@@ -31,7 +31,11 @@ def test_raises_a_clear_error_when_no_research_package_exists(tmp_path, monkeypa
 
 
 def test_builds_a_report_for_every_game_on_the_slate(tmp_path, monkeypatch):
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 32.6 Part 5: weather now defaults to the REAL Open-Meteo
+    # provider (no longer mock) -- tests unrelated to weather-provider
+    # resolution itself must explicitly opt into mock so they stay fast/
+    # deterministic/network-free (same discipline as Vegas's tests below).
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     monkeypatch.delenv("GAME_ENVIRONMENT_UMPIRE_PROVIDER", raising=False)
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=3)
@@ -45,7 +49,11 @@ def test_builds_a_report_for_every_game_on_the_slate(tmp_path, monkeypatch):
 
 
 def test_every_game_has_a_score_and_summary(tmp_path, monkeypatch):
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 32.6 Part 5: weather now defaults to the REAL Open-Meteo
+    # provider (no longer mock) -- tests unrelated to weather-provider
+    # resolution itself must explicitly opt into mock so they stay fast/
+    # deterministic/network-free (same discipline as Vegas's tests below).
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)
 
@@ -73,7 +81,14 @@ def test_vegas_slate_analysis_is_computed_across_every_game(tmp_path, monkeypatc
 
 def test_vegas_is_none_for_every_game_when_not_configured(tmp_path, monkeypatch):
     monkeypatch.delenv("SPORTSGAMEODDS_API_KEY", raising=False)
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # GAME_ENVIRONMENT_PROVIDER=mock can't be used here -- it would ALSO
+    # opt Vegas into MockVegasProvider (see collector.py's
+    # get_configured_vegas_provider), defeating the point of this test.
+    # Stub weather resolution directly instead, leaving Vegas's own
+    # env-based resolution genuinely untouched/not-configured.
+    from research.game_environment import collector
+    from research.game_environment.weather import MockWeatherProvider
+    monkeypatch.setattr(collector, "get_configured_weather_provider", lambda: (MockWeatherProvider(), "test_stub"))
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)
 
@@ -84,6 +99,7 @@ def test_vegas_is_none_for_every_game_when_not_configured(tmp_path, monkeypatch)
 
 
 def test_umpire_defaults_to_unknown_for_every_game(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     monkeypatch.delenv("GAME_ENVIRONMENT_UMPIRE_PROVIDER", raising=False)
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)
@@ -95,7 +111,11 @@ def test_umpire_defaults_to_unknown_for_every_game(tmp_path, monkeypatch):
 
 
 def test_report_serializes_cleanly_to_json(tmp_path, monkeypatch):
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 32.6 Part 5: weather now defaults to the REAL Open-Meteo
+    # provider (no longer mock) -- tests unrelated to weather-provider
+    # resolution itself must explicitly opt into mock so they stay fast/
+    # deterministic/network-free (same discipline as Vegas's tests below).
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)
 
@@ -104,7 +124,11 @@ def test_report_serializes_cleanly_to_json(tmp_path, monkeypatch):
 
 
 def test_report_has_no_validation_warnings_for_a_clean_slate(tmp_path, monkeypatch):
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 32.6 Part 5: weather now defaults to the REAL Open-Meteo
+    # provider (no longer mock) -- tests unrelated to weather-provider
+    # resolution itself must explicitly opt into mock so they stay fast/
+    # deterministic/network-free (same discipline as Vegas's tests below).
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)
 
@@ -116,7 +140,11 @@ def test_mlb_game_status_from_research_package_flows_through_to_each_game(tmp_pa
     # Milestone 25: research_output/<date>/games.json's "status" field
     # (already collected, previously discarded before reaching
     # GameEnvironmentReport) must now flow through end to end.
-    monkeypatch.delenv("GAME_ENVIRONMENT_PROVIDER", raising=False)
+    # Milestone 32.6 Part 5: weather now defaults to the REAL Open-Meteo
+    # provider (no longer mock) -- tests unrelated to weather-provider
+    # resolution itself must explicitly opt into mock so they stay fast/
+    # deterministic/network-free (same discipline as Vegas's tests below).
+    monkeypatch.setenv("GAME_ENVIRONMENT_PROVIDER", "mock")
     root = tmp_path / "research_output"
     _write_research_package(root, "2026-08-13", game_count=2)  # fixture uses "status": "scheduled"
 
