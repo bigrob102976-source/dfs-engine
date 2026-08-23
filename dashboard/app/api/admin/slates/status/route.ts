@@ -25,6 +25,21 @@ interface EligibilityCounts {
   optimizer_eligible: number;
 }
 
+// Canonical MLB Player Identity Foundation: PLAYER IDENTITY is
+// deliberately reported separately from `eligibility` above -- identity
+// (does this DK row resolve to a real mlb_player_id) and eligibility
+// (is this player optimizer-buildable today) are two different
+// questions. Sourced from the SAME match report dfs/player_pool.py's
+// build_match_report already writes (matched_to_mlb/unmatched_count/
+// ambiguous_count/dk_entries) -- nothing new computed here, just a
+// second read of fields that already existed.
+interface IdentityCounts {
+  dk_entries: number;
+  resolved: number;
+  ambiguous: number;
+  unmatched: number;
+}
+
 export const dynamic = "force-dynamic";
 
 const SLATE_AUDIT_ACTIONS = new Set([
@@ -65,6 +80,14 @@ export async function GET(request: Request) {
     const activeJob = listJobsForSlate(date, s.slateId).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
     const matchReport = loadLatestDkMatchReport(date, s.slateId).data;
     const eligibility = (matchReport?.eligibility as EligibilityCounts | undefined) ?? null;
+    const identity: IdentityCounts | null = matchReport
+      ? {
+          dk_entries: (matchReport.dk_entries as number) ?? 0,
+          resolved: (matchReport.matched_to_mlb as number) ?? 0,
+          ambiguous: (matchReport.ambiguous_count as number) ?? 0,
+          unmatched: (matchReport.unmatched_count as number) ?? 0,
+        }
+      : null;
     return {
       slateId: s.slateId,
       slateName: s.slateName,
@@ -81,6 +104,7 @@ export async function GET(request: Request) {
       readiness,
       activeJob: activeJob ? { id: activeJob.id, jobType: activeJob.job_type, status: activeJob.status, progress: activeJob.progress, currentStep: activeJob.current_step } : null,
       eligibility,
+      identity,
     };
   });
 

@@ -3,9 +3,25 @@ from pathlib import Path
 
 import pytest
 
+from dfs import pool_builder
 from dfs.models import DKSalaryRow
 from dfs.pool_builder import UnsafeSourceProvenanceError, build_pool, print_pool_report, save_pool
 from dfs.providers.adapter import provider_players_to_dk_rows
+
+
+@pytest.fixture(autouse=True)
+def _no_identity_crosswalk_by_default(monkeypatch):
+    # Canonical MLB Player Identity Foundation: build_pool() widens
+    # identity matching using the on-disk rolling crosswalk
+    # (player_identity/persistence.py's DEFAULT_CROSSWALK_PATH) by
+    # default. Every test in this file predates that milestone and
+    # asserts behavior against ONLY research_output's confirmed-lineup
+    # identity -- isolate from whatever crosswalk file happens to exist
+    # on this machine so these tests stay deterministic. Identity-
+    # widening behavior itself is covered by
+    # tests/test_pool_builder_identity.py, where each test builds its
+    # own isolated tmp_path crosswalk.
+    monkeypatch.setattr(pool_builder, "load_crosswalk", lambda *a, **k: {})
 
 
 def _write_research_package(root: Path, date: str):

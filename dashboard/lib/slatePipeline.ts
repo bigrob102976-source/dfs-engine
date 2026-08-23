@@ -103,6 +103,26 @@ export async function runSlatePipeline(
 
   const errors: string[] = [];
 
+  // Canonical MLB Player Identity Foundation: refreshes the roster-
+  // derived identity crosswalk (player_identity/refresh.py) for every
+  // team playing on `date` -- independent of starting-lineup
+  // confirmation, using research_output/<date>/teams.json (schedule-
+  // derived, guaranteed to exist by now since "Building player pool"
+  // above already built/loaded the research package). Runs BEFORE
+  // Native/AI/BlueCollar below so they consult the freshest possible
+  // crosswalk; the DK pool build just above already benefited from
+  // whatever crosswalk a PRIOR refresh had accumulated (rosters change
+  // slowly day to day, so this is a minor, documented ordering
+  // trade-off, not a correctness gap -- see this script's own module
+  // docstring). Never blocks the slate: scripts/refresh_player_identity.py
+  // always exits 0 and a missing/failed team fetch is recorded in its
+  // own JSON status line, not as a pipeline failure.
+  onProgress(35, "Refreshing MLB player identity");
+  const identityResult = await runPythonScript("scripts/refresh_player_identity.py", ["--date", date]);
+  if (identityResult.exitCode !== 0) {
+    errors.push(`Player identity refresh failed: ${tail(identityResult.stdout + identityResult.stderr, 800)}`);
+  }
+
   onProgress(40, "Running Native projection engine");
   const nativeResult = await runPythonScript("scripts/run_native_projection_engine.py", ["--date", date]);
   if (nativeResult.exitCode !== 0) {

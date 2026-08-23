@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # are legitimately allowed to import research/models/config -- that
 # direction (postgame depending on pregame code) is fine. Only the
 # reverse is forbidden.
-PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine", "native_projections", "big_money_ml"]
+PREGAME_PACKAGE_DIRS = ["agents", "research", "models", "services", "dfs", "optimizer", "ownership", "projection_engine", "native_projections", "big_money_ml", "player_identity"]
 PREGAME_EXTRA_FILES = [
     "config/scoring_config.py",
     "config/evaluation_config.py",  # config-only, no imports either way, but check anyway
@@ -46,6 +46,7 @@ PREGAME_EXTRA_FILES = [
     "scripts/run_native_projection_engine.py",
     "scripts/run_ml_shadow_inference.py",
     "scripts/run_ml_hitter_shadow_inference.py",
+    "scripts/refresh_player_identity.py",
 ]
 
 

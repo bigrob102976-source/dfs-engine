@@ -40,6 +40,8 @@ from external_projections.base import (
     ProjectionProviderUnavailableError,
 )
 from external_projections.bluecollar_provider import BlueCollarProvider
+from player_identity.identity_package import build_identity_package
+from player_identity.persistence import load_crosswalk
 from research.adapters import batter_input as batter_adapter
 from research.adapters import pitcher_input as pitcher_adapter
 from research.adapters.pitcher_input import ResearchPackageNotFoundError
@@ -68,9 +70,19 @@ def _load_research_package(date: str, research_output_root: str) -> Optional[dic
     return {"games": pitcher_pkg["games"], "teams": pitcher_pkg["teams"], "pitchers": pitcher_pkg["pitchers"], "batters": batter_pkg["batters"]}
 
 
-def build_bluecollar_snapshot(dk_slate: dict, date: str, research_output_root: str = "research_output", provider: Optional[BlueCollarProvider] = None) -> dict:
+def build_bluecollar_snapshot(
+    dk_slate: dict, date: str, research_output_root: str = "research_output",
+    provider: Optional[BlueCollarProvider] = None, identity_crosswalk_path: Optional[str] = None,
+) -> dict:
     """`dk_slate` is one entry from a real provider_slate_<ts>.json's
-    `slates` list. Returns {"status": str, "snapshot": BlueCollarSnapshot | None, "error": str | None}."""
+    `slates` list. Returns {"status": str, "snapshot": BlueCollarSnapshot | None, "error": str | None}.
+
+    `identity_crosswalk_path` (Canonical MLB Player Identity Foundation):
+    optional override for the roster-derived crosswalk file (see
+    dfs/pool_builder.py::build_pool's identical parameter) -- widens
+    which BlueCollar-reported players can resolve an mlb_player_id
+    (identity resolution only; never changes a projection value -- see
+    this module's own zero-value handling below, which is untouched)."""
     provider = provider if provider is not None else BlueCollarProvider()
     dk_slate_id = dk_slate.get("slate_id") or dk_slate.get("slateId") or ""
 
@@ -100,7 +112,13 @@ def build_bluecollar_snapshot(dk_slate: dict, date: str, research_output_root: s
     except (ProjectionProviderAuthenticationError, ProjectionProviderUnavailableError) as exc:
         return {"status": STATUS_API_ERROR, "snapshot": None, "error": str(exc)}
 
-    matched_players = match_bluecollar_players(raw_players, package)
+    # Canonical MLB Player Identity Foundation: widen identity matching
+    # with the roster-derived crosswalk, same as dfs/pool_builder.py.
+    # This is IDENTITY resolution only -- the zero-value/usable_projection
+    # handling below is completely untouched by it.
+    identity_crosswalk = load_crosswalk(identity_crosswalk_path) if identity_crosswalk_path else load_crosswalk()
+    identity_package = build_identity_package(package, identity_crosswalk)
+    matched_players = match_bluecollar_players(raw_players, identity_package)
 
     bluecollar_updated = raw_players[0].updated_at if raw_players else None
     for p in matched_players:

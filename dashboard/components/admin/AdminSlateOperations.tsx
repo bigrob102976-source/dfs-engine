@@ -33,6 +33,17 @@ interface EligibilityCounts {
   optimizer_eligible: number;
 }
 
+// Canonical MLB Player Identity Foundation: PLAYER IDENTITY, shown
+// separately from eligibility below -- "does this DK row resolve to a
+// real mlb_player_id" is a different question from "is this player
+// optimizer-buildable today."
+interface IdentityCounts {
+  dk_entries: number;
+  resolved: number;
+  ambiguous: number;
+  unmatched: number;
+}
+
 interface SlateBoardRow {
   slateId: string;
   slateName: string | null;
@@ -49,6 +60,7 @@ interface SlateBoardRow {
   readiness: { ok: boolean; required: ReadinessCheck[]; optional: ReadinessCheck[] };
   activeJob: ActiveJob | null;
   eligibility: EligibilityCounts | null;
+  identity: IdentityCounts | null;
 }
 
 interface StatusResponse {
@@ -244,6 +256,20 @@ export function AdminSlateOperations({ date }: { date: string }) {
                     </div>
                   ) : null;
                 })()}
+
+                {s.identity && (
+                  <div className="mb-3 border-t border-border-subtle pt-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-text-faint">Player Identity</div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] sm:grid-cols-4">
+                      <dt className="text-text-faint">Resolved</dt>
+                      <dd className="text-text">{s.identity.resolved} / {s.identity.dk_entries}</dd>
+                      <dt className="text-text-faint">Ambiguous</dt>
+                      <dd className="text-text">{s.identity.ambiguous}</dd>
+                      <dt className="text-text-faint">Unmatched</dt>
+                      <dd className="text-text">{s.identity.unmatched}</dd>
+                    </dl>
+                  </div>
+                )}
 
                 {s.eligibility && (
                   <div className="mb-3 border-t border-border-subtle pt-2">

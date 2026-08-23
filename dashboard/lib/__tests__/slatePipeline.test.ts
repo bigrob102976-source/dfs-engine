@@ -65,6 +65,10 @@ function defaultHandlers(): Record<string, Handler> {
       });
       return ok();
     },
+    // Canonical MLB Player Identity Foundation: refreshes the roster-
+    // derived identity crosswalk. Always exits 0 and reports status via
+    // a trailing JSON line -- see player_identity/refresh.py.
+    "scripts/refresh_player_identity.py": () => ok(JSON.stringify({ status: "ready", teams_total: 0, teams_fetched: 0 })),
     "scripts/run_native_projection_engine.py": () => {
       writeJson(`native_projection_snapshots/${DATE}/native_projection_${nextTs()}.json`, {
         slate_date: DATE, generated_at: "x", model_version: "1.0.0", player_count: 1,
@@ -138,6 +142,7 @@ describe("runSlatePipeline", () => {
       "scripts/fetch_dfs_slate.py",
       "scripts/build_dfs_pool_from_provider.py",
       "scripts/project_dk_ownership.py",
+      "scripts/refresh_player_identity.py",
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
       "scripts/fetch_fantasypros_projections.py",
@@ -401,6 +406,59 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors).toEqual([]);
     expect(calls.map((c) => c.script)).toContain("scripts/fetch_bluecollar_projections.py");
+  });
+
+  it("passes --date to the player identity refresh script", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    const call = calls.find((c) => c.script === "scripts/refresh_player_identity.py")!;
+    expect(call.args).toEqual(["--date", DATE]);
+  });
+
+  it("still marks the slate READY when the player identity refresh script exits non-zero -- recorded as an error, never fatal to the slate", async () => {
+    const handlers = { ...defaultHandlers(), "scripts/refresh_player_identity.py": () => fail("unexpected crash") };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors.some((e) => e.includes("Player identity refresh failed"))).toBe(true);
+    const { getSlateStatus } = await import("../db/slateStatus");
+    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+  });
+
+  it("does not record an error when the player identity refresh succeeds normally", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("READY");
+    expect(result.errors).toEqual([]);
+    expect(calls.map((c) => c.script)).toContain("scripts/refresh_player_identity.py");
+  });
+
+  it("runs the player identity refresh BEFORE Native/AI projections, so they consult the freshest crosswalk", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    const scripts = calls.map((c) => c.script);
+    expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/run_native_projection_engine.py"));
+    expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/fetch_bluecollar_projections.py"));
   });
 
   it("sets status to PROCESSING immediately, before the pipeline completes", async () => {

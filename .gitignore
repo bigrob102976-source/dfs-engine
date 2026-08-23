@@ -44,6 +44,12 @@ dashboard/next-env.d.ts
 # DFS API, never source. See bluecollar/.
 /bluecollar_projection_snapshots/
 
+# Canonical MLB Player Identity Foundation -- reproducible by re-running
+# scripts/refresh_player_identity.py against the live MLB Stats API,
+# never source. See player_identity/.
+/player_identity_snapshots/
+/player_identity_crosswalk/
+
 # Milestone 32.2B: Big Money ML SHADOW pitcher projection snapshots --
 # reproducible by re-running scripts/run_ml_shadow_inference.py, never
 # source. See big_money_ml/.

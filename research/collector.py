@@ -86,6 +86,22 @@ def fetch_person(player_id: str) -> Optional[dict]:
     return people[0] if people else None
 
 
+def fetch_team_roster(team_id: str, roster_type: str = "active") -> Optional[dict]:
+    """Fetch one team's roster (default: the 25/26-man active roster).
+    Live-verified real response shape: {"roster": [{"person": {"id",
+    "fullName"}, "position": {"abbreviation"}, "status": {"code"}, ...}]}.
+    Used by player_identity/ to build MLB player identity independent of
+    today's starting-lineup confirmation (see that package's module
+    docstring). Returns None on any failure rather than raising -- a
+    single team's roster fetch failing must never take down a refresh
+    that covers many teams."""
+    url = f"{MLB_STATS_BASE}/teams/{team_id}/roster?rosterType={roster_type}"
+    try:
+        return _get_json(url)
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return None
+
+
 def _extract_probable_pitcher_ids(schedule: dict) -> List[str]:
     ids = []
     for date_block in schedule.get("dates", []):

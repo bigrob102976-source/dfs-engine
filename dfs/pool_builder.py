@@ -26,6 +26,8 @@ from dfs.providers.source_realism import PROVIDER_KIND_CSV, check_source_realism
 from dfs.roster_feasibility import check_roster_feasibility
 from dfs.slate_validation import validate_slate
 from dfs.snapshot_selection import select_snapshot
+from player_identity.identity_package import build_identity_package
+from player_identity.persistence import load_crosswalk
 from research.adapters import batter_input as batter_adapter
 from research.adapters import pitcher_input as pitcher_adapter
 from research.adapters.pitcher_input import ResearchPackageNotFoundError
@@ -96,6 +98,7 @@ def build_pool(
     slate_id: Optional[str] = None, dfs_input_root: str = "dfs_input",
     exclude_il: bool = True, exclude_zero_avg_points: bool = True,
     provider_kind: str = PROVIDER_KIND_CSV,
+    identity_crosswalk_path: Optional[str] = None,
 ) -> PoolBuildResult:
     """Runs identity matching, slate validation, player-pool assembly,
     and roster-feasibility checking -- identical to what
@@ -127,16 +130,35 @@ def build_pool(
     PROVIDER_KIND_CSV (the original, unchanged behavior) so every
     pre-M32.2B caller is fully backward compatible. Pass
     PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL when `dk_rows` came from that
-    provider, so its live-proven-real pitcher-pool shape never BLOCKs."""
+    provider, so its live-proven-real pitcher-pool shape never BLOCKs.
+
+    `identity_crosswalk_path` (Canonical MLB Player Identity Foundation):
+    optional override for the roster-derived crosswalk file
+    (player_identity/persistence.py's DEFAULT_CROSSWALK_PATH when None)
+    -- lets a test point at an isolated tmp_path crosswalk. This ONLY
+    widens the pool of candidates build_canonical_index/resolve_all can
+    match a DK row against (see player_identity/identity_package.py's
+    module docstring for why eligibility below is deliberately
+    unaffected by it)."""
     package = ensure_research_package(date, research_output_root)
     pitcher_snapshot, pitcher_snapshot_path = load_snapshot_arg(
         pitcher_snapshot_path, date, predictions_root, "pitcher_board", "Pitcher")
     batter_snapshot, batter_snapshot_path = load_snapshot_arg(
         batter_snapshot_path, date, predictions_root, "batter_board", "Batter")
 
-    canonical_index = build_canonical_index(package)
+    # Canonical MLB Player Identity Foundation: widen the identity pool
+    # with roster-derived candidates (independent of lineup confirmation)
+    # for IDENTITY MATCHING ONLY -- compute_eligibility() below still
+    # reads the ORIGINAL, narrow `package["pitchers"]`/`package["batters"]`
+    # (confirmed lineup / probable starters only), never this widened
+    # version, so a bench hitter or reliever can resolve an mlb_player_id
+    # here while remaining correctly non-eligible below.
+    identity_crosswalk = load_crosswalk(identity_crosswalk_path) if identity_crosswalk_path else load_crosswalk()
+    identity_package = build_identity_package(package, identity_crosswalk)
+
+    canonical_index = build_canonical_index(identity_package)
     canonical_by_id = build_canonical_by_id(canonical_index)
-    matches = resolve_all(dk_rows, package, crosswalk or {})
+    matches = resolve_all(dk_rows, identity_package, crosswalk or {})
 
     slate_validation = validate_slate(dk_rows, package)
     pitcher_raw_by_id = {str(r["player_id"]): r for r in package["pitchers"]}
