@@ -9,5 +9,5 @@ export async function GET() {
   const userOrRes = await requireAdminApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
-  return NextResponse.json(computeAdminRevenueStats());
+  return NextResponse.json(await computeAdminRevenueStats());
 }

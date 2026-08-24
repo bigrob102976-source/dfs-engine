@@ -21,14 +21,16 @@ function fmtDateTime(iso: string | null): string {
 
 export default async function AdminUserDetailPage(props: PageProps<"/admin/users/[id]">) {
   const { id } = await props.params;
-  const user = findUserById(id);
+  const user = await findUserById(id);
   if (!user) notFound();
 
-  const subscription = getCurrentSubscriptionForUser(id);
-  const entitlements = listUserEntitlements(id);
-  const entitlementsCatalog = listEntitlementsCatalog();
-  const plans = listActivePlans();
-  const recentActivity = listAuditLog({ targetId: id, limit: 20 });
+  const [subscription, entitlements, entitlementsCatalog, plans, recentActivity] = await Promise.all([
+    getCurrentSubscriptionForUser(id),
+    listUserEntitlements(id),
+    listEntitlementsCatalog(),
+    listActivePlans(),
+    listAuditLog({ targetId: id, limit: 20 }),
+  ]);
 
   return (
     <div>

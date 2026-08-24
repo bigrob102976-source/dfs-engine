@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { __resetDbForTests } from "../../db/client";
+import { __resetExecutorForTests } from "../../db/executor";
 import { deriveWorkerHealth, isAnyWorkerOnline, listWorkerHealth, recordHeartbeat } from "../heartbeat";
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("deriveWorkerHealth", () => {
@@ -24,23 +26,23 @@ describe("deriveWorkerHealth", () => {
 });
 
 describe("recordHeartbeat / listWorkerHealth", () => {
-  it("upserts by worker_id and reports ONLINE for a fresh heartbeat", () => {
-    recordHeartbeat("worker-1", { note: "first" });
-    const health = listWorkerHealth();
+  it("upserts by worker_id and reports ONLINE for a fresh heartbeat", async () => {
+    await recordHeartbeat("worker-1", { note: "first" });
+    const health = await listWorkerHealth();
     expect(health).toHaveLength(1);
     expect(health[0].workerId).toBe("worker-1");
     expect(health[0].health).toBe("ONLINE");
   });
 
-  it("a second heartbeat for the same worker_id updates the row rather than inserting a second one", () => {
-    recordHeartbeat("worker-1");
-    recordHeartbeat("worker-1");
-    expect(listWorkerHealth()).toHaveLength(1);
+  it("a second heartbeat for the same worker_id updates the row rather than inserting a second one", async () => {
+    await recordHeartbeat("worker-1");
+    await recordHeartbeat("worker-1");
+    expect(await listWorkerHealth()).toHaveLength(1);
   });
 
-  it("isAnyWorkerOnline is false with no heartbeats and true after one", () => {
-    expect(isAnyWorkerOnline()).toBe(false);
-    recordHeartbeat("worker-1");
-    expect(isAnyWorkerOnline()).toBe(true);
+  it("isAnyWorkerOnline is false with no heartbeats and true after one", async () => {
+    expect(await isAnyWorkerOnline()).toBe(false);
+    await recordHeartbeat("worker-1");
+    expect(await isAnyWorkerOnline()).toBe(true);
   });
 });

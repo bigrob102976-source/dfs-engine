@@ -17,13 +17,10 @@ import { countAdmins, findUserById, setBetaAccess, setUserDisabled, updateUserRo
 export const dynamic = "force-dynamic";
 
 async function loadTarget(id: string) {
-  const target = findUserById(id);
+  const target = await findUserById(id);
   if (!target) return null;
-  return {
-    user: target,
-    subscription: getCurrentSubscriptionForUser(id),
-    entitlements: listUserEntitlements(id),
-  };
+  const [subscription, entitlements] = await Promise.all([getCurrentSubscriptionForUser(id), listUserEntitlements(id)]);
+  return { user: target, subscription, entitlements };
 }
 
 export async function GET(_request: Request, ctx: RouteContext<"/api/admin/users/[id]">) {
@@ -44,7 +41,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
   const admin = userOrRes;
 
   const { id } = await ctx.params;
-  const target = findUserById(id);
+  const target = await findUserById(id);
   if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
   let body: unknown;
@@ -61,11 +58,11 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
       if (typeof role !== "string" || !isValidRole(role)) {
         return NextResponse.json({ error: "Invalid role." }, { status: 400 });
       }
-      if (target.role === "ADMIN" && role !== "ADMIN" && countAdmins() <= 1) {
+      if (target.role === "ADMIN" && role !== "ADMIN" && (await countAdmins()) <= 1) {
         return NextResponse.json({ error: "Cannot remove the last remaining admin." }, { status: 400 });
       }
-      updateUserRole(target.id, role);
-      recordAuditLog({
+      await updateUserRole(target.id, role);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_role_changed",
@@ -77,9 +74,9 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
     }
 
     case "disable_account": {
-      setUserDisabled(target.id, true);
-      deleteAllSessionsForUser(target.id);
-      recordAuditLog({
+      await setUserDisabled(target.id, true);
+      await deleteAllSessionsForUser(target.id);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_disabled",
@@ -90,8 +87,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
     }
 
     case "restore_account": {
-      setUserDisabled(target.id, false);
-      recordAuditLog({
+      await setUserDisabled(target.id, false);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_restored",
@@ -106,7 +103,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
       if (typeof days !== "number" || !Number.isInteger(days) || days <= 0 || days > MAX_TRIAL_EXTENSION_DAYS) {
         return NextResponse.json({ error: `days must be a whole number between 1 and ${MAX_TRIAL_EXTENSION_DAYS}.` }, { status: 400 });
       }
-      const subscription = getCurrentSubscriptionForUser(target.id);
+      const subscription = await getCurrentSubscriptionForUser(target.id);
       if (!subscription) {
         return NextResponse.json({ error: "User has no subscription to extend." }, { status: 400 });
       }
@@ -114,8 +111,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
         ? new Date(subscription.trial_ends_at)
         : new Date();
       const newTrialEndsAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-      extendSubscriptionTrial(subscription.id, newTrialEndsAt);
-      recordAuditLog({
+      await extendSubscriptionTrial(subscription.id, newTrialEndsAt);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_trial_extended",
@@ -128,19 +125,19 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
 
     case "grant_complimentary": {
       const { planId, expiresAt } = body as { planId?: unknown; expiresAt?: unknown };
-      if (typeof planId !== "string" || !getPlan(planId)) {
+      if (typeof planId !== "string" || !(await getPlan(planId))) {
         return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
       }
       if (expiresAt !== undefined && expiresAt !== null && typeof expiresAt !== "string") {
         return NextResponse.json({ error: "expiresAt must be an ISO date string or null." }, { status: 400 });
       }
-      insertSubscription({
+      await insertSubscription({
         userId: target.id,
         planId,
         status: "complimentary",
         currentPeriodEnd: (expiresAt as string | null) ?? null,
       });
-      recordAuditLog({
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_granted_complimentary",
@@ -152,8 +149,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
     }
 
     case "grant_beta_access": {
-      setBetaAccess(target.id, true, admin.id);
-      recordAuditLog({
+      await setBetaAccess(target.id, true, admin.id);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_beta_access_granted",
@@ -164,8 +161,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
     }
 
     case "revoke_beta_access": {
-      setBetaAccess(target.id, false, null);
-      recordAuditLog({
+      await setBetaAccess(target.id, false, null);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_beta_access_revoked",
@@ -176,12 +173,12 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/user
     }
 
     case "remove_complimentary": {
-      const subscription = getCurrentSubscriptionForUser(target.id);
+      const subscription = await getCurrentSubscriptionForUser(target.id);
       if (!subscription || subscription.status !== "complimentary") {
         return NextResponse.json({ error: "User does not have an active complimentary grant." }, { status: 400 });
       }
-      cancelSubscription(subscription.id);
-      recordAuditLog({
+      await cancelSubscription(subscription.id);
+      await recordAuditLog({
         actorUserId: admin.id,
         actorLabel: admin.email,
         action: "user_complimentary_removed",

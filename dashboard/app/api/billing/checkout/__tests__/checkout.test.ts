@@ -19,6 +19,7 @@ vi.mock("@/lib/billing", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { listAuditLog } = await import("@/lib/db/auditLog");
@@ -30,6 +31,7 @@ function jsonRequest(url: string, body: unknown) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockCreateCheckoutSession.mockReset();
 });
@@ -42,7 +44,7 @@ describe("POST /api/billing/checkout", () => {
   });
 
   it("400s for an unknown plan id", async () => {
-    const user = createUser({ email: "unknownplan@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "unknownplan@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const res = await checkout(jsonRequest("http://localhost/api/billing/checkout", { planId: "yearly" }));
     expect(res.status).toBe(400);
@@ -50,7 +52,7 @@ describe("POST /api/billing/checkout", () => {
   });
 
   it("400s for a malformed JSON body", async () => {
-    const user = createUser({ email: "malformed@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "malformed@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const res = await checkout(
       new Request("http://localhost/api/billing/checkout", { method: "POST", headers: { "content-type": "application/json" }, body: "{not json" }),
@@ -60,7 +62,7 @@ describe("POST /api/billing/checkout", () => {
 
   it("creates a checkout session, using the SESSION user's id -- ignores any userId the body tries to supply", async () => {
     mockCreateCheckoutSession.mockResolvedValue({ url: "https://checkout.stripe.com/session/abc" });
-    const user = createUser({ email: "spoofcheck@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "spoofcheck@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const res = await checkout(
@@ -73,7 +75,7 @@ describe("POST /api/billing/checkout", () => {
 
   it("ignores an arbitrary raw priceId the body tries to smuggle in -- only planId is ever read", async () => {
     mockCreateCheckoutSession.mockResolvedValue({ url: "https://checkout.stripe.com/session/xyz" });
-    const user = createUser({ email: "priceidcheck@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "priceidcheck@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     await checkout(jsonRequest("http://localhost/api/billing/checkout", { planId: "monthly", priceId: "price_attacker_supplied" }));
@@ -84,22 +86,22 @@ describe("POST /api/billing/checkout", () => {
 
   it("records a checkout_initiated audit log entry on success", async () => {
     mockCreateCheckoutSession.mockResolvedValue({ url: "https://checkout.stripe.com/session/abc" });
-    const user = createUser({ email: "auditcheckout@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "auditcheckout@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     await checkout(jsonRequest("http://localhost/api/billing/checkout", { planId: "weekly" }));
-    const entries = listAuditLog({ action: "checkout_initiated" });
+    const entries = await listAuditLog({ action: "checkout_initiated" });
     expect(entries).toHaveLength(1);
     expect(entries[0].actor_user_id).toBe(user.id);
   });
 
   it("502s and does NOT audit-log when the provider returns an error", async () => {
     mockCreateCheckoutSession.mockResolvedValue({ error: "Stripe is down." });
-    const user = createUser({ email: "providererror@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "providererror@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const res = await checkout(jsonRequest("http://localhost/api/billing/checkout", { planId: "weekly" }));
     expect(res.status).toBe(502);
-    expect(listAuditLog({ action: "checkout_initiated" })).toHaveLength(0);
+    expect(await listAuditLog({ action: "checkout_initiated" })).toHaveLength(0);
   });
 });

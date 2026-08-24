@@ -15,7 +15,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/feat
   const admin = userOrRes;
 
   const { key } = await ctx.params;
-  const flag = getFeatureFlag(key);
+  const flag = await getFeatureFlag(key);
   if (!flag) return NextResponse.json({ error: "Unknown feature flag." }, { status: 404 });
 
   let body: unknown;
@@ -29,8 +29,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/feat
     return NextResponse.json({ error: "Invalid feature flag state." }, { status: 400 });
   }
 
-  setFeatureFlagState(key, state as FeatureFlagState, admin.id);
-  recordAuditLog({
+  await setFeatureFlagState(key, state as FeatureFlagState, admin.id);
+  await recordAuditLog({
     actorUserId: admin.id,
     actorLabel: admin.email,
     action: "feature_flag_changed",
@@ -38,5 +38,5 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/feat
     targetId: key,
     metadata: { fromState: flag.state, toState: state },
   });
-  return NextResponse.json({ ok: true, flag: getFeatureFlag(key) });
+  return NextResponse.json({ ok: true, flag: await getFeatureFlag(key) });
 }

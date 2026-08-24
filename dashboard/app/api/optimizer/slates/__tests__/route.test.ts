@@ -24,6 +24,7 @@ vi.mock("@/lib/memberSlateVisibility", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getTodayChicagoDate } = await import("@/lib/currentDate");
@@ -34,12 +35,13 @@ function req(query = "") {
 }
 
 async function loginAsMember() {
-  const user = createUser({ email: "member@example.com", passwordHash: "h" });
+  const user = await createUser({ email: "member@example.com", passwordHash: "h" });
   await establishSession(user.id, null);
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockListSlates.mockReset();
   mockFilterSlates.mockReset();

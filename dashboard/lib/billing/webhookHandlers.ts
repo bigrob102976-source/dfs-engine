@@ -25,12 +25,12 @@ function stripeCustomerId(customer: Stripe.Subscription["customer"] | Stripe.Che
   return typeof customer === "string" ? customer : customer.id;
 }
 
-function resolveUserId(subscription: Stripe.Subscription): string | null {
+async function resolveUserId(subscription: Stripe.Subscription): Promise<string | null> {
   const metaUserId = subscription.metadata?.bigmoney_user_id;
   if (metaUserId) return metaUserId;
   const customerId = stripeCustomerId(subscription.customer);
   if (!customerId) return null;
-  return findUserByStripeCustomerId(customerId)?.id ?? null;
+  return (await findUserByStripeCustomerId(customerId))?.id ?? null;
 }
 
 /** Primary source: the plan id set as Checkout Session metadata when we
@@ -70,8 +70,8 @@ function resolvePlanId(subscription: Stripe.Subscription): string | null {
  * is a valid chronological comparison) -- a delayed/retried older event
  * arriving after a newer one was already applied is a documented no-op,
  * not an error. */
-export function applyStripeSubscription(subscription: Stripe.Subscription, eventCreatedIso: string): HandlerResult {
-  const userId = resolveUserId(subscription);
+export async function applyStripeSubscription(subscription: Stripe.Subscription, eventCreatedIso: string): Promise<HandlerResult> {
+  const userId = await resolveUserId(subscription);
   if (!userId) return { ok: false, reason: "unknown_user" };
 
   const planId = resolvePlanId(subscription);
@@ -85,13 +85,13 @@ export function applyStripeSubscription(subscription: Stripe.Subscription, event
   const canceledAt = unixToIso(subscription.canceled_at);
   const providerPriceId = item?.price?.id ?? null;
 
-  const existing = findSubscriptionByProviderSubscriptionId(subscription.id);
+  const existing = await findSubscriptionByProviderSubscriptionId(subscription.id);
 
   if (existing) {
     if (existing.last_stripe_event_at && eventCreatedIso < existing.last_stripe_event_at) {
       return { ok: true, reason: "stale_event_skipped" };
     }
-    updateSubscriptionStatus(existing.id, status, {
+    await updateSubscriptionStatus(existing.id, status, {
       current_period_start: currentPeriodStart,
       current_period_end: currentPeriodEnd,
       cancel_at_period_end: subscription.cancel_at_period_end ? 1 : 0,
@@ -100,7 +100,7 @@ export function applyStripeSubscription(subscription: Stripe.Subscription, event
       last_stripe_event_at: eventCreatedIso,
     });
   } else {
-    insertSubscription({
+    await insertSubscription({
       userId,
       planId,
       status,
@@ -118,9 +118,9 @@ export function applyStripeSubscription(subscription: Stripe.Subscription, event
   // One-trial policy: consumption is confirmed by Stripe actually
   // granting a trial (trial_end present), never by mere checkout-session
   // creation -- idempotent, safe to call on every sync.
-  if (trialEndsAt) markTrialConsumed(userId);
+  if (trialEndsAt) await markTrialConsumed(userId);
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: null,
     actorLabel: "stripe_webhook",
     action: "subscription_synchronized",
@@ -137,18 +137,18 @@ export function applyStripeSubscription(subscription: Stripe.Subscription, event
  * Stripe does not guarantee this event arrives before
  * customer.subscription.created (see applyStripeSubscription's doc
  * comment for the canonical writer). */
-export function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session): HandlerResult {
+export async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session): Promise<HandlerResult> {
   const userId = session.client_reference_id ?? session.metadata?.bigmoney_user_id ?? null;
   const customerId = stripeCustomerId(session.customer);
 
   if (userId && customerId) {
-    const user = findUserById(userId);
+    const user = await findUserById(userId);
     if (user && !user.stripe_customer_id) {
-      setStripeCustomerId(userId, customerId);
+      await setStripeCustomerId(userId, customerId);
     }
   }
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: userId,
     actorLabel: userId ? "member" : "stripe_webhook",
     action: "checkout_completed",

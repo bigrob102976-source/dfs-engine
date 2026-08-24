@@ -13,9 +13,9 @@ export async function GET() {
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 
-  const subscription = getCurrentSubscriptionForUser(user.id);
-  const plan = subscription ? getPlan(subscription.plan_id) : null;
-  const access = computeUserAccess(user);
+  const subscription = await getCurrentSubscriptionForUser(user.id);
+  const plan = subscription ? await getPlan(subscription.plan_id) : null;
+  const access = await computeUserAccess(user);
 
   return NextResponse.json({
     email: user.email,
@@ -30,6 +30,6 @@ export async function GET() {
         }
       : null,
     entitlementCount: access.entitlementKeys.size,
-    sports: listSports(),
+    sports: await listSports(),
   });
 }

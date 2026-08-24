@@ -15,7 +15,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/spor
   const admin = userOrRes;
 
   const { code } = await ctx.params;
-  const sport = getSport(code);
+  const sport = await getSport(code);
   if (!sport) return NextResponse.json({ error: "Unknown sport." }, { status: 404 });
 
   let body: unknown;
@@ -29,8 +29,8 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/spor
     return NextResponse.json({ error: "status must be LIVE or COMING_SOON." }, { status: 400 });
   }
 
-  setSportStatus(code, status as SportStatus);
-  recordAuditLog({
+  await setSportStatus(code, status as SportStatus);
+  await recordAuditLog({
     actorUserId: admin.id,
     actorLabel: admin.email,
     action: "sport_status_changed",
@@ -38,5 +38,5 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/spor
     targetId: code,
     metadata: { fromStatus: sport.status, toStatus: status },
   });
-  return NextResponse.json({ ok: true, sport: getSport(code) });
+  return NextResponse.json({ ok: true, sport: await getSport(code) });
 }

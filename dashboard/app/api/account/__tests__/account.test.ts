@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getCurrentSubscriptionForUser, insertSubscription } = await import("@/lib/db/subscriptions");
@@ -22,6 +23,7 @@ const { POST: cancel } = await import("../billing/cancel/route");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -32,7 +34,7 @@ describe("GET /api/account", () => {
   });
 
   it("returns profile + null subscription + sports for a logged-in user with no subscription", async () => {
-    const user = createUser({ email: "acct@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "acct@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const res = await getAccount();
     expect(res.status).toBe(200);
@@ -51,18 +53,18 @@ describe("POST /api/account/billing/cancel", () => {
   });
 
   it("400s when there is no subscription to cancel", async () => {
-    const user = createUser({ email: "nosub@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "nosub@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const res = await cancel();
     expect(res.status).toBe(400);
   });
 
   it("cancels an active subscription", async () => {
-    const user = createUser({ email: "cancelme@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "cancelme@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
     const res = await cancel();
     expect(res.status).toBe(200);
-    expect(getCurrentSubscriptionForUser(user.id)?.status).toBe("canceled");
+    expect((await getCurrentSubscriptionForUser(user.id))?.status).toBe("canceled");
   });
 });

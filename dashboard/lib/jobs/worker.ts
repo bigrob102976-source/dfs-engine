@@ -50,14 +50,14 @@ export interface RunJobResult {
  * decide whether that's a poll-loop's cue to wait, or (the inline path)
  * simply nothing left to do. */
 export async function runOneQueuedJob(workerId: string): Promise<RunJobResult> {
-  const job = claimNextQueuedJob(workerId);
+  const job = await claimNextQueuedJob(workerId);
   if (!job) return { ran: false, job: null, status: "NO_JOB" };
 
-  recordHeartbeat(workerId, { currentJobId: job.id, jobType: job.job_type });
+  await recordHeartbeat(workerId, { currentJobId: job.id, jobType: job.job_type });
 
   const handler = HANDLERS[job.job_type];
   if (!handler) {
-    failJob(job.id, {
+    await failJob(job.id, {
       errorCode: "NO_HANDLER",
       safeErrorMessage: `No handler is registered for job type "${job.job_type}" yet -- architecture-ready, not yet implemented.`,
       retryable: false,
@@ -69,9 +69,9 @@ export async function runOneQueuedJob(workerId: string): Promise<RunJobResult> {
   const logFields = { jobId: job.id, slateId: job.slate_id ?? undefined, slateDate: job.slate_date ?? undefined, operation: job.job_type };
 
   try {
-    await handler(job, (progress, step) => updateJobProgress(job.id, progress, step));
-    completeJob(job.id);
-    recordHeartbeat(workerId, { currentJobId: null });
+    await handler(job, (progress, step) => void updateJobProgress(job.id, progress, step));
+    await completeJob(job.id);
+    await recordHeartbeat(workerId, { currentJobId: null });
     logger.info("job succeeded", { ...logFields, durationMs: Date.now() - startedAt, status: "SUCCEEDED" });
     return { ran: true, job, status: "SUCCEEDED" };
   } catch (err) {
@@ -79,8 +79,8 @@ export async function runOneQueuedJob(workerId: string): Promise<RunJobResult> {
     const retryable = err instanceof TransientJobError;
     const errorCode = retryable ? "WORKER_TRANSIENT_ERROR" : "WORKER_UNEXPECTED_ERROR";
     const failOptions: FailJobOptions = { errorCode, safeErrorMessage: message, retryable };
-    const finalStatus = failJob(job.id, failOptions);
-    recordHeartbeat(workerId, { currentJobId: null });
+    const finalStatus = await failJob(job.id, failOptions);
+    await recordHeartbeat(workerId, { currentJobId: null });
     captureError(err, { ...logFields, durationMs: Date.now() - startedAt, status: finalStatus });
     return { ran: true, job, status: finalStatus === "QUEUED" ? "QUEUED" : "FAILED" };
   }

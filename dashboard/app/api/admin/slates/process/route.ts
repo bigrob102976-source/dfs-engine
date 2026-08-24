@@ -42,33 +42,33 @@ export async function POST(request: Request) {
   }
   const label = typeof slateLabel === "string" ? slateLabel : null;
 
-  const existing = getSlateStatus(date, slateId);
+  const existing = await getSlateStatus(date, slateId);
   if (existing?.status === "PROCESSING") {
     return NextResponse.json({ error: "This slate is already processing." }, { status: 409 });
   }
 
   ensureSlateJobHandlersRegistered();
-  const { job } = enqueueJob({ jobType: "PROCESS_SLATE", slateDate: date, slateId, createdBy: admin.id, payload: { slateLabel: label } });
+  const { job } = await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: date, slateId, createdBy: admin.id, payload: { slateLabel: label } });
 
   // The job's own handler (lib/slatePipeline.ts::runSlatePipeline) flips
   // slate_status to PROCESSING as the very first (synchronous) thing it
   // does, before this handler even returns -- see that function's
   // docstring and lib/jobs/worker.ts's claim-then-run-synchronously-up-
   // to-its-first-real-await behavior.
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_process_started",
     targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId, slateLabel: label, jobId: job.id },
   });
 
-  runOneQueuedJob(`inline-${job.id}`).then((result) => {
+  runOneQueuedJob(`inline-${job.id}`).then(async (result) => {
     const failed = result.status === "FAILED" || result.status === "NO_HANDLER";
-    recordAuditLog({
+    await recordAuditLog({
       actorUserId: admin.id, actorLabel: admin.email,
       action: failed ? "slate_process_failed" : "slate_process_completed",
       targetType: "slate", targetId: `${date}:${slateId}`,
       metadata: failed
         ? { date, slateId, jobId: job.id, error: result.job?.safe_error_message ?? null }
-        : { date, slateId, jobId: job.id, status: getSlateStatus(date, slateId)?.status ?? null },
+        : { date, slateId, jobId: job.id, status: (await getSlateStatus(date, slateId))?.status ?? null },
     });
   });
 

@@ -7,10 +7,12 @@ vi.mock("next/navigation", () => ({
 
 const { __resetDbForTests } = await import("@/lib/db/client");
 
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const AdminFeaturesPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("AdminFeaturesPage", () => {

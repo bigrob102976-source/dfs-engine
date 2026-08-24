@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: INVALID_CREDENTIALS_MESSAGE }, { status: 401 });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   if (!user || user.disabled_at || !verifyPassword(password, user.password_hash)) {
     return NextResponse.json({ error: INVALID_CREDENTIALS_MESSAGE }, { status: 401 });
   }
@@ -35,8 +35,8 @@ export async function POST(request: Request) {
   // login is the proof of account control this milestone requires
   // before ever promoting a role. Server-side only; the client never
   // supplies or influences this decision.
-  const bootstrapped = maybeBootstrapAdmin(user);
-  recordUsageEvent({ userId: user.id, eventType: "login" });
+  const bootstrapped = await maybeBootstrapAdmin(user);
+  await recordUsageEvent({ userId: user.id, eventType: "login" });
 
   return NextResponse.json({ ok: true, role: bootstrapped ? "ADMIN" : user.role });
 }

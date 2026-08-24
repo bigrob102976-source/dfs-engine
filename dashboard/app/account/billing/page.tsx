@@ -28,8 +28,8 @@ function billingModeLabel(mode: BillingMode): string {
 
 export default async function BillingPage() {
   const user = await requireAuth();
-  const subscription = getCurrentSubscriptionForUser(user.id);
-  const plan = subscription ? getPlan(subscription.plan_id) : null;
+  const subscription = await getCurrentSubscriptionForUser(user.id);
+  const plan = subscription ? await getPlan(subscription.plan_id) : null;
   const billingMode = getBillingMode();
   const hasAccess = subscription !== null && ACCESS_GRANTING_STATUSES.has(subscription.status);
   const accessThrough = subscription ? (subscription.status === "trialing" ? subscription.trial_ends_at : subscription.current_period_end) : null;

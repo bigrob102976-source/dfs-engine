@@ -20,12 +20,14 @@ vi.mock("@/lib/mockMode", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 
 const AdminSystemPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   mockExternalStatus.mockResolvedValue({ error: "no python configured in test env" });
   mockFantasyProsStatus.mockResolvedValue({
     slate_date: "2026-08-19",

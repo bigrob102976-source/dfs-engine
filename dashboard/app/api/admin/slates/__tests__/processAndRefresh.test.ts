@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getSlateStatus } = await import("@/lib/db/slateStatus");
@@ -39,14 +40,14 @@ function req(body: unknown) {
 }
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 async function loginAsMember() {
-  const member = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const member = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(member.id, null);
   return member;
 }
@@ -59,6 +60,7 @@ function nextTs(): string {
 
 beforeEach(async () => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   tsCounter = 0;
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-process-api-"));
@@ -142,14 +144,24 @@ describe("POST /api/admin/slates/process", () => {
     const res = await processSlate(req({ date: DATE, slateId: SLATE_ID, slateLabel: "Main" }));
     expect(res.status).toBe(202);
 
-    expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("PROCESSING");
-    expect(listAuditLog({ action: "slate_process_started" })).toHaveLength(1);
-    expect(listAuditLog({ action: "slate_process_started" })[0].actor_user_id).toBe(admin.id);
+    // Milestone 33.1: the fire-and-forget pipeline's first write
+    // (slate_status -> PROCESSING) is no longer guaranteed to have
+    // landed in the same synchronous tick the 202 response returns in
+    // -- the DB layer is now genuinely async (claimNextQueuedJob's own
+    // `await db.get(...)` yields at least one microtask before the
+    // handler even starts), which is the whole point of this
+    // milestone. A short grace period (well under the mocked
+    // pipeline's own ~15ms-per-script delay before any real work
+    // happens) replaces the old same-tick assumption.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await getSlateStatus(DATE, SLATE_ID))?.status).toBe("PROCESSING");
+    expect(await listAuditLog({ action: "slate_process_started" })).toHaveLength(1);
+    expect((await listAuditLog({ action: "slate_process_started" }))[0].actor_user_id).toBe(admin.id);
 
     // Let the fire-and-forget pipeline promise settle.
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("READY");
-    expect(listAuditLog({ action: "slate_process_completed" })).toHaveLength(1);
+    expect((await getSlateStatus(DATE, SLATE_ID))?.status).toBe("READY");
+    expect(await listAuditLog({ action: "slate_process_completed" })).toHaveLength(1);
   });
 
   it("409s when the slate is already processing", async () => {
@@ -176,7 +188,7 @@ describe("POST /api/admin/slates/refresh", () => {
     const res = await refreshSlate(req({ date: DATE, slateId: SLATE_ID, slateLabel: "Main" }));
     expect(res.status).toBe(202);
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("READY");
-    expect(listAuditLog({ action: "slate_refresh_started" })).toHaveLength(1);
+    expect((await getSlateStatus(DATE, SLATE_ID))?.status).toBe("READY");
+    expect(await listAuditLog({ action: "slate_refresh_started" })).toHaveLength(1);
   });
 });

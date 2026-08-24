@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   if (userOrRes instanceof NextResponse) return userOrRes;
 
   const url = new URL(request.url);
-  const entries = listAuditLog({
+  const entries = await listAuditLog({
     action: url.searchParams.get("action"),
     search: url.searchParams.get("search"),
   });

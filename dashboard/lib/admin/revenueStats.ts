@@ -42,17 +42,19 @@ function startOfCurrentMonthIso(): string {
  * fabricated. Revenue-shaped concepts this system cannot rigorously
  * compute yet (refunds, true churn) are surfaced as null/`--`, not
  * guessed at. */
-export function computeAdminRevenueStats(): AdminRevenueStats {
-  const plans = listActivePlans();
+export async function computeAdminRevenueStats(): Promise<AdminRevenueStats> {
+  const plans = await listActivePlans();
   const weeklyPlan = plans.find((p) => p.billing_interval === "WEEKLY") ?? null;
   const monthlyPlan = plans.find((p) => p.billing_interval === "MONTHLY") ?? null;
 
-  const weeklyRevenueCents = weeklyPlan ? Math.round(countActiveSubscribersByPlan(weeklyPlan.id) * weeklyPlan.price_cents * (52 / 12)) : 0;
-  const monthlyRevenueCents = monthlyPlan ? countActiveSubscribersByPlan(monthlyPlan.id) * monthlyPlan.price_cents : 0;
+  const weeklyRevenueCents = weeklyPlan
+    ? Math.round((await countActiveSubscribersByPlan(weeklyPlan.id)) * weeklyPlan.price_cents * (52 / 12))
+    : 0;
+  const monthlyRevenueCents = monthlyPlan ? (await countActiveSubscribersByPlan(monthlyPlan.id)) * monthlyPlan.price_cents : 0;
   const mrrCents = weeklyRevenueCents + monthlyRevenueCents;
 
-  const statusCounts = countSubscriptionsByStatus();
-  const conversion = getTrialConversionStats();
+  const statusCounts = await countSubscriptionsByStatus();
+  const conversion = await getTrialConversionStats();
   const since = startOfCurrentMonthIso();
 
   return {
@@ -61,14 +63,14 @@ export function computeAdminRevenueStats(): AdminRevenueStats {
     weeklyRevenueCents,
     monthlyRevenueCents,
     activeSubscribers: statusCounts.active,
-    weeklySubscribers: weeklyPlan ? countCurrentSubscribersByPlan(weeklyPlan.id) : 0,
-    monthlySubscribers: monthlyPlan ? countCurrentSubscribersByPlan(monthlyPlan.id) : 0,
+    weeklySubscribers: weeklyPlan ? await countCurrentSubscribersByPlan(weeklyPlan.id) : 0,
+    monthlySubscribers: monthlyPlan ? await countCurrentSubscribersByPlan(monthlyPlan.id) : 0,
     pastDueSubscribers: statusCounts.past_due,
     canceledSubscribers: statusCounts.canceled,
-    newSubscribersThisMonth: countSubscriptionsCreatedSince(since),
+    newSubscribersThisMonth: await countSubscriptionsCreatedSince(since),
     activeTrials: statusCounts.trialing,
     trialConversionRatePct: conversion.trialUsersEver > 0 ? (conversion.converted / conversion.trialUsersEver) * 100 : null,
-    cancellationsThisMonth: countCancellationsSince(since),
+    cancellationsThisMonth: await countCancellationsSince(since),
     churnRatePct: null,
   };
 }

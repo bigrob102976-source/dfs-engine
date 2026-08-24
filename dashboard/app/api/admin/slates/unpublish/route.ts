@@ -31,12 +31,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "`slateId` is required." }, { status: 400 });
   }
 
-  const ok = unpublishSlate(date, slateId, admin.id);
+  const ok = await unpublishSlate(date, slateId, admin.id);
   if (!ok) {
     return NextResponse.json({ error: "This slate is not currently published." }, { status: 409 });
   }
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_unpublished",
     targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId },
   });

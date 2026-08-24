@@ -19,6 +19,7 @@ vi.mock("@/lib/optimizerWorkspace/poolCache", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getTodayChicagoDate } = await import("@/lib/currentDate");
@@ -33,12 +34,13 @@ function req(body: unknown) {
 }
 
 async function loginAsMember() {
-  const user = createUser({ email: "member@example.com", passwordHash: "h" });
+  const user = await createUser({ email: "member@example.com", passwordHash: "h" });
   await establishSession(user.id, null);
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockLoadPool.mockReset();
   mockLoadPool.mockResolvedValue({ date: "irrelevant", slateId: "s1", players: [] });

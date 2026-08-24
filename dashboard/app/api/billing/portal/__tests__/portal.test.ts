@@ -19,6 +19,7 @@ vi.mock("@/lib/billing", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { POST: portal } = await import("../route");
@@ -29,6 +30,7 @@ function postRequest(url: string) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockCreateCustomerPortalSession.mockReset();
 });
@@ -41,7 +43,7 @@ describe("POST /api/billing/portal", () => {
 
   it("returns a portal URL for a subscribed user, using the session user's id and request origin", async () => {
     mockCreateCustomerPortalSession.mockResolvedValue({ url: "https://billing.stripe.com/session/portal1" });
-    const user = createUser({ email: "portaluser@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "portaluser@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const res = await portal(postRequest("http://localhost/api/billing/portal"));
@@ -52,7 +54,7 @@ describe("POST /api/billing/portal", () => {
 
   it("501s when the provider has no hosted portal (dev mode)", async () => {
     mockCreateCustomerPortalSession.mockResolvedValue(null);
-    const user = createUser({ email: "devmodeportal@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "devmodeportal@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const res = await portal(postRequest("http://localhost/api/billing/portal"));
@@ -61,7 +63,7 @@ describe("POST /api/billing/portal", () => {
 
   it("502s when the provider returns an error", async () => {
     mockCreateCustomerPortalSession.mockResolvedValue({ error: "No billing account on file yet." });
-    const user = createUser({ email: "noaccount@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "noaccount@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const res = await portal(postRequest("http://localhost/api/billing/portal"));

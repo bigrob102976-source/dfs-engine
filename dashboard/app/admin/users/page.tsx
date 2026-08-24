@@ -36,8 +36,7 @@ export default async function AdminUsersPage(props: PageProps<"/admin/users">) {
     limit: 50,
   };
 
-  const users = listAdminUsers(filter);
-  const total = countAdminUsers(filter);
+  const [users, total] = await Promise.all([listAdminUsers(filter), countAdminUsers(filter)]);
 
   return (
     <div>

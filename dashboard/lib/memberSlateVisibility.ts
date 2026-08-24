@@ -16,6 +16,6 @@ import type { SlateOption } from "./orchestrator/types";
 export async function filterSlatesForCurrentViewer(slates: SlateOption[], date: string): Promise<SlateOption[]> {
   const user = await getCurrentUser();
   if (user && isAdminRole(user.role)) return slates;
-  const publishedIds = new Set(listPublishedSlateIds(date));
+  const publishedIds = new Set(await listPublishedSlateIds(date));
   return slates.filter((s) => publishedIds.has(s.slateId));
 }

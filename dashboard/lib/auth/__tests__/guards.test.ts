@@ -25,6 +25,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("../session");
 const { requireAuth, requireAdmin, requireAuthApi, requireAdminApi } = await import("../guards");
@@ -32,6 +33,7 @@ const { NextResponse } = await import("next/server");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -47,7 +49,7 @@ describe("requireAuth (Server Component / layout guard)", () => {
   });
 
   it("returns the current user when logged in", async () => {
-    const user = createUser({ email: "member@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const result = await requireAuth();
     expect(result.id).toBe(user.id);
@@ -60,25 +62,25 @@ describe("requireAdmin (Server Component / layout guard)", () => {
   });
 
   it("redirects a logged-in MEMBER to /dashboard (privilege escalation via direct nav is blocked)", async () => {
-    const user = createUser({ email: "member2@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "member2@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     await expect(requireAdmin()).rejects.toThrow("NEXT_REDIRECT:/dashboard");
   });
 
   it("allows a real ADMIN through", async () => {
-    const user = createUser({ email: "admin@example.com", passwordHash: "h" });
-    updateUserRole(user.id, "ADMIN");
+    const user = await createUser({ email: "admin@example.com", passwordHash: "h" });
+    await updateUserRole(user.id, "ADMIN");
     await establishSession(user.id, null);
     const result = await requireAdmin();
     expect(result.role).toBe("ADMIN");
   });
 
   it("re-checks role fresh from the DB even if it changed after the session was established", async () => {
-    const user = createUser({ email: "promoted@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "promoted@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     await expect(requireAdmin()).rejects.toThrow("NEXT_REDIRECT:/dashboard");
 
-    updateUserRole(user.id, "ADMIN");
+    await updateUserRole(user.id, "ADMIN");
     const result = await requireAdmin();
     expect(result.role).toBe("ADMIN");
   });
@@ -92,7 +94,7 @@ describe("requireAuthApi (API route guard)", () => {
   });
 
   it("returns the current user when logged in", async () => {
-    const user = createUser({ email: "apiuser@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "apiuser@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const result = await requireAuthApi();
     expect(result).not.toBeInstanceOf(NextResponse);
@@ -107,7 +109,7 @@ describe("requireAdminApi (API route guard)", () => {
   });
 
   it("returns a 403 NextResponse for a logged-in MEMBER (no client-side role can bypass this)", async () => {
-    const user = createUser({ email: "apimember@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "apimember@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     const result = await requireAdminApi();
     expect(result).toBeInstanceOf(NextResponse);
@@ -115,8 +117,8 @@ describe("requireAdminApi (API route guard)", () => {
   });
 
   it("returns the current user for a real ADMIN", async () => {
-    const user = createUser({ email: "apiadmin@example.com", passwordHash: "h" });
-    updateUserRole(user.id, "ADMIN");
+    const user = await createUser({ email: "apiadmin@example.com", passwordHash: "h" });
+    await updateUserRole(user.id, "ADMIN");
     await establishSession(user.id, null);
     const result = await requireAdminApi();
     expect(result).not.toBeInstanceOf(NextResponse);

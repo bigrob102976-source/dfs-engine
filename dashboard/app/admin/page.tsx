@@ -13,7 +13,7 @@ function fmtPct(value: number | null): string {
 }
 
 export default async function AdminOverviewPage() {
-  const stats = computeAdminOverviewStats();
+  const stats = await computeAdminOverviewStats();
 
   return (
     <div>

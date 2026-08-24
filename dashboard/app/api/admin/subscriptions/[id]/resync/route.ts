@@ -20,7 +20,7 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/admin/subs
   const admin = userOrRes;
 
   const { id } = await ctx.params;
-  const subscription = getSubscriptionById(id);
+  const subscription = await getSubscriptionById(id);
   if (!subscription) {
     return NextResponse.json({ error: "Subscription not found." }, { status: 404 });
   }
@@ -33,7 +33,7 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/admin/subs
     return NextResponse.json({ error: "Failed to resync from Stripe." }, { status: 502 });
   }
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id,
     actorLabel: admin.email,
     action: "admin_subscription_resync",

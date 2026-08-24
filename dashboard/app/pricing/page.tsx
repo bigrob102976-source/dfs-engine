@@ -40,8 +40,8 @@ function PlanCard({ plan, bestValue }: { plan: Plan; bestValue: boolean }) {
   );
 }
 
-export default function PricingPage() {
-  const plans = listActivePlans();
+export default async function PricingPage() {
+  const plans = await listActivePlans();
 
   return (
     <div className="min-h-screen bg-bg">

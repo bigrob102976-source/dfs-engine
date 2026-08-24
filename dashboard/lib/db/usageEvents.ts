@@ -1,20 +1,20 @@
 import crypto from "node:crypto";
 
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 
-export function recordUsageEvent(args: { userId: string | null; eventType: string; metadata?: Record<string, unknown> | null }): void {
-  const db = getDb();
-  db.prepare("INSERT INTO usage_events (id, user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)").run(
+export async function recordUsageEvent(args: { userId: string | null; eventType: string; metadata?: Record<string, unknown> | null }): Promise<void> {
+  const db = getExecutor();
+  await db.run("INSERT INTO usage_events (id, user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)", [
     crypto.randomUUID(),
     args.userId,
     args.eventType,
     args.metadata ? JSON.stringify(args.metadata) : null,
     new Date().toISOString(),
-  );
+  ]);
 }
 
-export function countUsageEvents(filter: { eventType?: string; since?: string } = {}): number {
-  const db = getDb();
+export async function countUsageEvents(filter: { eventType?: string; since?: string } = {}): Promise<number> {
+  const db = getExecutor();
   const clauses: string[] = [];
   const params: (string | number | null)[] = [];
   if (filter.eventType) {
@@ -26,6 +26,6 @@ export function countUsageEvents(filter: { eventType?: string; since?: string } 
     params.push(filter.since);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const row = db.prepare(`SELECT COUNT(*) as c FROM usage_events ${where}`).get(...params) as { c: number };
-  return row.c;
+  const row = await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM usage_events ${where}`, params);
+  return Number(row!.c);
 }

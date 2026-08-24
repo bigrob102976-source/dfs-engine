@@ -5,10 +5,16 @@
 // SportsGameOdds and Stripe status are already covered by
 // lib/gameEnvironmentStatus.ts and lib/billing/stripeConfig.ts
 // respectively -- not duplicated here.
+//
+// Milestone 33.1: getDatabaseReadiness() now also reports SCHEMA
+// readiness (not just connectivity) -- a fresh Postgres database
+// connects fine but has zero tables until migrations are explicitly
+// applied (see lib/db/postgresClient.ts::checkPostgresSchemaReadiness's
+// own docstring for why this is never done implicitly here).
 
 import { ProductionDatabaseNotConfiguredError, resolveDbBackend } from "./db/backend";
 import { getDb } from "./db/client";
-import { checkPostgresConnection } from "./db/postgresClient";
+import { checkPostgresConnection, checkPostgresSchemaReadiness } from "./db/postgresClient";
 import { listRecentJobs } from "./jobs/queue";
 import { isAnyWorkerOnline, listWorkerHealth, type WorkerHealth } from "./jobs/heartbeat";
 import { checkObjectStorageConnection, getObjectStorageConfigStatus, resolveObjectStorageConfigFromEnv } from "./storage/StorageBackend";
@@ -16,6 +22,12 @@ import { checkObjectStorageConnection, getObjectStorageConfigStatus, resolveObje
 export interface DatabaseReadiness {
   kind: "sqlite" | "postgres";
   status: "CONNECTED" | "ERROR";
+  /** Postgres: whether every migration file on disk has actually been
+   * applied to this database. SQLite: always true once `status` is
+   * CONNECTED -- lib/db/client.ts::getDb() applies pending migrations
+   * synchronously on open, so an open SQLite connection is by
+   * construction fully migrated. */
+  schemaReady: boolean;
   detail: string;
 }
 
@@ -26,19 +38,35 @@ export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
   } catch (err) {
     // Production, fail-closed, no DATABASE_URL configured -- a real,
     // expected state to SHOW on this page, not crash it.
-    return { kind: "postgres", status: "ERROR", detail: err instanceof ProductionDatabaseNotConfiguredError ? err.message : String(err) };
+    return {
+      kind: "postgres",
+      status: "ERROR",
+      schemaReady: false,
+      detail: err instanceof ProductionDatabaseNotConfiguredError ? err.message : String(err),
+    };
   }
 
   if (decision.kind === "postgres") {
     const result = await checkPostgresConnection();
-    return { kind: "postgres", status: result.connected ? "CONNECTED" : "ERROR", detail: result.error ?? "Connected." };
+    if (!result.connected) {
+      return { kind: "postgres", status: "ERROR", schemaReady: false, detail: result.error ?? "Connection failed." };
+    }
+    const schema = await checkPostgresSchemaReadiness();
+    return {
+      kind: "postgres",
+      status: "CONNECTED",
+      schemaReady: schema.ready,
+      detail: schema.ready
+        ? `Connected. Schema ready (${schema.appliedCount}/${schema.expectedCount} migrations applied).`
+        : `Connected, but schema is NOT ready: ${schema.pending.length} migration(s) pending (${schema.appliedCount}/${schema.expectedCount} applied). Run the production migration command before serving traffic.`,
+    };
   }
 
   try {
     getDb();
-    return { kind: "sqlite", status: "CONNECTED", detail: "Local SQLite database." };
+    return { kind: "sqlite", status: "CONNECTED", schemaReady: true, detail: "Local SQLite database." };
   } catch (err) {
-    return { kind: "sqlite", status: "ERROR", detail: err instanceof Error ? err.message : String(err) };
+    return { kind: "sqlite", status: "ERROR", schemaReady: false, detail: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -66,12 +94,11 @@ export interface JobQueueReadiness {
 
 /** The `jobs` table lives in the same database as everything else, so
  * this necessarily reports the same ERROR the Database card does when
- * Postgres is configured but the query layer hasn't been ported yet
- * (lib/db/client.ts::getDb() throws) -- an honest reflection of the same
- * real gap, not a separate bug. */
-export function getJobQueueReadiness(): JobQueueReadiness {
+ * the underlying connection/schema isn't ready -- an honest reflection
+ * of the same real gap, not a separate bug. */
+export async function getJobQueueReadiness(): Promise<JobQueueReadiness> {
   try {
-    const recent = listRecentJobs(200);
+    const recent = await listRecentJobs(200);
     return {
       status: "CONNECTED",
       detail: `${recent.length} job(s) in recent history.`,
@@ -88,7 +115,7 @@ export interface WorkerReadiness {
   workers: WorkerHealth[];
 }
 
-export function getWorkerReadiness(): WorkerReadiness {
-  const workers = listWorkerHealth();
-  return { status: isAnyWorkerOnline() ? "ONLINE" : "OFFLINE", workers };
+export async function getWorkerReadiness(): Promise<WorkerReadiness> {
+  const workers = await listWorkerHealth();
+  return { status: (await isAnyWorkerOnline()) ? "ONLINE" : "OFFLINE", workers };
 }

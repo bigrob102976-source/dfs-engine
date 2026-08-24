@@ -28,12 +28,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }
 
-  const user = findUserByEmail(normalizeEmail(email));
+  const user = await findUserByEmail(normalizeEmail(email));
   if (!user) {
     return NextResponse.json({ ok: true, message: "If an account exists for that email, a reset link has been sent." });
   }
 
-  const { rawToken } = createPasswordResetToken(user.id);
+  const { rawToken } = await createPasswordResetToken(user.id);
   const origin = new URL(request.url).origin;
   const resetLink = `${origin}/reset-password?token=${rawToken}`;
   const { devLink } = await getEmailAdapter().sendPasswordResetEmail({ to: user.email, link: resetLink });

@@ -36,7 +36,7 @@ function toCurrentUser(user: User): CurrentUser {
 /** Server Action / Route Handler only (mutates cookies). Creates a new
  * DB session row and sets the cookie. */
 export async function establishSession(userId: string, userAgent: string | null): Promise<void> {
-  const { rawToken } = createSession(userId, userAgent);
+  const { rawToken } = await createSession(userId, userAgent);
   const store = await cookies();
   store.set(SESSION_COOKIE, rawToken, {
     httpOnly: true,
@@ -58,7 +58,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const store = await cookies();
   const rawToken = store.get(SESSION_COOKIE)?.value;
   if (!rawToken) return null;
-  const result = findSessionByRawToken(rawToken);
+  const result = await findSessionByRawToken(rawToken);
   if (!result) return null;
   return toCurrentUser(result.user);
 }
@@ -68,6 +68,6 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 export async function destroySession(): Promise<void> {
   const store = await cookies();
   const rawToken = store.get(SESSION_COOKIE)?.value;
-  if (rawToken) deleteSessionByRawToken(rawToken);
+  if (rawToken) await deleteSessionByRawToken(rawToken);
   store.delete(SESSION_COOKIE);
 }

@@ -1,6 +1,6 @@
 import { computeUserAccess } from "./computeAccess";
 
-export function userHasEntitlement(user: { id: string; role: string }, key: string): boolean {
-  const access = computeUserAccess(user);
+export async function userHasEntitlement(user: { id: string; role: string }, key: string): Promise<boolean> {
+  const access = await computeUserAccess(user);
   return access.isAdmin || access.entitlementKeys.has(key);
 }

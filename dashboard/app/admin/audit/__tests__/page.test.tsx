@@ -7,6 +7,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { recordAuditLog } = await import("@/lib/db/auditLog");
 
 const AdminAuditPage = (await import("../page")).default;
@@ -17,6 +18,7 @@ function props(search: Record<string, string> = {}) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("AdminAuditPage", () => {

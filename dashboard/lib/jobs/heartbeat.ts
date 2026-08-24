@@ -1,4 +1,4 @@
-import { getDb } from "../db/client";
+import { getExecutor } from "../db/executor";
 import type { WorkerHealthStatus, WorkerHeartbeatRow } from "../db/types";
 
 // Milestone 30: worker liveness, derived ENTIRELY from a DB timestamp
@@ -13,13 +13,16 @@ import type { WorkerHealthStatus, WorkerHeartbeatRow } from "../db/types";
 const ONLINE_THRESHOLD_MS = 30_000; // heartbeat within the last 30s
 const STALE_THRESHOLD_MS = 120_000; // 30s-2min: worker likely mid-job or briefly hung
 
-export function recordHeartbeat(workerId: string, metadata?: Record<string, unknown>): void {
-  const db = getDb();
+/** `ON CONFLICT ... DO UPDATE SET col = excluded.col` is identical syntax
+ * on SQLite (3.24+) and PostgreSQL -- no backend branch needed here. */
+export async function recordHeartbeat(workerId: string, metadata?: Record<string, unknown>): Promise<void> {
+  const db = getExecutor();
   const now = new Date().toISOString();
-  db.prepare(
+  await db.run(
     `INSERT INTO worker_heartbeats (worker_id, last_seen_at, status, metadata_json) VALUES (?, ?, 'ONLINE', ?)
      ON CONFLICT(worker_id) DO UPDATE SET last_seen_at = excluded.last_seen_at, metadata_json = excluded.metadata_json`,
-  ).run(workerId, now, metadata ? JSON.stringify(metadata) : null);
+    [workerId, now, metadata ? JSON.stringify(metadata) : null],
+  );
 }
 
 export function deriveWorkerHealth(lastSeenAtIso: string, now: Date = new Date()): WorkerHealthStatus {
@@ -35,17 +38,22 @@ export interface WorkerHealth {
   health: WorkerHealthStatus;
 }
 
-export function listWorkerHealth(): WorkerHealth[] {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM worker_heartbeats ORDER BY worker_id").all() as unknown as WorkerHeartbeatRow[];
+export async function listWorkerHealth(): Promise<WorkerHealth[]> {
+  const db = getExecutor();
+  const rows = await db.all<Record<string, unknown>>("SELECT * FROM worker_heartbeats ORDER BY worker_id");
   const now = new Date();
-  return rows.map((row) => ({ workerId: row.worker_id, lastSeenAt: row.last_seen_at, health: deriveWorkerHealth(row.last_seen_at, now) }));
+  return (rows as unknown as WorkerHeartbeatRow[]).map((row) => ({
+    workerId: row.worker_id,
+    lastSeenAt: row.last_seen_at,
+    health: deriveWorkerHealth(row.last_seen_at, now),
+  }));
 }
 
 /** True when at least one worker has reported a heartbeat recently
  * enough to be considered ONLINE -- used by /api/health's admin
  * readiness view and the Admin System page's "Worker: ONLINE/OFFLINE"
  * status card. */
-export function isAnyWorkerOnline(): boolean {
-  return listWorkerHealth().some((w) => w.health === "ONLINE");
+export async function isAnyWorkerOnline(): Promise<boolean> {
+  const workers = await listWorkerHealth();
+  return workers.some((w) => w.health === "ONLINE");
 }

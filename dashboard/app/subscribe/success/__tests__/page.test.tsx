@@ -22,6 +22,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 
@@ -29,6 +30,7 @@ const SubscribeSuccessPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   vi.stubGlobal("fetch", vi.fn());
 });
@@ -39,7 +41,7 @@ describe("SubscribeSuccessPage", () => {
   });
 
   it("shows 'Finalizing Membership...' immediately, then never grants access on its own -- only reflects real polled server state", async () => {
-    const user = createUser({ email: "polling@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "polling@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
@@ -54,7 +56,7 @@ describe("SubscribeSuccessPage", () => {
   });
 
   it("shows 'Membership Active' for an active (non-trial) subscription", async () => {
-    const user = createUser({ email: "activepoll@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "activepoll@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
@@ -67,7 +69,7 @@ describe("SubscribeSuccessPage", () => {
 
   it("shows a graceful 'still finalizing' state (not an error) after the bounded poll window, when the webhook hasn't landed yet", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = createUser({ email: "neverarrives@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "neverarrives@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,

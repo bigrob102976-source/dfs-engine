@@ -27,6 +27,7 @@ vi.mock("@/lib/billing/stripeConfig", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
@@ -39,6 +40,7 @@ function props(search: Record<string, string> = {}) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockRedirect.mockClear();
 });
@@ -51,7 +53,7 @@ describe("SubscribePage", () => {
   });
 
   it("shows both plan picker cards for a logged-in user with no subscription", async () => {
-    const user = createUser({ email: "picker@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "picker@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     render(await SubscribePage(props()));
@@ -61,9 +63,9 @@ describe("SubscribePage", () => {
   });
 
   it("shows an 'already a member' state instead of the plan picker for an active subscriber", async () => {
-    const user = createUser({ email: "already@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "already@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
 
     render(await SubscribePage(props()));
     expect(screen.getByText(/already a member/i)).toBeInTheDocument();
@@ -71,11 +73,11 @@ describe("SubscribePage", () => {
   });
 
   it("still shows the plan picker for a user whose subscription is canceled (no remaining access)", async () => {
-    const user = createUser({ email: "canceled@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "canceled@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    const sub = insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
+    const sub = await insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
     const { cancelSubscription } = await import("@/lib/db/subscriptions");
-    cancelSubscription(sub.id);
+    await cancelSubscription(sub.id);
 
     render(await SubscribePage(props()));
     expect(screen.getByText("Choose Your Plan")).toBeInTheDocument();

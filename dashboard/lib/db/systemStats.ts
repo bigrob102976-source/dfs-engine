@@ -1,4 +1,4 @@
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 
 export interface DbStats {
   totalUsers: number;
@@ -9,14 +9,16 @@ export interface DbStats {
 
 const COUNTABLE_TABLES = ["users", "sessions", "subscriptions", "admin_audit_log"] as const;
 
-/** Real row counts straight from the local SQLite DB -- table names are
- * a fixed internal constant, never user input, so this is not building
- * a query from untrusted data. */
-export function computeDbStats(): DbStats {
-  const db = getDb();
-  const counts = Object.fromEntries(
-    COUNTABLE_TABLES.map((table) => [table, (db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c]),
-  );
+/** Real row counts straight from the configured database -- table names
+ * are a fixed internal constant, never user input, so this is not
+ * building a query from untrusted data. */
+export async function computeDbStats(): Promise<DbStats> {
+  const db = getExecutor();
+  const counts: Record<string, number> = {};
+  for (const table of COUNTABLE_TABLES) {
+    const row = await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM ${table}`);
+    counts[table] = Number(row!.c);
+  }
   return {
     totalUsers: counts.users,
     totalSessions: counts.sessions,

@@ -46,7 +46,7 @@ export default async function SubscribePage(props: PageProps<"/subscribe">) {
   const nextPath = planParam ? `/subscribe?plan=${encodeURIComponent(planParam)}` : "/subscribe";
 
   const user = await requireAuth(nextPath);
-  const subscription = getCurrentSubscriptionForUser(user.id);
+  const subscription = await getCurrentSubscriptionForUser(user.id);
   const alreadySubscribed = subscription !== null && ACCESS_GRANTING_STATUSES.has(subscription.status);
 
   if (alreadySubscribed) {
@@ -61,7 +61,7 @@ export default async function SubscribePage(props: PageProps<"/subscribe">) {
     );
   }
 
-  const plans = listActivePlans();
+  const plans = await listActivePlans();
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16">

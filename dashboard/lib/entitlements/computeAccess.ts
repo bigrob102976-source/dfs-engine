@@ -23,16 +23,16 @@ export interface UserAccess {
  * -- the full entitlement catalog. A canceled/expired/past_due
  * subscription contributes nothing from (b), but explicit grants from
  * (a) still apply. */
-export function computeUserAccess(user: { id: string; role: string }): UserAccess {
+export async function computeUserAccess(user: { id: string; role: string }): Promise<UserAccess> {
   if (isAdminRole(user.role)) {
-    return { isAdmin: true, entitlementKeys: new Set(listEntitlementsCatalog().map((e) => e.key)) };
+    return { isAdmin: true, entitlementKeys: new Set((await listEntitlementsCatalog()).map((e) => e.key)) };
   }
 
-  const keys = new Set(listUserEntitlements(user.id).map((e) => e.entitlement_key));
+  const keys = new Set((await listUserEntitlements(user.id)).map((e) => e.entitlement_key));
 
-  const subscription = getCurrentSubscriptionForUser(user.id);
+  const subscription = await getCurrentSubscriptionForUser(user.id);
   if (subscription && SUBSCRIPTION_GRANTS_ACCESS_STATUSES.has(subscription.status)) {
-    for (const entitlement of listEntitlementsCatalog()) keys.add(entitlement.key);
+    for (const entitlement of await listEntitlementsCatalog()) keys.add(entitlement.key);
   }
 
   return { isAdmin: false, entitlementKeys: keys };

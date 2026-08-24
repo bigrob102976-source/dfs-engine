@@ -7,8 +7,8 @@ import { findUserById } from "@/lib/db/users";
 
 export const dynamic = "force-dynamic";
 
-function isKnownEntitlementKey(key: string): boolean {
-  return listEntitlementsCatalog().some((e) => e.key === key);
+async function isKnownEntitlementKey(key: string): Promise<boolean> {
+  return (await listEntitlementsCatalog()).some((e) => e.key === key);
 }
 
 export async function POST(request: Request, ctx: RouteContext<"/api/admin/users/[id]/entitlements">) {
@@ -17,7 +17,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/users
   const admin = userOrRes;
 
   const { id } = await ctx.params;
-  const target = findUserById(id);
+  const target = await findUserById(id);
   if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
   let body: unknown;
@@ -31,18 +31,18 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/users
     reason?: unknown;
     expiresAt?: unknown;
   };
-  if (typeof entitlementKey !== "string" || !isKnownEntitlementKey(entitlementKey)) {
+  if (typeof entitlementKey !== "string" || !(await isKnownEntitlementKey(entitlementKey))) {
     return NextResponse.json({ error: "Unknown entitlement key." }, { status: 400 });
   }
 
-  const grant = grantUserEntitlement({
+  const grant = await grantUserEntitlement({
     userId: target.id,
     entitlementKey,
     grantedBy: admin.id,
     reason: typeof reason === "string" ? reason : null,
     expiresAt: typeof expiresAt === "string" ? expiresAt : null,
   });
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id,
     actorLabel: admin.email,
     action: "user_entitlement_granted",
@@ -59,7 +59,7 @@ export async function DELETE(request: Request, ctx: RouteContext<"/api/admin/use
   const admin = userOrRes;
 
   const { id } = await ctx.params;
-  const target = findUserById(id);
+  const target = await findUserById(id);
   if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
   const url = new URL(request.url);
@@ -68,8 +68,8 @@ export async function DELETE(request: Request, ctx: RouteContext<"/api/admin/use
     return NextResponse.json({ error: "entitlementKey query param is required." }, { status: 400 });
   }
 
-  revokeUserEntitlement(target.id, entitlementKey);
-  recordAuditLog({
+  await revokeUserEntitlement(target.id, entitlementKey);
+  await recordAuditLog({
     actorUserId: admin.id,
     actorLabel: admin.email,
     action: "user_entitlement_revoked",

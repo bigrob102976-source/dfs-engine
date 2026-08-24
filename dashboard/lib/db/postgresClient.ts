@@ -134,3 +134,37 @@ export async function checkPostgresConnection(): Promise<{ connected: boolean; e
     return { connected: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+export interface SchemaReadiness {
+  ready: boolean;
+  appliedCount: number;
+  expectedCount: number;
+  /** Filenames present on disk but not yet recorded in schema_migrations
+   * -- never the SQL/table contents, only migration filenames, which are
+   * safe to display (see this milestone's "never expose internal SQL"
+   * requirement). */
+  pending: string[];
+}
+
+/** Milestone 33.1: "is the schema actually ready," distinct from "can we
+ * open a connection" (checkPostgresConnection above) -- a fresh Postgres
+ * database connects fine and has zero tables. Compares
+ * listPostgresMigrationFiles()'s on-disk list against schema_migrations'
+ * applied rows; never applies anything itself (migrations are an
+ * explicit, separate operator step -- see the production migration
+ * command documented alongside this milestone's final report). Never
+ * throws; a query failure (e.g. schema_migrations doesn't exist yet on a
+ * brand-new database) is reported as ready:false, not a crash. */
+export async function checkPostgresSchemaReadiness(client: PostgresQueryable = getPostgresPool()): Promise<SchemaReadiness> {
+  const expected = listPostgresMigrationFiles();
+  try {
+    const { rows } = await client.query<{ filename: string }>("SELECT filename FROM schema_migrations");
+    const applied = new Set(rows.map((r) => r.filename));
+    const pending = expected.filter((f) => !applied.has(f));
+    return { ready: pending.length === 0, appliedCount: applied.size, expectedCount: expected.length, pending };
+  } catch {
+    // schema_migrations itself doesn't exist yet -- a brand-new,
+    // never-migrated database. Every expected migration is "pending."
+    return { ready: false, appliedCount: 0, expectedCount: expected.length, pending: expected };
+  }
+}

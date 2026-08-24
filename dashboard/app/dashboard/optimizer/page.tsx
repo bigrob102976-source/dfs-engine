@@ -43,10 +43,10 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
   // matching server-side enforcement -- this prop only controls whether
   // the option is OFFERED in the UI, never the actual authorization).
   const user = await getCurrentUser();
-  const canUseBigMoneyMl = userCanSelectBigMoneyMlOptimizerSource(user);
+  const canUseBigMoneyMl = await userCanSelectBigMoneyMlOptimizerSource(user);
   // BlueCollar Live Projection Integration: same ADMIN/OWNER-only
   // server-side gate ('mlb.bluecollar_optimizer', default ADMIN_ONLY).
-  const canUseBlueCollar = userCanSelectBlueCollarOptimizerSource(user);
+  const canUseBlueCollar = await userCanSelectBlueCollarOptimizerSource(user);
 
   return (
     <div>

@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { findUserByEmail } = await import("@/lib/db/users");
 const { getCurrentUser } = await import("@/lib/auth/session");
 const { POST } = await import("../signup/route");
@@ -28,6 +29,7 @@ function jsonRequest(body: unknown) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 

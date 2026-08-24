@@ -30,7 +30,7 @@ function firstParam(value: string | string[] | undefined): string | null {
  * called, so "Result" is always Success. */
 export default async function AdminAuditPage(props: PageProps<"/admin/audit">) {
   const params = await props.searchParams;
-  const entries = listAuditLog({ search: firstParam(params.search), limit: 200 });
+  const entries = await listAuditLog({ search: firstParam(params.search), limit: 200 });
 
   return (
     <div>

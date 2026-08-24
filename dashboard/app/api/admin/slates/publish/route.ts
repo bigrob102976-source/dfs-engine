@@ -49,8 +49,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = getSlateStatus(date, slateId);
-  const history = publishSlateRecord({
+  const existing = await getSlateStatus(date, slateId);
+  const history = await publishSlateRecord({
     slateDate: date, slateId, slateLabel: existing?.slate_label ?? null, publishedBy: admin.id,
     poolPath: existing?.pool_path ?? null, matchReportPath: existing?.match_report_path ?? null,
     ownershipPath: existing?.ownership_path ?? null, nativeSnapshotPath: existing?.native_snapshot_path ?? null,
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     researchSnapshotPath: existing?.research_snapshot_path ?? null, sourceHash: existing?.source_hash ?? null,
   });
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_published",
     targetType: "slate", targetId: `${date}:${slateId}`,
     metadata: { date, slateId, dataVersion: history.data_version, sourceHash: history.source_hash },

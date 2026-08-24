@@ -22,6 +22,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 
@@ -29,6 +30,7 @@ const SubscribeCanceledPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -38,7 +40,7 @@ describe("SubscribeCanceledPage", () => {
   });
 
   it("explains the checkout was canceled and no changes were made, with a link back to pricing", async () => {
-    const user = createUser({ email: "canceledpage@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "canceledpage@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     render(await SubscribeCanceledPage());

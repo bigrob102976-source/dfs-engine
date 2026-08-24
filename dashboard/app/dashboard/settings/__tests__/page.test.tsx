@@ -20,25 +20,27 @@ vi.mock("@/lib/externalProjectionsStatus", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 import SettingsPage from "../page";
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
 describe("SettingsPage", () => {
   it("redirects a MEMBER away -- this is an admin-only DFS data-provider settings page", async () => {
-    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    const member = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(member.id, null);
     await expect(SettingsPage()).rejects.toThrow(/NEXT_REDIRECT/);
   });

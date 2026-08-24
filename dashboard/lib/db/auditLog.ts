@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 import type { AdminAuditLogEntry } from "./types";
 
 /** Append-only by convention: no update/delete function is exported
@@ -9,29 +9,30 @@ import type { AdminAuditLogEntry } from "./types";
  * (e.g. the one-time admin bootstrap) -- every human-triggered admin
  * action must pass a real user id. Never pass password/token/card data
  * in `metadata`. */
-export function recordAuditLog(args: {
+export async function recordAuditLog(args: {
   actorUserId: string | null;
   actorLabel: string;
   action: string;
   targetType?: string | null;
   targetId?: string | null;
   metadata?: Record<string, unknown> | null;
-}): AdminAuditLogEntry {
-  const db = getDb();
+}): Promise<AdminAuditLogEntry> {
+  const db = getExecutor();
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  db.prepare(
+  await db.run(
     `INSERT INTO admin_audit_log (id, actor_user_id, actor_label, action, target_type, target_id, metadata_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    args.actorUserId,
-    args.actorLabel,
-    args.action,
-    args.targetType ?? null,
-    args.targetId ?? null,
-    args.metadata ? JSON.stringify(args.metadata) : null,
-    createdAt,
+    [
+      id,
+      args.actorUserId,
+      args.actorLabel,
+      args.action,
+      args.targetType ?? null,
+      args.targetId ?? null,
+      args.metadata ? JSON.stringify(args.metadata) : null,
+      createdAt,
+    ],
   );
   return {
     id,
@@ -48,9 +49,9 @@ export function recordAuditLog(args: {
 /** Used by the admin-bootstrap guard to enforce "fires exactly once,
  * ever" -- checks for ANY prior row with this action, regardless of
  * target. */
-export function hasAuditAction(action: string): boolean {
-  const db = getDb();
-  const row = db.prepare("SELECT 1 as found FROM admin_audit_log WHERE action = ? LIMIT 1").get(action);
+export async function hasAuditAction(action: string): Promise<boolean> {
+  const db = getExecutor();
+  const row = await db.get<{ found: number }>("SELECT 1 as found FROM admin_audit_log WHERE action = ? LIMIT 1", [action]);
   return Boolean(row);
 }
 
@@ -63,8 +64,8 @@ export interface ListAuditLogFilter {
   offset?: number;
 }
 
-export function listAuditLog(filter: ListAuditLogFilter = {}): AdminAuditLogEntry[] {
-  const db = getDb();
+export async function listAuditLog(filter: ListAuditLogFilter = {}): Promise<AdminAuditLogEntry[]> {
+  const db = getExecutor();
   const clauses: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -81,7 +82,7 @@ export function listAuditLog(filter: ListAuditLogFilter = {}): AdminAuditLogEntr
     params.push(filter.targetId);
   }
   if (filter.search) {
-    clauses.push("(actor_label LIKE ? OR action LIKE ? OR target_type LIKE ?)");
+    clauses.push("(LOWER(actor_label) LIKE LOWER(?) OR LOWER(action) LIKE LOWER(?) OR LOWER(target_type) LIKE LOWER(?))");
     const pattern = `%${filter.search}%`;
     params.push(pattern, pattern, pattern);
   }
@@ -89,10 +90,16 @@ export function listAuditLog(filter: ListAuditLogFilter = {}): AdminAuditLogEntr
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const limit = filter.limit ?? 100;
   const offset = filter.offset ?? 0;
-  const rows = db
-    // rowid tiebreaker: audit ordering must stay stable even when two
-    // actions land in the same millisecond (e.g. a scripted bulk action).
-    .prepare(`SELECT * FROM admin_audit_log ${where} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`)
-    .all(...params, limit, offset);
+  const rows = await db.all<Record<string, unknown>>(
+    // `id` (a UUID) is a portable tiebreaker for entries created in the
+    // same millisecond (e.g. a scripted bulk action) -- SQLite's rowid
+    // has no Postgres equivalent (see the 0009 migration's docstring for
+    // the two tables where a tiebreaker alone isn't enough and a real
+    // `seq` column was added instead; audit-log ordering only ever needs
+    // a STABLE tiebreak, not true insertion order, so `id` is sufficient
+    // here without a schema change).
+    `SELECT * FROM admin_audit_log ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  );
   return rows as unknown as AdminAuditLogEntry[];
 }

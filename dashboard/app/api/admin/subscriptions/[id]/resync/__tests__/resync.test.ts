@@ -19,6 +19,7 @@ vi.mock("@/lib/billing", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
@@ -30,14 +31,15 @@ function ctx(id: string) {
 }
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockSyncSubscription.mockReset();
 });
@@ -49,7 +51,7 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
   });
 
   it("403s for a MEMBER", async () => {
-    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    const member = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(member.id, null);
     const res = await resync(new Request("http://localhost/x", { method: "POST" }), ctx("x"));
     expect(res.status).toBe(403);
@@ -63,8 +65,8 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
 
   it("400s for a non-Stripe (dev-provider) subscription -- never fabricates a Stripe sync for it", async () => {
     await loginAsAdmin();
-    const user = createUser({ email: "devsub@example.com", passwordHash: "h" });
-    const sub = insertSubscription({ userId: user.id, planId: "weekly", status: "active" }); // provider='dev'
+    const user = await createUser({ email: "devsub@example.com", passwordHash: "h" });
+    const sub = await insertSubscription({ userId: user.id, planId: "weekly", status: "active" }); // provider='dev'
 
     const res = await resync(new Request("http://localhost/x", { method: "POST" }), ctx(sub.id));
     expect(res.status).toBe(400);
@@ -73,8 +75,8 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
 
   it("resyncs a Stripe-backed subscription and writes an audit log entry", async () => {
     const admin = await loginAsAdmin();
-    const user = createUser({ email: "stripesub@example.com", passwordHash: "h" });
-    const sub = insertSubscription({
+    const user = await createUser({ email: "stripesub@example.com", passwordHash: "h" });
+    const sub = await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "past_due",
@@ -87,7 +89,7 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
     expect(res.status).toBe(200);
     expect(mockSyncSubscription).toHaveBeenCalledWith("sub_resync1");
 
-    const entries = listAuditLog({ action: "admin_subscription_resync" });
+    const entries = await listAuditLog({ action: "admin_subscription_resync" });
     expect(entries).toHaveLength(1);
     expect(entries[0].actor_user_id).toBe(admin.id);
     expect(entries[0].target_id).toBe(sub.id);
@@ -95,8 +97,8 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
 
   it("502s when the provider fails to resync (never fabricates a result)", async () => {
     await loginAsAdmin();
-    const user = createUser({ email: "syncfail@example.com", passwordHash: "h" });
-    const sub = insertSubscription({
+    const user = await createUser({ email: "syncfail@example.com", passwordHash: "h" });
+    const sub = await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "active",
@@ -107,6 +109,6 @@ describe("POST /api/admin/subscriptions/[id]/resync", () => {
 
     const res = await resync(new Request("http://localhost/x", { method: "POST" }), ctx(sub.id));
     expect(res.status).toBe(502);
-    expect(listAuditLog({ action: "admin_subscription_resync" })).toHaveLength(0);
+    expect(await listAuditLog({ action: "admin_subscription_resync" })).toHaveLength(0);
   });
 });

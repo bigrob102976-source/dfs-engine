@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate:postgres": "node scripts/migrate-postgres-schema.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1113.0",

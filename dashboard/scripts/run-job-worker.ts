@@ -36,7 +36,7 @@ function sleep(ms: number): Promise<void> {
 async function main() {
   ensureSlateJobHandlersRegistered();
   console.log(`[job-worker] ${WORKER_ID} starting, polling every ${POLL_INTERVAL_MS}ms`);
-  recordHeartbeat(WORKER_ID, { startedAt: new Date().toISOString() });
+  await recordHeartbeat(WORKER_ID, { startedAt: new Date().toISOString() });
 
   let lastHeartbeat = Date.now();
 
@@ -44,7 +44,7 @@ async function main() {
     const result = await runOneQueuedJob(WORKER_ID);
     if (result.status === "NO_JOB") {
       if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
-        recordHeartbeat(WORKER_ID);
+        await recordHeartbeat(WORKER_ID);
         lastHeartbeat = Date.now();
       }
       await sleep(POLL_INTERVAL_MS);

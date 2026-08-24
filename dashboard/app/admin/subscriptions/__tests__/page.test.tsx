@@ -7,6 +7,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
 
@@ -18,12 +19,13 @@ function props(search: Record<string, string> = {}) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("AdminSubscriptionsPage", () => {
   it("renders subscriptions with user email, plan, and status", async () => {
-    const user = createUser({ email: "sub@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
+    const user = await createUser({ email: "sub@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
 
     render(await AdminSubscriptionsPage(props()));
 
@@ -35,10 +37,10 @@ describe("AdminSubscriptionsPage", () => {
   });
 
   it("shows Provider, Cancel At Period End, and Stripe IDs for a real Stripe-backed subscription", async () => {
-    const user = createUser({ email: "stripesub@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "stripesub@example.com", passwordHash: "h" });
     const { setStripeCustomerId } = await import("@/lib/db/users");
-    setStripeCustomerId(user.id, "cus_admincheck");
-    insertSubscription({
+    await setStripeCustomerId(user.id, "cus_admincheck");
+    await insertSubscription({
       userId: user.id,
       planId: "monthly",
       status: "active",
@@ -56,8 +58,8 @@ describe("AdminSubscriptionsPage", () => {
   });
 
   it("shows -- for missing Stripe customer/subscription IDs on a dev-provider row", async () => {
-    const user = createUser({ email: "devrow@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
+    const user = await createUser({ email: "devrow@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "trialing" });
 
     render(await AdminSubscriptionsPage(props()));
     const dashes = screen.getAllByText("--");

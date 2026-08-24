@@ -6,7 +6,7 @@ import { listSports } from "@/lib/db/sports";
 export const dynamic = "force-dynamic";
 
 export default async function AdminSportsPage() {
-  const sports = listSports();
+  const sports = await listSports();
 
   return (
     <div>

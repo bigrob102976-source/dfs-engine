@@ -88,19 +88,51 @@ real environment instead.
   non-empty target table, and never prints a password hash, session/
   verification/reset token hash, or Stripe customer id (redacted in every
   report).
+- **Production migration command** (Milestone 33.1):
+  `DATABASE_URL=postgres://... node scripts/migrate-postgres-schema.ts` —
+  applies every not-yet-applied `dashboard/lib/db/migrations-postgres/*.sql`
+  file, schema only, never touches data. Safe to run repeatedly (already
+  -applied migrations are skipped). This is the one command to run before
+  a production Postgres database serves its first request, and again after
+  any later release that ships a new migration file. Deliberately never
+  run implicitly (no auto-migrate on app startup) — see
+  `lib/db/executor.ts`'s own docstring.
 
-### Known remaining gap — be honest about this
+### Milestone 33.1 — the SQLite-only query-layer gap is closed
 
-`dashboard/lib/db/client.ts::getDb()` and the 17 query modules under
-`dashboard/lib/db/*.ts` (users, sessions, subscriptions, entitlements,
-audit log, slate status, jobs, etc.) are **SQLite-only**. When `DATABASE_URL`
-is configured, `getDb()` deliberately throws a clear error rather than
-silently using local SQLite or silently pretending to support Postgres. A
-real production Postgres deployment needs those 17 modules ported to the
-async `lib/db/postgresClient.ts` adapter — that port is real, separate work
-this milestone did not attempt (the scope here was the connection/migration
-layer and an honest, fail-closed selection mechanism, not a rewrite of every
-existing query call site).
+The gap this document used to describe here (`lib/db/client.ts::getDb()`
+and the query modules under `lib/db/*.ts` being SQLite-only) is resolved.
+Every query module now calls `lib/db/executor.ts::getExecutor()` instead
+of `getDb()` directly — a single, backend-neutral `SqlExecutor` interface
+(`lib/db/sqlExecutor.ts`) with two implementations: `SqliteExecutor`
+(wraps `node:sqlite`, unchanged local-dev behavior) and `PostgresExecutor`
+(wraps `pg`, real async queries, real transactions via a checked-out
+`PoolClient`). `lib/db/client.ts::getDb()` itself is untouched and still
+SQLite-only by design — it's now purely `SqliteExecutor`'s internal
+implementation detail, never called directly by a query module.
+
+Two tables (`subscriptions`, `stripe_webhook_events`) relied on SQLite's
+built-in `rowid` for "most recently inserted" ordering, which has no
+Postgres equivalent; a new migration
+(`migrations-postgres/0009_ordering_sequence_columns.sql`, Postgres-only —
+SQLite already has `rowid` natively) added a real `seq BIGSERIAL` column
+to each. `claimNextQueuedJob()`'s Postgres path now uses
+`UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING *`,
+a single atomic statement safe under real multi-worker concurrency —
+previously a documented, honest SQLite-only limitation.
+
+**Remaining, deliberately out-of-scope items**: all timestamp columns
+stay ISO-8601 TEXT on both backends (not `TIMESTAMPTZ`) — the existing
+schema's own documented convention (`migrations/0001_init.sql`'s header
+comment), preserved rather than silently changed, since switching would
+be a real behavioral/schema change warranting its own milestone, not a
+port detail. The standalone worker (`scripts/run-job-worker.ts`) has
+still only been exercised against local SQLite and the in-memory
+Postgres test fakes in this repo's test suite — genuine multi-process,
+multi-machine Postgres concurrency has real automated test coverage now
+(`lib/jobs/__tests__/jobQueueConcurrency.test.ts`, plus a
+`TEST_DATABASE_URL`-gated real-server version) but has not been run
+against an actual hosted multi-instance deployment.
 
 ## Object storage
 

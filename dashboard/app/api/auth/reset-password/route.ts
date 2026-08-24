@@ -23,14 +23,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
 
-  const user = consumePasswordResetToken(token, hashPassword(newPassword));
+  const user = await consumePasswordResetToken(token, hashPassword(newPassword));
   if (!user) {
     return NextResponse.json({ error: "This reset link is invalid or has expired." }, { status: 400 });
   }
 
   // A password reset invalidates every existing session -- anyone who
   // had the old password (or a stolen session) is signed out everywhere.
-  deleteAllSessionsForUser(user.id);
+  await deleteAllSessionsForUser(user.id);
 
   return NextResponse.json({ ok: true });
 }

@@ -196,7 +196,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   // published_* pointer field on slate_status enforces. Full-day
   // (no slate selected) has no publish concept, so it keeps the
   // existing latest-artifact-timestamp behavior unchanged.
-  const publishedVersion = slateCtx.selected ? getPublishedVersion(date, slateCtx.selected.slateId) : null;
+  const publishedVersion = slateCtx.selected ? await getPublishedVersion(date, slateCtx.selected.slateId) : null;
   const lastUpdated =
     publishedVersion?.publishedAt ??
     (statuses

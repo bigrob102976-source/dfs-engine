@@ -18,13 +18,13 @@ function getBootstrapEmail(): string {
  * ever runs server-side, driven entirely by the DB's own state. Returns
  * true if a promotion just happened (the caller should re-read the
  * user's role before finishing the login response/session). */
-export function maybeBootstrapAdmin(user: { id: string; email: string; role: string }): boolean {
+export async function maybeBootstrapAdmin(user: { id: string; email: string; role: string }): Promise<boolean> {
   if (user.email.toLowerCase() !== getBootstrapEmail()) return false;
   if (user.role !== "MEMBER") return false;
-  if (hasAuditAction(BOOTSTRAP_ACTION)) return false;
+  if (await hasAuditAction(BOOTSTRAP_ACTION)) return false;
 
-  updateUserRole(user.id, "ADMIN");
-  recordAuditLog({
+  await updateUserRole(user.id, "ADMIN");
+  await recordAuditLog({
     actorUserId: null,
     actorLabel: "system",
     action: BOOTSTRAP_ACTION,

@@ -19,6 +19,7 @@ vi.mock("@/lib/optimizerWorkspace/buildRunner", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { POST } = await import("../route");
@@ -36,20 +37,21 @@ function baseBody(overrides: Record<string, unknown> = {}) {
 }
 
 async function loginAsMember() {
-  const user = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const user = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(user.id, null);
   return user;
 }
 
 async function loginAsAdmin() {
-  const user = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(user.id, "ADMIN");
+  const user = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(user.id, "ADMIN");
   await establishSession(user.id, null);
   return user;
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockValidateBuildRequest.mockReset();
   mockValidateBuildRequest.mockResolvedValue({ errors: [], coverage: null });

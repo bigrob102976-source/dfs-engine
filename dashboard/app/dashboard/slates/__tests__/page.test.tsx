@@ -25,6 +25,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { publishSlateRecord, upsertSlateStatus } = await import("@/lib/db/slateStatus");
@@ -50,13 +51,14 @@ async function stubSlates(slates: unknown[]) {
 }
 
 async function loginAsMember() {
-  const member = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const member = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(member.id, null);
   return member;
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -93,10 +95,10 @@ describe("SlateManagerPage (member, read-only)", () => {
   it("shows a published slate's Last Updated and per-signal Data Status", async () => {
     await loginAsMember();
     await stubSlates([{ slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 }]);
-    const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-    updateUserRole(admin.id, "ADMIN");
-    upsertSlateStatus(DATE, "main", { slateLabel: "Main", status: "READY" });
-    publishSlateRecord({
+    const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+    await updateUserRole(admin.id, "ADMIN");
+    await upsertSlateStatus(DATE, "main", { slateLabel: "Main", status: "READY" });
+    await publishSlateRecord({
       slateDate: DATE, slateId: "main", slateLabel: "Main", publishedBy: admin.id,
       poolPath: "dfs_input/x/pool.json", matchReportPath: null, ownershipPath: "ownership_predictions/x/o.json",
       nativeSnapshotPath: "native_projection_snapshots/x/n.json", aiSnapshotPath: null,
@@ -130,9 +132,9 @@ describe("SlateManagerPage (member, read-only)", () => {
     it("shows Starting Pitchers/Hitters confirmed counts and Optimizer Eligible from the published match report", async () => {
       await loginAsMember();
       await stubSlates([{ slate_id: "main", slate_name: "Main", game_count: 9, start_time: null, game_ids: ["g1"], player_count: 142 }]);
-      const admin = createUser({ email: "admin-widget@example.com", passwordHash: "h" });
-      updateUserRole(admin.id, "ADMIN");
-      upsertSlateStatus(DATE, "main", { slateLabel: "Main", status: "READY" });
+      const admin = await createUser({ email: "admin-widget@example.com", passwordHash: "h" });
+      await updateUserRole(admin.id, "ADMIN");
+      await upsertSlateStatus(DATE, "main", { slateLabel: "Main", status: "READY" });
 
       const matchReportPath = path.join(tmpDir, "dfs_input", DATE, "dk_match_report_x.json");
       fs.mkdirSync(path.dirname(matchReportPath), { recursive: true });
@@ -144,7 +146,7 @@ describe("SlateManagerPage (member, read-only)", () => {
         }),
       );
 
-      publishSlateRecord({
+      await publishSlateRecord({
         slateDate: DATE, slateId: "main", slateLabel: "Main", publishedBy: admin.id,
         poolPath: "dfs_input/x/pool.json", matchReportPath,
         ownershipPath: null, nativeSnapshotPath: null, aiSnapshotPath: null,

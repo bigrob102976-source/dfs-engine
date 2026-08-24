@@ -20,11 +20,13 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole, setUserDisabled } = await import("@/lib/db/users");
 const { establishSession, getCurrentUser, destroySession, SESSION_COOKIE } = await import("../session");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -34,7 +36,7 @@ describe("session", () => {
   });
 
   it("establishSession + getCurrentUser round-trips to the right user", async () => {
-    const user = createUser({ email: "s@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "s@example.com", passwordHash: "h" });
     await establishSession(user.id, "test-agent");
     const current = await getCurrentUser();
     expect(current?.id).toBe(user.id);
@@ -42,16 +44,16 @@ describe("session", () => {
   });
 
   it("role is always read fresh from the DB, never cached from establishSession time", async () => {
-    const user = createUser({ email: "r@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "r@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     expect((await getCurrentUser())?.role).toBe("MEMBER");
 
-    updateUserRole(user.id, "ADMIN");
+    await updateUserRole(user.id, "ADMIN");
     expect((await getCurrentUser())?.role).toBe("ADMIN");
   });
 
   it("destroySession clears the cookie and invalidates the session", async () => {
-    const user = createUser({ email: "d@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "d@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     await destroySession();
     expect(await getCurrentUser()).toBeNull();
@@ -64,11 +66,11 @@ describe("session", () => {
   });
 
   it("a disabled account's session no longer resolves", async () => {
-    const user = createUser({ email: "disabled@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "disabled@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
     expect(await getCurrentUser()).not.toBeNull();
 
-    setUserDisabled(user.id, true);
+    await setUserDisabled(user.id, true);
     expect(await getCurrentUser()).toBeNull();
   });
 });

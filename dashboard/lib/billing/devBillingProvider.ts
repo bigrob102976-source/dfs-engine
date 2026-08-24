@@ -33,11 +33,11 @@ const MONTHLY_INTERVAL_DAYS = 30;
  */
 export class DevBillingProvider implements BillingProvider {
   async createCheckoutSession(args: { userId: string; planId: string; origin: string }): Promise<CheckoutResult> {
-    const plan = getPlan(args.planId);
+    const plan = await getPlan(args.planId);
     if (!plan || plan.is_active !== 1) {
       return { error: `Unknown plan: ${args.planId}` };
     }
-    const user = findUserById(args.userId);
+    const user = await findUserById(args.userId);
     if (!user) {
       return { error: "Unknown user." };
     }
@@ -47,17 +47,17 @@ export class DevBillingProvider implements BillingProvider {
 
     if (trialEligible) {
       const trialEndsAt = new Date(Date.now() + plan.trial_days * 24 * 60 * 60 * 1000).toISOString();
-      insertSubscription({
+      await insertSubscription({
         userId: args.userId,
         planId: plan.id,
         status: "trialing",
         trialEndsAt,
         currentPeriodEnd: trialEndsAt,
       });
-      markTrialConsumed(args.userId);
+      await markTrialConsumed(args.userId);
     } else {
       const currentPeriodEnd = new Date(Date.now() + intervalDays * 24 * 60 * 60 * 1000).toISOString();
-      insertSubscription({
+      await insertSubscription({
         userId: args.userId,
         planId: plan.id,
         status: "active",
@@ -73,7 +73,7 @@ export class DevBillingProvider implements BillingProvider {
   }
 
   async cancelSubscription(subscriptionId: string): Promise<void> {
-    cancelSubscriptionRow(subscriptionId);
+    await cancelSubscriptionRow(subscriptionId);
   }
 
   async syncSubscription(providerSubscriptionId: string): Promise<Subscription | null> {

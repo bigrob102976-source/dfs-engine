@@ -22,35 +22,35 @@ export interface AdminOverviewStats {
   trialConversionRatePct: number | null;
 }
 
-/** Real KPI figures derived entirely from local SQLite state -- no
+/** Real KPI figures derived entirely from the configured database -- no
  * payment processor is connected, so MRR/ARR are computed from the
  * seeded plan prices and actual current-subscriber counts, not
  * fabricated. $0 (zero active payers) is a valid computed answer;
  * trial conversion is null (displayed as "--") only when the
  * denominator is genuinely zero. */
-export function computeAdminOverviewStats(): AdminOverviewStats {
-  const statusCounts = countSubscriptionsByStatus();
-  const plans = listActivePlans();
+export async function computeAdminOverviewStats(): Promise<AdminOverviewStats> {
+  const statusCounts = await countSubscriptionsByStatus();
+  const plans = await listActivePlans();
   const weeklyPlan = plans.find((p) => p.billing_interval === "WEEKLY") ?? null;
   const monthlyPlan = plans.find((p) => p.billing_interval === "MONTHLY") ?? null;
 
   let mrrCents = 0;
   if (weeklyPlan) {
-    mrrCents += countActiveSubscribersByPlan(weeklyPlan.id) * weeklyPlan.price_cents * (52 / 12);
+    mrrCents += (await countActiveSubscribersByPlan(weeklyPlan.id)) * weeklyPlan.price_cents * (52 / 12);
   }
   if (monthlyPlan) {
-    mrrCents += countActiveSubscribersByPlan(monthlyPlan.id) * monthlyPlan.price_cents;
+    mrrCents += (await countActiveSubscribersByPlan(monthlyPlan.id)) * monthlyPlan.price_cents;
   }
   mrrCents = Math.round(mrrCents);
 
-  const conversion = getTrialConversionStats();
+  const conversion = await getTrialConversionStats();
 
   return {
-    totalUsers: countUsers(),
+    totalUsers: await countUsers(),
     activeMembers: statusCounts.active,
     activeTrials: statusCounts.trialing,
-    weeklyMembers: weeklyPlan ? countCurrentSubscribersByPlan(weeklyPlan.id) : 0,
-    monthlyMembers: monthlyPlan ? countCurrentSubscribersByPlan(monthlyPlan.id) : 0,
+    weeklyMembers: weeklyPlan ? await countCurrentSubscribersByPlan(weeklyPlan.id) : 0,
+    monthlyMembers: monthlyPlan ? await countCurrentSubscribersByPlan(monthlyPlan.id) : 0,
     canceledMembers: statusCounts.canceled,
     pastDue: statusCounts.past_due,
     complimentaryAccounts: statusCounts.complimentary,

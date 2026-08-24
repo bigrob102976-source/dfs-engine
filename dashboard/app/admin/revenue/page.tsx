@@ -24,7 +24,7 @@ function billingDisclosure(mode: ReturnType<typeof getBillingMode>): string {
 }
 
 export default async function AdminRevenuePage() {
-  const stats = computeAdminRevenueStats();
+  const stats = await computeAdminRevenueStats();
   const billingMode = getBillingMode();
 
   return (

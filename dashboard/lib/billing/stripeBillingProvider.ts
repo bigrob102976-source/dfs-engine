@@ -27,7 +27,7 @@ function priceIdForPlan(planId: string): string | null {
  */
 export class StripeBillingProvider implements BillingProvider {
   async createCheckoutSession(args: { userId: string; planId: string; origin: string }): Promise<CheckoutResult> {
-    const plan = getPlan(args.planId);
+    const plan = await getPlan(args.planId);
     if (!plan || plan.is_active !== 1) {
       return { error: `Unknown plan: ${args.planId}` };
     }
@@ -35,7 +35,7 @@ export class StripeBillingProvider implements BillingProvider {
     if (!priceId) {
       return { error: `No Stripe price configured for plan: ${args.planId}` };
     }
-    const user = findUserById(args.userId);
+    const user = await findUserById(args.userId);
     if (!user) {
       return { error: "Unknown user." };
     }
@@ -49,7 +49,7 @@ export class StripeBillingProvider implements BillingProvider {
         metadata: { bigmoney_user_id: user.id },
       });
       customerId = customer.id;
-      setStripeCustomerId(user.id, customerId);
+      await setStripeCustomerId(user.id, customerId);
     }
 
     const trialEligible = user.trial_consumed_at === null;
@@ -75,7 +75,7 @@ export class StripeBillingProvider implements BillingProvider {
   }
 
   async createCustomerPortalSession(args: { userId: string; origin: string }): Promise<PortalResult> {
-    const user = findUserById(args.userId);
+    const user = await findUserById(args.userId);
     if (!user?.stripe_customer_id) {
       return { error: "No billing account on file yet -- start a subscription first." };
     }
@@ -88,7 +88,7 @@ export class StripeBillingProvider implements BillingProvider {
   }
 
   async cancelSubscription(subscriptionId: string): Promise<void> {
-    const local = getSubscriptionById(subscriptionId);
+    const local = await getSubscriptionById(subscriptionId);
     if (!local || local.provider !== "stripe" || !local.provider_subscription_id) {
       throw new Error("Not a Stripe-backed subscription.");
     }
@@ -96,13 +96,13 @@ export class StripeBillingProvider implements BillingProvider {
     await stripe.subscriptions.update(local.provider_subscription_id, { cancel_at_period_end: true });
     // Reflect immediately; the subsequent customer.subscription.updated
     // webhook will also confirm this through the canonical writer.
-    updateSubscriptionStatus(local.id, local.status, { cancel_at_period_end: 1 });
+    await updateSubscriptionStatus(local.id, local.status, { cancel_at_period_end: 1 });
   }
 
   async syncSubscription(providerSubscriptionId: string): Promise<Subscription | null> {
     const stripe = getStripeClient();
     const subscription = await stripe.subscriptions.retrieve(providerSubscriptionId);
-    const result = applyStripeSubscription(subscription, new Date().toISOString());
+    const result = await applyStripeSubscription(subscription, new Date().toISOString());
     if (!result.ok) return null;
     return findSubscriptionByProviderSubscriptionId(subscription.id);
   }

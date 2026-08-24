@@ -7,16 +7,18 @@ vi.mock("@/lib/billing/stripeConfig", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const PricingPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   mockGetBillingMode.mockReturnValue("dev");
 });
 
 describe("PricingPage", () => {
-  it("renders the headline, both plans with correct prices/trial, and the disclosure copy", () => {
-    render(PricingPage());
+  it("renders the headline, both plans with correct prices/trial, and the disclosure copy", async () => {
+    render(await PricingPage());
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("PLAY SMARTER.");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("BUILD BETTER LINEUPS.");
@@ -27,28 +29,28 @@ describe("PricingPage", () => {
     expect(screen.getByText(/Recurring subscription\. Cancel anytime\./)).toBeInTheDocument();
   });
 
-  it("marks Monthly (not Weekly) as Best Value", () => {
-    render(PricingPage());
+  it("marks Monthly (not Weekly) as Best Value", async () => {
+    render(await PricingPage());
     expect(screen.getByText("Best Value")).toBeInTheDocument();
   });
 
-  it("links each plan's CTA to /subscribe?plan=<id>", () => {
-    render(PricingPage());
+  it("links each plan's CTA to /subscribe?plan=<id>", async () => {
+    render(await PricingPage());
     const links = screen.getAllByText("Start Free Trial") as HTMLAnchorElement[];
     const hrefs = links.map((el) => el.closest("a")?.getAttribute("href"));
     expect(hrefs).toContain("/subscribe?plan=weekly");
     expect(hrefs).toContain("/subscribe?plan=monthly");
   });
 
-  it("shows the Stripe Test Mode badge only when billing mode is stripe_test", () => {
+  it("shows the Stripe Test Mode badge only when billing mode is stripe_test", async () => {
     mockGetBillingMode.mockReturnValue("stripe_test");
-    render(PricingPage());
+    render(await PricingPage());
     expect(screen.getByText(/Stripe Test Mode/)).toBeInTheDocument();
   });
 
-  it("hides the Stripe Test Mode badge in dev mode", () => {
+  it("hides the Stripe Test Mode badge in dev mode", async () => {
     mockGetBillingMode.mockReturnValue("dev");
-    render(PricingPage());
+    render(await PricingPage());
     expect(screen.queryByText(/Stripe Test Mode/)).not.toBeInTheDocument();
   });
 });

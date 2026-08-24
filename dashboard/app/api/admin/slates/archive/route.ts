@@ -30,12 +30,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "`slateId` is required." }, { status: 400 });
   }
 
-  const ok = archiveSlate(date, slateId, admin.id);
+  const ok = await archiveSlate(date, slateId, admin.id);
   if (!ok) {
     return NextResponse.json({ error: "Unknown slate for this date." }, { status: 404 });
   }
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_archived",
     targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId },
   });

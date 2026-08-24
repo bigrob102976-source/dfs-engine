@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { POST: uploadDkCsv } = await import("../upload/route");
@@ -21,14 +22,14 @@ const { POST: deleteDkCsv } = await import("../delete/route");
 const { GET: listDkUploads } = await import("../uploads/route");
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 async function loginAsMember() {
-  const member = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const member = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(member.id, null);
   return member;
 }
@@ -51,6 +52,7 @@ function deleteRequest(): Request {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 

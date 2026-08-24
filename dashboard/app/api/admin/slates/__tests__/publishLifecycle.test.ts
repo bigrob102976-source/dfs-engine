@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getPublishedVersion, getSlateStatus, listPublishedSlateIds, upsertSlateStatus } = await import("@/lib/db/slateStatus");
@@ -40,19 +41,19 @@ function req(body: unknown) {
 }
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 async function loginAsMember() {
-  const member = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const member = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(member.id, null);
   return member;
 }
 
-function makeSlateReady() {
+async function makeSlateReady() {
   writeJson(`dfs_input/${DATE}/dk_player_pool_1.json`, {
     selected_slate_id: SLATE_ID, player_count: 1,
     players: [{ dk_player_id: "d1", mlb_player_id: "h1", name: "X", team: "AAA", player_type: "hitter" }],
@@ -65,7 +66,7 @@ function makeSlateReady() {
     slate_date: DATE, generated_at: "x", model_version: "1.0.0", player_count: 1,
     players: [{ player_id: "h1", name: "X", team: "AAA", player_type: "hitter" }], warnings: [],
   });
-  upsertSlateStatus(DATE, SLATE_ID, {
+  await upsertSlateStatus(DATE, SLATE_ID, {
     slateLabel: "Main", status: "READY",
     poolPath: `dfs_input/${DATE}/dk_player_pool_1.json`, matchReportPath: `dfs_input/${DATE}/dk_match_report_1.json`,
     nativeSnapshotPath: `native_projection_snapshots/${DATE}/native_projection_1.json`,
@@ -74,6 +75,7 @@ function makeSlateReady() {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-publish-api-"));
   process.env.MLB_DFS_ROOT = tmpDir;
@@ -102,32 +104,32 @@ describe("POST /api/admin/slates/publish", () => {
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.readiness.ok).toBe(false);
-    expect(listPublishedSlateIds(DATE)).toEqual([]);
+    expect(await listPublishedSlateIds(DATE)).toEqual([]);
   });
 
   it("publishes a ready slate: version 1, pinned paths, PUBLISHED status, audit entry, member-visible", async () => {
     const admin = await loginAsAdmin();
-    makeSlateReady();
+    await makeSlateReady();
 
     const res = await publishSlate(req({ date: DATE, slateId: SLATE_ID }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.dataVersion).toBe(1);
 
-    expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("PUBLISHED");
-    expect(listPublishedSlateIds(DATE)).toEqual([SLATE_ID]);
-    const version = getPublishedVersion(DATE, SLATE_ID)!;
+    expect((await getSlateStatus(DATE, SLATE_ID))?.status).toBe("PUBLISHED");
+    expect(await listPublishedSlateIds(DATE)).toEqual([SLATE_ID]);
+    const version = (await getPublishedVersion(DATE, SLATE_ID))!;
     expect(version.poolPath).toContain("dk_player_pool_1.json");
     expect(version.dataVersion).toBe(1);
 
-    const entries = listAuditLog({ action: "slate_published" });
+    const entries = await listAuditLog({ action: "slate_published" });
     expect(entries).toHaveLength(1);
     expect(entries[0].actor_user_id).toBe(admin.id);
   });
 
   it("publishing twice increments the data version without losing history", async () => {
     await loginAsAdmin();
-    makeSlateReady();
+    await makeSlateReady();
     await publishSlate(req({ date: DATE, slateId: SLATE_ID }));
     const second = await publishSlate(req({ date: DATE, slateId: SLATE_ID }));
     const body = await second.json();
@@ -144,20 +146,20 @@ describe("POST /api/admin/slates/unpublish", () => {
 
   it("removes the slate from member visibility but keeps its processed artifacts", async () => {
     await loginAsAdmin();
-    makeSlateReady();
+    await makeSlateReady();
     await publishSlate(req({ date: DATE, slateId: SLATE_ID }));
-    expect(listPublishedSlateIds(DATE)).toEqual([SLATE_ID]);
+    expect(await listPublishedSlateIds(DATE)).toEqual([SLATE_ID]);
 
     const res = await unpublishSlate(req({ date: DATE, slateId: SLATE_ID }));
     expect(res.status).toBe(200);
-    expect(listPublishedSlateIds(DATE)).toEqual([]);
-    expect(getPublishedVersion(DATE, SLATE_ID)).toBeNull();
-    expect(getSlateStatus(DATE, SLATE_ID)?.pool_path).toContain("dk_player_pool_1.json"); // untouched
+    expect(await listPublishedSlateIds(DATE)).toEqual([]);
+    expect(await getPublishedVersion(DATE, SLATE_ID)).toBeNull();
+    expect((await getSlateStatus(DATE, SLATE_ID))?.pool_path).toContain("dk_player_pool_1.json"); // untouched
   });
 
   it("409s when the slate isn't currently published", async () => {
     await loginAsAdmin();
-    makeSlateReady();
+    await makeSlateReady();
     const res = await unpublishSlate(req({ date: DATE, slateId: SLATE_ID }));
     expect(res.status).toBe(409);
   });
@@ -172,12 +174,12 @@ describe("POST /api/admin/slates/archive", () => {
 
   it("archives a published slate, implicitly unpublishing it", async () => {
     await loginAsAdmin();
-    makeSlateReady();
+    await makeSlateReady();
     await publishSlate(req({ date: DATE, slateId: SLATE_ID }));
 
     const res = await archiveSlate(req({ date: DATE, slateId: SLATE_ID }));
     expect(res.status).toBe(200);
-    expect(getSlateStatus(DATE, SLATE_ID)?.status).toBe("ARCHIVED");
-    expect(listPublishedSlateIds(DATE)).toEqual([]);
+    expect((await getSlateStatus(DATE, SLATE_ID))?.status).toBe("ARCHIVED");
+    expect(await listPublishedSlateIds(DATE)).toEqual([]);
   });
 });

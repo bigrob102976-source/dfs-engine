@@ -18,9 +18,9 @@ function fmtDate(iso: string | null): string {
 
 export default async function AccountPage() {
   const user = await requireAuth();
-  const subscription = getCurrentSubscriptionForUser(user.id);
-  const plan = subscription ? getPlan(subscription.plan_id) : null;
-  const sports = listSports();
+  const subscription = await getCurrentSubscriptionForUser(user.id);
+  const plan = subscription ? await getPlan(subscription.plan_id) : null;
+  const sports = await listSports();
 
   return (
     <div>

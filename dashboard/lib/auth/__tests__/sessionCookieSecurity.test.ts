@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("../session");
 
@@ -25,6 +26,7 @@ const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   lastSetOptions = undefined;
 });
@@ -36,7 +38,16 @@ afterEach(() => {
 describe("session cookie security flags (fail-closed in production)", () => {
   it("sets secure:true and httpOnly:true in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const user = createUser({ email: "prod@example.com", passwordHash: "h" });
+    // Milestone 33.1: getExecutor() (unlike the old getDb()) re-resolves
+    // the backend on its first post-reset call, so it genuinely
+    // observes NODE_ENV=production here and would otherwise hit the
+    // real, correct fail-closed guard (no DATABASE_URL configured in
+    // this test). This test's purpose is cookie-flag behavior, not
+    // database backend selection -- the documented, explicit "I
+    // understand the risk" override lets it keep using local SQLite
+    // under a simulated production NODE_ENV.
+    vi.stubEnv("ALLOW_SQLITE_IN_PRODUCTION", "true");
+    const user = await createUser({ email: "prod@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     expect(lastSetOptions?.secure).toBe(true);
@@ -46,7 +57,7 @@ describe("session cookie security flags (fail-closed in production)", () => {
 
   it("does not force secure:true outside production (so local http:// dev still works)", async () => {
     vi.stubEnv("NODE_ENV", "test");
-    const user = createUser({ email: "dev@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "dev@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     expect(lastSetOptions?.secure).toBe(false);

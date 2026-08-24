@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const statusParam = url.searchParams.get("status");
   const status = statusParam && (VALID_STATUSES as string[]).includes(statusParam) ? (statusParam as SubscriptionStatus) : null;
 
-  const subscriptions = listSubscriptions({
+  const subscriptions = await listSubscriptions({
     status,
     planId: url.searchParams.get("planId"),
     search: url.searchParams.get("search"),

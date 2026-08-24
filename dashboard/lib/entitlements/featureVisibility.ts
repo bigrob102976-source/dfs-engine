@@ -14,21 +14,21 @@ import { userHasEntitlement } from "./hasEntitlement";
  *
  * An unknown feature key (no feature_flags row at all) is never
  * silently allowed -- it's treated as not visible. */
-export function isFeatureVisibleToUser(user: { id: string; role: string } | null, key: string): boolean {
-  const flag = getFeatureFlag(key);
+export async function isFeatureVisibleToUser(user: { id: string; role: string } | null, key: string): Promise<boolean> {
+  const flag = await getFeatureFlag(key);
   if (!flag) return false;
   if (flag.state === "DISABLED") return false;
   if (!user) return false;
 
   const admin = isAdminRole(user.role);
   if (flag.state === "ADMIN_ONLY") return admin;
-  return admin || userHasEntitlement(user, key);
+  return admin || (await userHasEntitlement(user, key));
 }
 
-export function listVisibleFeatureKeysForUser(user: { id: string; role: string } | null): Set<string> {
+export async function listVisibleFeatureKeysForUser(user: { id: string; role: string } | null): Promise<Set<string>> {
   const keys = new Set<string>();
-  for (const flag of listFeatureFlags()) {
-    if (isFeatureVisibleToUser(user, flag.key)) keys.add(flag.key);
+  for (const flag of await listFeatureFlags()) {
+    if (await isFeatureVisibleToUser(user, flag.key)) keys.add(flag.key);
   }
   return keys;
 }
@@ -40,7 +40,7 @@ export const BIG_MONEY_ML_OPTIMIZER_FLAG_KEY = "mlb.big_money_ml_optimizer";
  * API routes (never trust the UI selector alone). Reuses the same
  * feature-flag/entitlement machinery every other gated capability in
  * this app already goes through; no new authorization mechanism. */
-export function userCanSelectBigMoneyMlOptimizerSource(user: { id: string; role: string } | null): boolean {
+export async function userCanSelectBigMoneyMlOptimizerSource(user: { id: string; role: string } | null): Promise<boolean> {
   return isFeatureVisibleToUser(user, BIG_MONEY_ML_OPTIMIZER_FLAG_KEY);
 }
 
@@ -50,6 +50,6 @@ export const BLUECOLLAR_OPTIMIZER_FLAG_KEY = "mlb.bluecollar_optimizer";
  * selecting BlueCollar as an optimizer projection source -- checked in
  * BOTH the build and validate API routes (never trust the UI selector
  * alone). Mirrors userCanSelectBigMoneyMlOptimizerSource exactly. */
-export function userCanSelectBlueCollarOptimizerSource(user: { id: string; role: string } | null): boolean {
+export async function userCanSelectBlueCollarOptimizerSource(user: { id: string; role: string } | null): Promise<boolean> {
   return isFeatureVisibleToUser(user, BLUECOLLAR_OPTIMIZER_FLAG_KEY);
 }

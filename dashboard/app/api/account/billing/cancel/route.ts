@@ -12,12 +12,12 @@ export async function POST() {
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 
-  const subscription = getCurrentSubscriptionForUser(user.id);
+  const subscription = await getCurrentSubscriptionForUser(user.id);
   if (!subscription || subscription.status === "canceled") {
     return NextResponse.json({ error: "No active subscription to cancel." }, { status: 400 });
   }
 
   await getBillingProvider().cancelSubscription(subscription.id);
-  recordUsageEvent({ userId: user.id, eventType: "subscription_canceled" });
+  await recordUsageEvent({ userId: user.id, eventType: "subscription_canceled" });
   return NextResponse.json({ ok: true });
 }

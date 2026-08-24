@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   }
 
   const { planId } = (body ?? {}) as { planId?: unknown };
-  if (typeof planId !== "string" || !getPlan(planId)) {
+  if (typeof planId !== "string" || !(await getPlan(planId))) {
     return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
   }
 
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: user.id,
     actorLabel: user.email,
     action: "checkout_initiated",

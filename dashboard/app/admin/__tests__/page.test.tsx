@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { __resetDbForTests } from "@/lib/db/client";
+import { __resetExecutorForTests } from "@/lib/db/executor";
 import { insertSubscription } from "@/lib/db/subscriptions";
 import { createUser } from "@/lib/db/users";
 
@@ -9,6 +10,7 @@ import AdminOverviewPage from "../page";
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("AdminOverviewPage", () => {
@@ -34,8 +36,8 @@ describe("AdminOverviewPage", () => {
   });
 
   it("reflects a real active subscriber in the Active Members and MRR cards", async () => {
-    const user = createUser({ email: "kpi@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "monthly", status: "active" });
+    const user = await createUser({ email: "kpi@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "monthly", status: "active" });
 
     render(await AdminOverviewPage());
 

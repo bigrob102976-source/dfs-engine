@@ -20,24 +20,26 @@ vi.mock("@/lib/orchestrator/pythonRunner", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getTodayChicagoDate } = await import("@/lib/currentDate");
 const { GET } = await import("../route");
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
 }
 
 async function loginAsMember() {
-  const user = createUser({ email: "member@example.com", passwordHash: "h" });
+  const user = await createUser({ email: "member@example.com", passwordHash: "h" });
   await establishSession(user.id, null);
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockRunPythonScript.mockReset();
 });

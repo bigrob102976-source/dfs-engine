@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { GET: getSlates } = await import("../route");
@@ -26,6 +27,7 @@ let originalRoot: string | undefined;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-slates-api-"));
   originalRoot = process.env.MLB_DFS_ROOT;
@@ -45,15 +47,15 @@ describe("GET /api/admin/slates", () => {
   });
 
   it("403s for a MEMBER", async () => {
-    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    const member = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(member.id, null);
     const res = await getSlates();
     expect(res.status).toBe(403);
   });
 
   it("returns real pipeline status for an ADMIN", async () => {
-    const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-    updateUserRole(admin.id, "ADMIN");
+    const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+    await updateUserRole(admin.id, "ADMIN");
     await establishSession(admin.id, null);
 
     const res = await getSlates();

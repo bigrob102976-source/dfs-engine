@@ -1,20 +1,21 @@
 import crypto from "node:crypto";
 
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 import type { User } from "./types";
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function createUser(args: { email: string; passwordHash: string; displayName?: string | null }): User {
-  const db = getDb();
+export async function createUser(args: { email: string; passwordHash: string; displayName?: string | null }): Promise<User> {
+  const db = getExecutor();
   const id = crypto.randomUUID();
   const now = nowIso();
-  db.prepare(
+  await db.run(
     "INSERT INTO users (id, email, password_hash, role, display_name, created_at, updated_at) VALUES (?, ?, ?, 'MEMBER', ?, ?, ?)",
-  ).run(id, args.email, args.passwordHash, args.displayName ?? null, now, now);
-  return findUserById(id)!;
+    [id, args.email, args.passwordHash, args.displayName ?? null, now, now],
+  );
+  return (await findUserById(id))!;
 }
 
 function mapUser(row: Record<string, unknown> | undefined): User | null {
@@ -22,36 +23,41 @@ function mapUser(row: Record<string, unknown> | undefined): User | null {
   return row as unknown as User;
 }
 
-export function findUserByEmail(email: string): User | null {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE").get(email);
+/** Case-insensitive by LOWER(email) on both backends -- SQLite's
+ * `COLLATE NOCASE` and Postgres's functional `idx_users_email_lower`
+ * index (lib/db/migrations-postgres/0001_init.sql) both exist specifically
+ * so this exact comparison uses each backend's real unique index rather
+ * than a full scan. */
+export async function findUserByEmail(email: string): Promise<User | null> {
+  const db = getExecutor();
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [email]);
   return mapUser(row);
 }
 
-export function findUserById(id: string): User | null {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+export async function findUserById(id: string): Promise<User | null> {
+  const db = getExecutor();
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM users WHERE id = ?", [id]);
   return mapUser(row);
 }
 
-export function updateUserPassword(id: string, passwordHash: string): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(passwordHash, nowIso(), id);
+export async function updateUserPassword(id: string, passwordHash: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", [passwordHash, nowIso(), id]);
 }
 
-export function setEmailVerified(id: string): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET email_verified_at = ?, updated_at = ? WHERE id = ?").run(nowIso(), nowIso(), id);
+export async function setEmailVerified(id: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET email_verified_at = ?, updated_at = ? WHERE id = ?", [nowIso(), nowIso(), id]);
 }
 
-export function updateUserRole(id: string, role: string): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?").run(role, nowIso(), id);
+export async function updateUserRole(id: string, role: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET role = ?, updated_at = ? WHERE id = ?", [role, nowIso(), id]);
 }
 
-export function setUserDisabled(id: string, disabled: boolean): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabled ? nowIso() : null, nowIso(), id);
+export async function setUserDisabled(id: string, disabled: boolean): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?", [disabled ? nowIso() : null, nowIso(), id]);
 }
 
 /** Milestone 30: Private Beta gate (PRIVATE_BETA=true -- see lib/env.ts
@@ -60,14 +66,14 @@ export function setUserDisabled(id: string, disabled: boolean): void {
  * both columns. This is an account-level access gate, not an
  * entitlement -- see the 0005 migration's docstring for why it isn't
  * modeled as a user_entitlements row. */
-export function setBetaAccess(id: string, granted: boolean, grantedByUserId: string | null): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET beta_access_granted_at = ?, beta_access_granted_by = ?, updated_at = ? WHERE id = ?").run(
+export async function setBetaAccess(id: string, granted: boolean, grantedByUserId: string | null): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET beta_access_granted_at = ?, beta_access_granted_by = ?, updated_at = ? WHERE id = ?", [
     granted ? nowIso() : null,
     granted ? grantedByUserId : null,
     nowIso(),
     id,
-  );
+  ]);
 }
 
 export interface ListUsersFilter {
@@ -80,13 +86,13 @@ export interface ListUsersFilter {
 /** Plain (role-only) listing -- subscription-status filtering is applied
  * by the caller (lib/db/subscriptions.ts's admin listing joins against
  * this), since "current subscription status" isn't a users-table column. */
-export function listUsers(filter: ListUsersFilter = {}): User[] {
-  const db = getDb();
+export async function listUsers(filter: ListUsersFilter = {}): Promise<User[]> {
+  const db = getExecutor();
   const clauses: string[] = [];
   const params: (string | number | null)[] = [];
 
   if (filter.search) {
-    clauses.push("(email LIKE ? OR display_name LIKE ?)");
+    clauses.push("(LOWER(email) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?))");
     const pattern = `%${filter.search}%`;
     params.push(pattern, pattern);
   }
@@ -98,18 +104,20 @@ export function listUsers(filter: ListUsersFilter = {}): User[] {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const limit = filter.limit ?? 100;
   const offset = filter.offset ?? 0;
-  const rows = db
-    .prepare(`SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-    .all(...params, limit, offset);
+  const rows = await db.all<Record<string, unknown>>(`SELECT * FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`, [
+    ...params,
+    limit,
+    offset,
+  ]);
   return rows as unknown as User[];
 }
 
-export function countUsers(filter: Pick<ListUsersFilter, "search" | "role"> = {}): number {
-  const db = getDb();
+export async function countUsers(filter: Pick<ListUsersFilter, "search" | "role"> = {}): Promise<number> {
+  const db = getExecutor();
   const clauses: string[] = [];
   const params: (string | number | null)[] = [];
   if (filter.search) {
-    clauses.push("(email LIKE ? OR display_name LIKE ?)");
+    clauses.push("(LOWER(email) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?))");
     const pattern = `%${filter.search}%`;
     params.push(pattern, pattern);
   }
@@ -118,24 +126,24 @@ export function countUsers(filter: Pick<ListUsersFilter, "search" | "role"> = {}
     params.push(filter.role);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const row = db.prepare(`SELECT COUNT(*) as c FROM users ${where}`).get(...params) as { c: number };
-  return row.c;
+  const row = await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM users ${where}`, params);
+  return Number(row!.c);
 }
 
-export function countAdmins(): number {
-  const db = getDb();
-  const row = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN'").get() as { c: number };
-  return row.c;
+export async function countAdmins(): Promise<number> {
+  const db = getExecutor();
+  const row = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN'");
+  return Number(row!.c);
 }
 
-export function setStripeCustomerId(id: string, stripeCustomerId: string): void {
-  const db = getDb();
-  db.prepare("UPDATE users SET stripe_customer_id = ?, updated_at = ? WHERE id = ?").run(stripeCustomerId, nowIso(), id);
+export async function setStripeCustomerId(id: string, stripeCustomerId: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE users SET stripe_customer_id = ?, updated_at = ? WHERE id = ?", [stripeCustomerId, nowIso(), id]);
 }
 
-export function findUserByStripeCustomerId(stripeCustomerId: string): User | null {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM users WHERE stripe_customer_id = ?").get(stripeCustomerId);
+export async function findUserByStripeCustomerId(stripeCustomerId: string): Promise<User | null> {
+  const db = getExecutor();
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM users WHERE stripe_customer_id = ?", [stripeCustomerId]);
   return mapUser(row);
 }
 
@@ -143,8 +151,8 @@ export function findUserByStripeCustomerId(stripeCustomerId: string): User | nul
  * an earlier consumption timestamp), and deliberately provider-agnostic:
  * both DevBillingProvider and StripeBillingProvider call this through the
  * same code path, so there is exactly one trial-tracking mechanism. */
-export function markTrialConsumed(id: string): void {
-  const db = getDb();
+export async function markTrialConsumed(id: string): Promise<void> {
+  const db = getExecutor();
   const now = nowIso();
-  db.prepare("UPDATE users SET trial_consumed_at = COALESCE(trial_consumed_at, ?), updated_at = ? WHERE id = ?").run(now, now, id);
+  await db.run("UPDATE users SET trial_consumed_at = COALESCE(trial_consumed_at, ?), updated_at = ? WHERE id = ?", [now, now, id]);
 }

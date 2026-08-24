@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { insertSubscription, updateSubscriptionStatus } = await import("@/lib/db/subscriptions");
@@ -32,13 +33,14 @@ const BillingPage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockGetBillingMode.mockReturnValue("dev");
 });
 
 describe("BillingPage", () => {
   it("shows a 'no active membership' state with a link to /pricing when unsubscribed", async () => {
-    const user = createUser({ email: "nosub@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "nosub@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     render(await BillingPage());
@@ -47,9 +49,9 @@ describe("BillingPage", () => {
   });
 
   it("shows the full membership field set for a trialing subscriber", async () => {
-    const user = createUser({ email: "trialing@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "trialing@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({
+    await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "trialing",
@@ -67,16 +69,16 @@ describe("BillingPage", () => {
   });
 
   it("shows cancel_at_period_end and access-through date for a canceling-but-still-active subscriber", async () => {
-    const user = createUser({ email: "cancelatperiod@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "cancelatperiod@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    const sub = insertSubscription({
+    const sub = await insertSubscription({
       userId: user.id,
       planId: "monthly",
       status: "active",
       currentPeriodEnd: "2026-09-01T00:00:00Z",
       cancelAtPeriodEnd: true,
     });
-    updateSubscriptionStatus(sub.id, "active", { cancel_at_period_end: 1 });
+    await updateSubscriptionStatus(sub.id, "active", { cancel_at_period_end: 1 });
 
     render(await BillingPage());
     const yesCells = screen.getAllByText("Yes");
@@ -84,9 +86,9 @@ describe("BillingPage", () => {
   });
 
   it("hides the Cancel button and shows -- for Access Through once a subscription has fully ended", async () => {
-    const user = createUser({ email: "expired@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "expired@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({ userId: user.id, planId: "weekly", status: "expired" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "expired" });
 
     render(await BillingPage());
     expect(screen.queryByText("Cancel membership")).not.toBeInTheDocument();
@@ -94,9 +96,9 @@ describe("BillingPage", () => {
 
   it("shows the Stripe test-mode label and hides the dev-mode banner when configured", async () => {
     mockGetBillingMode.mockReturnValue("stripe_test");
-    const user = createUser({ email: "stripemode@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "stripemode@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({ userId: user.id, planId: "weekly", status: "active", provider: "stripe" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "active", provider: "stripe" });
 
     render(await BillingPage());
     expect(screen.getByText("Stripe (Test Mode)")).toBeInTheDocument();
@@ -105,7 +107,7 @@ describe("BillingPage", () => {
 
   it("shows an explicit 'Billing Not Configured' state (fails visibly, not silently) when unconfigured in production-like mode", async () => {
     mockGetBillingMode.mockReturnValue("unconfigured");
-    const user = createUser({ email: "unconfigured@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "unconfigured@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     render(await BillingPage());

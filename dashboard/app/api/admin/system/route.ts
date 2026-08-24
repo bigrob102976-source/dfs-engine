@@ -21,7 +21,7 @@ export async function GET() {
   ]);
 
   return NextResponse.json({
-    db: computeDbStats(),
+    db: await computeDbStats(),
     mockModeEnabled,
     externalProjections,
     gameEnvironment,

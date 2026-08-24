@@ -68,10 +68,10 @@ export async function GET(request: Request) {
   }
 
   const discovered = await listSlates(date);
-  const statusRows = listSlateStatuses(date);
+  const statusRows = await listSlateStatuses(date);
   const statusById = new Map(statusRows.map((r) => [r.slate_id, r]));
 
-  const slates = discovered.slates.map((s) => {
+  const slates = await Promise.all(discovered.slates.map(async (s) => {
     const statusRow = statusById.get(s.slateId) ?? null;
     const readiness = evaluatePublishReadiness(date, s.slateId);
     // Milestone 30: the most recent QUEUED/RUNNING job for this slate, if
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     // while a Process/Refresh job is in flight, backed by the durable
     // `jobs` table (lib/jobs/queue.ts) rather than only the coarse
     // PROCESSING/READY/PARTIAL/ERROR status column.
-    const activeJob = listJobsForSlate(date, s.slateId).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
+    const activeJob = (await listJobsForSlate(date, s.slateId)).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
     const matchReport = loadLatestDkMatchReport(date, s.slateId).data;
     const eligibility = (matchReport?.eligibility as EligibilityCounts | undefined) ?? null;
     const identity: IdentityCounts | null = matchReport
@@ -132,9 +132,9 @@ export async function GET(request: Request) {
       blueCollarCoverage,
       changeReport,
     };
-  });
+  }));
 
-  const recentOperations = listAuditLog({ limit: 50 }).filter((entry) => SLATE_AUDIT_ACTIONS.has(entry.action));
+  const recentOperations = (await listAuditLog({ limit: 50 })).filter((entry) => SLATE_AUDIT_ACTIONS.has(entry.action));
 
   return NextResponse.json({
     date, providerName: discovered.providerName, isMock: discovered.isMock, slates, recentOperations,

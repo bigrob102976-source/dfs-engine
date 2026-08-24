@@ -79,7 +79,7 @@ export async function runSlatePipeline(
   // M32.7: captured BEFORE anything runs -- the "before" half of the
   // Admin Change Report (see lib/slateChangeReport.ts). Cheap, read-only.
   const stateBefore = captureSlateState(date, slateId);
-  upsertSlateStatus(date, slateId, { slateLabel, status: "PROCESSING" });
+  await upsertSlateStatus(date, slateId, { slateLabel, status: "PROCESSING" });
 
   const errors: string[] = [];
 
@@ -144,7 +144,7 @@ export async function runSlatePipeline(
     const recoveredHash = (recoveredPool.data?.players.find((p) => p.source_sha256)?.source_sha256 as string | undefined) ?? null;
     const recoveredProvenance =
       typeof recoveredMatchReport.data?.source_provenance === "string" ? (recoveredMatchReport.data.source_provenance as string) : null;
-    upsertSlateStatus(date, slateId, {
+    await upsertSlateStatus(date, slateId, {
       status: "ERROR",
       lastProcessedAt: now,
       poolPath: recoveredPool.path,
@@ -289,7 +289,7 @@ export async function runSlatePipeline(
   const status: SlateLifecycleStatus = readiness.ok ? "READY" : pool.data ? "PARTIAL" : "ERROR";
   const changeReport = diffSlateState(stateBefore, captureSlateState(date, slateId));
 
-  upsertSlateStatus(date, slateId, {
+  await upsertSlateStatus(date, slateId, {
     slateLabel,
     status,
     poolPath: pool.path,

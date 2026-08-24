@@ -28,11 +28,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  if (parsed.request.projectionSource === "big_money_ml" && !userCanSelectBigMoneyMlOptimizerSource(userOrRes)) {
+  if (parsed.request.projectionSource === "big_money_ml" && !(await userCanSelectBigMoneyMlOptimizerSource(userOrRes))) {
     return NextResponse.json({ error: "Big Money ML is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
-  if (parsed.request.projectionSource === "bluecollar" && !userCanSelectBlueCollarOptimizerSource(userOrRes)) {
+  if (parsed.request.projectionSource === "bluecollar" && !(await userCanSelectBlueCollarOptimizerSource(userOrRes))) {
     return NextResponse.json({ error: "BlueCollar is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 

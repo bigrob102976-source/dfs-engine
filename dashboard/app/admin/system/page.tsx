@@ -27,25 +27,37 @@ function fmtDateTime(iso: string | null): string {
  * definition of "is this connected." No READY is faked here. */
 export default async function AdminSystemPage() {
   const date = getTodayChicagoDate();
-  const [mockModeEnabled, externalStatus, fantasyProsStatus, environmentStatus, databaseReadiness, objectStorageReadiness] = await Promise.all([
+  const [
+    mockModeEnabled,
+    externalStatus,
+    fantasyProsStatus,
+    environmentStatus,
+    databaseReadiness,
+    objectStorageReadiness,
+    jobQueueReadiness,
+    workerReadiness,
+    dbStats,
+    webhookCounts,
+    lastSuccessfulWebhook,
+    recentFailedWebhooksAll,
+  ] = await Promise.all([
     getMockModeEnabled(),
     getExternalProjectionsStatus(date),
     getFantasyProsStatus(date, null),
     getGameEnvironmentStatus(date),
     getDatabaseReadiness(),
     getObjectStorageReadiness(),
+    getJobQueueReadiness(),
+    getWorkerReadiness(),
+    computeDbStats(),
+    countWebhookEventsByStatus(),
+    getLastSuccessfulWebhookEvent(),
+    listRecentWebhookEvents(50),
   ]);
   const mlShadowStatus = getMlShadowStatus(date);
   const mlHitterShadowStatus = getMlHitterShadowStatus(date);
-  const jobQueueReadiness = getJobQueueReadiness();
-  const workerReadiness = getWorkerReadiness();
-  const dbStats = computeDbStats();
   const stripeConfigStatus = getStripeConfigStatus();
-  const webhookCounts = countWebhookEventsByStatus();
-  const lastSuccessfulWebhook = getLastSuccessfulWebhookEvent();
-  const recentFailedWebhooks = listRecentWebhookEvents(50)
-    .filter((e) => e.status === "failed")
-    .slice(0, 5);
+  const recentFailedWebhooks = recentFailedWebhooksAll.filter((e) => e.status === "failed").slice(0, 5);
 
   return (
     <div>

@@ -20,6 +20,7 @@ vi.mock("@/lib/orchestrator/pythonRunner", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { POST } = await import("../route");
@@ -33,18 +34,19 @@ function req(body: unknown) {
 }
 
 async function loginAsMember() {
-  const user = createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
+  const user = await createUser({ email: `member-${Math.random()}@example.com`, passwordHash: "h" });
   await establishSession(user.id, null);
 }
 
 async function loginAsAdmin() {
-  const user = createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
-  updateUserRole(user.id, "ADMIN");
+  const user = await createUser({ email: `admin-${Math.random()}@example.com`, passwordHash: "h" });
+  await updateUserRole(user.id, "ADMIN");
   await establishSession(user.id, null);
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
   mockRunPythonScript.mockReset();
   mockRunPythonScript.mockResolvedValue({

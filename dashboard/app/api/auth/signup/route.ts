@@ -37,23 +37,23 @@ export async function POST(request: Request) {
   }
 
   const normalizedEmail = normalizeEmail(email);
-  if (findUserByEmail(normalizedEmail)) {
+  if (await findUserByEmail(normalizedEmail)) {
     return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
   }
 
-  const user = createUser({
+  const user = await createUser({
     email: normalizedEmail,
     passwordHash: hashPassword(password),
     displayName: displayName ? displayName.trim() || null : null,
   });
 
-  const { rawToken } = createEmailVerificationToken(user.id);
+  const { rawToken } = await createEmailVerificationToken(user.id);
   const origin = new URL(request.url).origin;
   const verificationLink = `${origin}/verify-email?token=${rawToken}`;
   const { devLink } = await getEmailAdapter().sendVerificationEmail({ to: user.email, link: verificationLink });
 
   await establishSession(user.id, request.headers.get("user-agent"));
-  recordUsageEvent({ userId: user.id, eventType: "signup" });
+  await recordUsageEvent({ userId: user.id, eventType: "signup" });
 
   return NextResponse.json({ ok: true, devVerificationLink: devLink });
 }

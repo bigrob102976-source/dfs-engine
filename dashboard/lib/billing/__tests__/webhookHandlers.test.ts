@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
 
 import { __resetDbForTests } from "@/lib/db/client";
+import { __resetExecutorForTests } from "@/lib/db/executor";
 import { listAuditLog } from "@/lib/db/auditLog";
 import { findSubscriptionByProviderSubscriptionId, getCurrentSubscriptionForUser } from "@/lib/db/subscriptions";
 import { createUser, findUserById, setStripeCustomerId } from "@/lib/db/users";
@@ -66,6 +67,7 @@ function fakeInvoice(overrides: Partial<Stripe.Invoice> = {}): Stripe.Invoice {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 afterEach(() => {
@@ -73,57 +75,57 @@ afterEach(() => {
 });
 
 describe("applyStripeSubscription", () => {
-  it("returns unknown_user when neither metadata nor stripe_customer_id resolves a local user", () => {
-    const result = applyStripeSubscription(fakeSubscription({ customer: "cus_nobody" }), EVENT_TIME);
+  it("returns unknown_user when neither metadata nor stripe_customer_id resolves a local user", async () => {
+    const result = await applyStripeSubscription(fakeSubscription({ customer: "cus_nobody" }), EVENT_TIME);
     expect(result).toEqual({ ok: false, reason: "unknown_user" });
   });
 
-  it("resolves the user via metadata.bigmoney_user_id when present", () => {
-    const user = createUser({ email: "meta-user@example.com", passwordHash: "h" });
-    const result = applyStripeSubscription(
+  it("resolves the user via metadata.bigmoney_user_id when present", async () => {
+    const user = await createUser({ email: "meta-user@example.com", passwordHash: "h" });
+    const result = await applyStripeSubscription(
       fakeSubscription({ metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
       EVENT_TIME,
     );
     expect(result.ok).toBe(true);
-    expect(getCurrentSubscriptionForUser(user.id)?.user_id).toBe(user.id);
+    expect((await getCurrentSubscriptionForUser(user.id))?.user_id).toBe(user.id);
   });
 
-  it("falls back to resolving the user via stripe_customer_id when metadata is absent", () => {
-    const user = createUser({ email: "cus-fallback@example.com", passwordHash: "h" });
-    setStripeCustomerId(user.id, "cus_fallback123");
-    const result = applyStripeSubscription(
+  it("falls back to resolving the user via stripe_customer_id when metadata is absent", async () => {
+    const user = await createUser({ email: "cus-fallback@example.com", passwordHash: "h" });
+    await setStripeCustomerId(user.id, "cus_fallback123");
+    const result = await applyStripeSubscription(
       fakeSubscription({ customer: "cus_fallback123", metadata: { bigmoney_plan_id: "monthly" } }),
       EVENT_TIME,
     );
     expect(result.ok).toBe(true);
-    expect(getCurrentSubscriptionForUser(user.id)?.plan_id).toBe("monthly");
+    expect((await getCurrentSubscriptionForUser(user.id))?.plan_id).toBe("monthly");
   });
 
-  it("returns unknown_plan when metadata is missing/invalid and no price-ID fallback is configured", () => {
-    const user = createUser({ email: "noplan@example.com", passwordHash: "h" });
-    const result = applyStripeSubscription(fakeSubscription({ metadata: { bigmoney_user_id: user.id } }), EVENT_TIME);
+  it("returns unknown_plan when metadata is missing/invalid and no price-ID fallback is configured", async () => {
+    const user = await createUser({ email: "noplan@example.com", passwordHash: "h" });
+    const result = await applyStripeSubscription(fakeSubscription({ metadata: { bigmoney_user_id: user.id } }), EVENT_TIME);
     expect(result).toEqual({ ok: false, reason: "unknown_plan" });
   });
 
-  it("resolves the plan via reverse price-ID lookup when Stripe is configured and metadata is missing (defensive fallback)", () => {
+  it("resolves the plan via reverse price-ID lookup when Stripe is configured and metadata is missing (defensive fallback)", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_abc");
     vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_abc");
     vi.stubEnv("STRIPE_WEEKLY_PRICE_ID", "price_weekly_test");
     vi.stubEnv("STRIPE_MONTHLY_PRICE_ID", "price_monthly_test");
 
-    const user = createUser({ email: "pricefallback@example.com", passwordHash: "h" });
-    const result = applyStripeSubscription(
+    const user = await createUser({ email: "pricefallback@example.com", passwordHash: "h" });
+    const result = await applyStripeSubscription(
       fakeSubscription({ metadata: { bigmoney_user_id: user.id } }, { price: { id: "price_weekly_test" } }),
       EVENT_TIME,
     );
     expect(result.ok).toBe(true);
-    expect(getCurrentSubscriptionForUser(user.id)?.plan_id).toBe("weekly");
+    expect((await getCurrentSubscriptionForUser(user.id))?.plan_id).toBe("weekly");
   });
 
-  it("inserts a new stripe-provider subscription row with every field mapped correctly", () => {
-    const user = createUser({ email: "insertnew@example.com", passwordHash: "h" });
+  it("inserts a new stripe-provider subscription row with every field mapped correctly", async () => {
+    const user = await createUser({ email: "insertnew@example.com", passwordHash: "h" });
     const trialEndUnix = Math.floor(Date.parse("2026-08-20T00:00:00Z") / 1000);
-    applyStripeSubscription(
+    await applyStripeSubscription(
       fakeSubscription({
         id: "sub_new123",
         status: "trialing",
@@ -134,7 +136,7 @@ describe("applyStripeSubscription", () => {
       EVENT_TIME,
     );
 
-    const sub = getCurrentSubscriptionForUser(user.id)!;
+    const sub = (await getCurrentSubscriptionForUser(user.id))!;
     expect(sub.provider).toBe("stripe");
     expect(sub.provider_subscription_id).toBe("sub_new123");
     expect(sub.provider_price_id).toBe("price_weekly_test");
@@ -144,9 +146,9 @@ describe("applyStripeSubscription", () => {
     expect(sub.last_stripe_event_at).toBe(EVENT_TIME);
   });
 
-  it("marks the user's trial consumed when trial_end is present, and NOT when absent", () => {
-    const trialUser = createUser({ email: "trialconsumed@example.com", passwordHash: "h" });
-    applyStripeSubscription(
+  it("marks the user's trial consumed when trial_end is present, and NOT when absent", async () => {
+    const trialUser = await createUser({ email: "trialconsumed@example.com", passwordHash: "h" });
+    await applyStripeSubscription(
       fakeSubscription({
         id: "sub_trial1",
         trial_end: Math.floor(Date.now() / 1000) + 86400,
@@ -154,10 +156,10 @@ describe("applyStripeSubscription", () => {
       }),
       EVENT_TIME,
     );
-    expect(findUserById(trialUser.id)?.trial_consumed_at).not.toBeNull();
+    expect((await findUserById(trialUser.id))?.trial_consumed_at).not.toBeNull();
 
-    const noTrialUser = createUser({ email: "notrial@example.com", passwordHash: "h" });
-    applyStripeSubscription(
+    const noTrialUser = await createUser({ email: "notrial@example.com", passwordHash: "h" });
+    await applyStripeSubscription(
       fakeSubscription({
         id: "sub_notrial1",
         status: "active",
@@ -166,16 +168,16 @@ describe("applyStripeSubscription", () => {
       }),
       EVENT_TIME,
     );
-    expect(findUserById(noTrialUser.id)?.trial_consumed_at).toBeNull();
+    expect((await findUserById(noTrialUser.id))?.trial_consumed_at).toBeNull();
   });
 
-  it("updates an existing local row (found by provider_subscription_id) rather than inserting a duplicate", () => {
-    const user = createUser({ email: "updateexisting@example.com", passwordHash: "h" });
-    applyStripeSubscription(
+  it("updates an existing local row (found by provider_subscription_id) rather than inserting a duplicate", async () => {
+    const user = await createUser({ email: "updateexisting@example.com", passwordHash: "h" });
+    await applyStripeSubscription(
       fakeSubscription({ id: "sub_update1", status: "trialing", metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
       "2026-08-17T12:00:00.000Z",
     );
-    applyStripeSubscription(
+    await applyStripeSubscription(
       fakeSubscription({
         id: "sub_update1",
         status: "active",
@@ -185,21 +187,21 @@ describe("applyStripeSubscription", () => {
       "2026-08-17T12:05:00.000Z",
     );
 
-    const sub = findSubscriptionByProviderSubscriptionId("sub_update1")!;
+    const sub = (await findSubscriptionByProviderSubscriptionId("sub_update1"))!;
     expect(sub.status).toBe("active");
     expect(sub.cancel_at_period_end).toBe(1);
     // Still exactly one row for this Stripe subscription -- no duplicate insert.
-    expect(getCurrentSubscriptionForUser(user.id)?.id).toBe(sub.id);
+    expect((await getCurrentSubscriptionForUser(user.id))?.id).toBe(sub.id);
   });
 
-  it("skips (no-op) an event older than the last one already applied -- out-of-order delivery guard", () => {
-    const user = createUser({ email: "staleorder@example.com", passwordHash: "h" });
-    applyStripeSubscription(
+  it("skips (no-op) an event older than the last one already applied -- out-of-order delivery guard", async () => {
+    const user = await createUser({ email: "staleorder@example.com", passwordHash: "h" });
+    await applyStripeSubscription(
       fakeSubscription({ id: "sub_stale1", status: "active", metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
       "2026-08-17T12:10:00.000Z",
     );
     // A delayed/retried event, timestamped BEFORE the one already applied.
-    const result = applyStripeSubscription(
+    const result = await applyStripeSubscription(
       fakeSubscription({
         id: "sub_stale1",
         status: "past_due", // would regress status if wrongly applied
@@ -208,16 +210,16 @@ describe("applyStripeSubscription", () => {
       "2026-08-17T12:00:00.000Z",
     );
     expect(result).toEqual({ ok: true, reason: "stale_event_skipped" });
-    expect(findSubscriptionByProviderSubscriptionId("sub_stale1")?.status).toBe("active");
+    expect((await findSubscriptionByProviderSubscriptionId("sub_stale1"))?.status).toBe("active");
   });
 
-  it("records a subscription_synchronized audit entry with no secrets, only identifiers/status", () => {
-    const user = createUser({ email: "auditcheck@example.com", passwordHash: "h" });
-    applyStripeSubscription(
+  it("records a subscription_synchronized audit entry with no secrets, only identifiers/status", async () => {
+    const user = await createUser({ email: "auditcheck@example.com", passwordHash: "h" });
+    await applyStripeSubscription(
       fakeSubscription({ id: "sub_audit1", status: "active", metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
       EVENT_TIME,
     );
-    const entries = listAuditLog({ action: "subscription_synchronized" });
+    const entries = await listAuditLog({ action: "subscription_synchronized" });
     expect(entries).toHaveLength(1);
     expect(entries[0].actor_label).toBe("stripe_webhook");
     expect(entries[0].metadata_json).toContain("sub_audit1");
@@ -226,37 +228,37 @@ describe("applyStripeSubscription", () => {
 });
 
 describe("handleCheckoutSessionCompleted", () => {
-  it("maps the stripe customer id onto the user when both are resolvable", () => {
-    const user = createUser({ email: "checkoutmap@example.com", passwordHash: "h" });
-    const result = handleCheckoutSessionCompleted(
+  it("maps the stripe customer id onto the user when both are resolvable", async () => {
+    const user = await createUser({ email: "checkoutmap@example.com", passwordHash: "h" });
+    const result = await handleCheckoutSessionCompleted(
       fakeCheckoutSession({ client_reference_id: user.id, customer: "cus_mapped123" }),
     );
     expect(result.ok).toBe(true);
-    expect(findUserById(user.id)?.stripe_customer_id).toBe("cus_mapped123");
+    expect((await findUserById(user.id))?.stripe_customer_id).toBe("cus_mapped123");
   });
 
-  it("does not overwrite an already-set stripe_customer_id", () => {
-    const user = createUser({ email: "alreadymapped@example.com", passwordHash: "h" });
-    setStripeCustomerId(user.id, "cus_original");
-    handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: user.id, customer: "cus_different" }));
-    expect(findUserById(user.id)?.stripe_customer_id).toBe("cus_original");
+  it("does not overwrite an already-set stripe_customer_id", async () => {
+    const user = await createUser({ email: "alreadymapped@example.com", passwordHash: "h" });
+    await setStripeCustomerId(user.id, "cus_original");
+    await handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: user.id, customer: "cus_different" }));
+    expect((await findUserById(user.id))?.stripe_customer_id).toBe("cus_original");
   });
 
-  it("returns ok:false when the user cannot be resolved", () => {
-    const result = handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: null, metadata: {} }));
+  it("returns ok:false when the user cannot be resolved", async () => {
+    const result = await handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: null, metadata: {} }));
     expect(result.ok).toBe(false);
   });
 
-  it("records a checkout_completed audit entry", () => {
-    const user = createUser({ email: "checkoutaudit@example.com", passwordHash: "h" });
-    handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: user.id, customer: "cus_auditcheck" }));
-    expect(listAuditLog({ action: "checkout_completed" })).toHaveLength(1);
+  it("records a checkout_completed audit entry", async () => {
+    const user = await createUser({ email: "checkoutaudit@example.com", passwordHash: "h" });
+    await handleCheckoutSessionCompleted(fakeCheckoutSession({ client_reference_id: user.id, customer: "cus_auditcheck" }));
+    expect(await listAuditLog({ action: "checkout_completed" })).toHaveLength(1);
   });
 });
 
 describe("handleInvoicePaid / handleInvoicePaymentFailed", () => {
   it("re-fetches and syncs the associated subscription via the canonical writer", async () => {
-    const user = createUser({ email: "invoicepaid@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "invoicepaid@example.com", passwordHash: "h" });
     const fetchSubscription = vi.fn().mockResolvedValue(
       fakeSubscription({ id: "sub_invoice1", status: "active", metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
     );
@@ -269,11 +271,11 @@ describe("handleInvoicePaid / handleInvoicePaymentFailed", () => {
 
     expect(result.ok).toBe(true);
     expect(fetchSubscription).toHaveBeenCalledWith("sub_invoice1");
-    expect(getCurrentSubscriptionForUser(user.id)?.status).toBe("active");
+    expect((await getCurrentSubscriptionForUser(user.id))?.status).toBe("active");
   });
 
   it("handles an expanded (object, not string) subscription reference on the invoice", async () => {
-    const user = createUser({ email: "expandedref@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "expandedref@example.com", passwordHash: "h" });
     const fetchSubscription = vi.fn().mockResolvedValue(
       fakeSubscription({ id: "sub_expanded1", status: "past_due", metadata: { bigmoney_user_id: user.id, bigmoney_plan_id: "weekly" } }),
     );

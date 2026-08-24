@@ -70,8 +70,8 @@ export default async function SlateManagerPage(props: PageProps<"/dashboard/slat
   const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
   const ctx = await resolveSlateContext(date);
 
-  const rows: MemberSlateRow[] = ctx.slates.map((s) => {
-    const version = getPublishedVersion(date, s.slateId);
+  const rows: MemberSlateRow[] = await Promise.all(ctx.slates.map(async (s) => {
+    const version = await getPublishedVersion(date, s.slateId);
     // Milestone 30.1: the same match report already pinned by publish
     // (version.matchReportPath) -- never a fresh/unpinned load, so this
     // widget always matches whatever slate a member is actually seeing.
@@ -101,7 +101,7 @@ export default async function SlateManagerPage(props: PageProps<"/dashboard/slat
       ],
       playerPool,
     };
-  });
+  }));
 
   return (
     <div>

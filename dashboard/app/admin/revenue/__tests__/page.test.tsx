@@ -7,6 +7,7 @@ vi.mock("@/lib/billing/stripeConfig", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
 
@@ -14,6 +15,7 @@ const AdminRevenuePage = (await import("../page")).default;
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   mockGetBillingMode.mockReturnValue("dev");
 });
 
@@ -31,8 +33,8 @@ describe("AdminRevenuePage", () => {
   });
 
   it("shows the new subscriber-count cards required for spec parity", async () => {
-    const user = createUser({ email: "revenuecard@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
+    const user = await createUser({ email: "revenuecard@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
 
     render(await AdminRevenuePage());
     expect(screen.getByText("Active Subscribers")).toBeInTheDocument();

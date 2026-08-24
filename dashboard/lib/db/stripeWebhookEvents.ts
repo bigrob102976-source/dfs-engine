@@ -1,4 +1,4 @@
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 import type { StripeWebhookEvent, StripeWebhookEventStatus } from "./types";
 
 function nowIso(): string {
@@ -18,7 +18,10 @@ function mapEvent(row: Record<string, unknown> | undefined): StripeWebhookEvent 
  * that duplicate webhook deliveries happen).
  *
  * If the INSERT succeeds, THIS call owns processing.
- * If it fails (a row already exists):
+ * If it fails (a row already exists -- a real primary-key violation on
+ * both SQLite and Postgres, just with different Error shapes, which is
+ * why this only checks "did the INSERT throw," never the error's own
+ * message/code):
  *   - status='processed' -> a true duplicate delivery of a fully-handled
  *     event. Return shouldProcess:false; the caller no-ops and returns
  *     200 without touching subscription state twice.
@@ -29,58 +32,67 @@ function mapEvent(row: Record<string, unknown> | undefined): StripeWebhookEvent 
  *     because every webhook handler applies the FULL authoritative state
  *     from the Stripe object (never an incremental delta) -- reprocessing
  *     is idempotent by construction, not just "usually fine." */
-export function claimWebhookEvent(eventId: string, type: string): { shouldProcess: boolean } {
-  const db = getDb();
+export async function claimWebhookEvent(eventId: string, type: string): Promise<{ shouldProcess: boolean }> {
+  const db = getExecutor();
   try {
-    db.prepare("INSERT INTO stripe_webhook_events (id, type, status, received_at) VALUES (?, ?, 'processing', ?)").run(
+    await db.run("INSERT INTO stripe_webhook_events (id, type, status, received_at) VALUES (?, ?, 'processing', ?)", [
       eventId,
       type,
       nowIso(),
-    );
+    ]);
     return { shouldProcess: true };
   } catch {
-    const existing = db.prepare("SELECT status FROM stripe_webhook_events WHERE id = ?").get(eventId) as
-      | { status: StripeWebhookEventStatus }
-      | undefined;
+    const existing = await db.get<{ status: StripeWebhookEventStatus }>("SELECT status FROM stripe_webhook_events WHERE id = ?", [
+      eventId,
+    ]);
     if (existing?.status === "processed") {
       return { shouldProcess: false };
     }
-    db.prepare("UPDATE stripe_webhook_events SET status = 'processing', error = NULL WHERE id = ?").run(eventId);
+    await db.run("UPDATE stripe_webhook_events SET status = 'processing', error = NULL WHERE id = ?", [eventId]);
     return { shouldProcess: true };
   }
 }
 
-export function markWebhookEventProcessed(eventId: string): void {
-  const db = getDb();
-  db.prepare("UPDATE stripe_webhook_events SET status = 'processed', processed_at = ?, error = NULL WHERE id = ?").run(nowIso(), eventId);
+export async function markWebhookEventProcessed(eventId: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE stripe_webhook_events SET status = 'processed', processed_at = ?, error = NULL WHERE id = ?", [nowIso(), eventId]);
 }
 
-export function markWebhookEventFailed(eventId: string, error: string): void {
-  const db = getDb();
-  db.prepare("UPDATE stripe_webhook_events SET status = 'failed', error = ? WHERE id = ?").run(error, eventId);
+export async function markWebhookEventFailed(eventId: string, error: string): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE stripe_webhook_events SET status = 'failed', error = ? WHERE id = ?", [error, eventId]);
 }
 
-export function listRecentWebhookEvents(limit = 50): StripeWebhookEvent[] {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM stripe_webhook_events ORDER BY received_at DESC, rowid DESC LIMIT ?").all(limit);
+/** SQLite has a built-in monotonic `rowid`; Postgres does not, so the
+ * 0009 migration added a real `seq BIGSERIAL` column here for the same
+ * reason as lib/db/subscriptions.ts -- see that migration's docstring. */
+function insertionOrderColumn(backend: "sqlite" | "postgres"): string {
+  return backend === "postgres" ? "seq" : "rowid";
+}
+
+export async function listRecentWebhookEvents(limit = 50): Promise<StripeWebhookEvent[]> {
+  const db = getExecutor();
+  const rows = await db.all<Record<string, unknown>>(
+    `SELECT * FROM stripe_webhook_events ORDER BY received_at DESC, ${insertionOrderColumn(db.backend)} DESC LIMIT ?`,
+    [limit],
+  );
   return rows as unknown as StripeWebhookEvent[];
 }
 
-export function countWebhookEventsByStatus(): Record<StripeWebhookEventStatus, number> {
-  const db = getDb();
-  const rows = db.prepare("SELECT status, COUNT(*) as c FROM stripe_webhook_events GROUP BY status").all() as Array<{
-    status: StripeWebhookEventStatus;
-    c: number;
-  }>;
+export async function countWebhookEventsByStatus(): Promise<Record<StripeWebhookEventStatus, number>> {
+  const db = getExecutor();
+  const rows = await db.all<{ status: StripeWebhookEventStatus; c: number }>(
+    "SELECT status, COUNT(*) as c FROM stripe_webhook_events GROUP BY status",
+  );
   const result: Record<StripeWebhookEventStatus, number> = { processing: 0, processed: 0, failed: 0 };
-  for (const row of rows) result[row.status] = row.c;
+  for (const row of rows) result[row.status] = Number(row.c);
   return result;
 }
 
-export function getLastSuccessfulWebhookEvent(): StripeWebhookEvent | null {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM stripe_webhook_events WHERE status = 'processed' ORDER BY processed_at DESC, rowid DESC LIMIT 1")
-    .get();
-  return mapEvent(row as Record<string, unknown> | undefined);
+export async function getLastSuccessfulWebhookEvent(): Promise<StripeWebhookEvent | null> {
+  const db = getExecutor();
+  const row = await db.get<Record<string, unknown>>(
+    `SELECT * FROM stripe_webhook_events WHERE status = 'processed' ORDER BY processed_at DESC, ${insertionOrderColumn(db.backend)} DESC LIMIT 1`,
+  );
+  return mapEvent(row);
 }

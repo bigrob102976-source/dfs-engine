@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
 const { grantUserEntitlement } = await import("@/lib/db/entitlements");
@@ -21,6 +22,7 @@ function props(id: string) {
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("AdminUserDetailPage", () => {
@@ -29,9 +31,9 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("renders account, subscription, and entitlement details for a real user", async () => {
-    const user = createUser({ email: "detail@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "monthly", status: "trialing" });
-    grantUserEntitlement({ userId: user.id, entitlementKey: "mlb.optimizer", grantedBy: null, reason: "beta" });
+    const user = await createUser({ email: "detail@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "monthly", status: "trialing" });
+    await grantUserEntitlement({ userId: user.id, entitlementKey: "mlb.optimizer", grantedBy: null, reason: "beta" });
 
     render(await AdminUserDetailPage(props(user.id)));
 
@@ -43,7 +45,7 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("shows 'No subscription' state and an empty entitlements message", async () => {
-    const user = createUser({ email: "bare@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "bare@example.com", passwordHash: "h" });
     render(await AdminUserDetailPage(props(user.id)));
 
     expect(screen.getByText("No subscription.")).toBeInTheDocument();
@@ -51,24 +53,24 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("shows trial eligibility as 'Eligible' for a fresh user with no trial consumed", async () => {
-    const user = createUser({ email: "eligible@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "eligible@example.com", passwordHash: "h" });
     render(await AdminUserDetailPage(props(user.id)));
     expect(screen.getByText("Eligible")).toBeInTheDocument();
   });
 
   it("shows trial eligibility as 'Consumed' plus the consumption date once a trial has been used", async () => {
-    const user = createUser({ email: "consumed@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "consumed@example.com", passwordHash: "h" });
     const { markTrialConsumed } = await import("@/lib/db/users");
-    markTrialConsumed(user.id);
+    await markTrialConsumed(user.id);
     render(await AdminUserDetailPage(props(user.id)));
     expect(screen.getByText("Consumed")).toBeInTheDocument();
   });
 
   it("shows Stripe customer id, provider, subscription id, and cancel-at-period-end for a Stripe-backed subscription, plus a Resync button", async () => {
-    const user = createUser({ email: "stripedetail@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "stripedetail@example.com", passwordHash: "h" });
     const { setStripeCustomerId } = await import("@/lib/db/users");
-    setStripeCustomerId(user.id, "cus_detailcheck");
-    insertSubscription({
+    await setStripeCustomerId(user.id, "cus_detailcheck");
+    await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "active",
@@ -86,8 +88,8 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("does NOT show the Resync button for a dev-provider subscription", async () => {
-    const user = createUser({ email: "devdetail@example.com", passwordHash: "h" });
-    insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
+    const user = await createUser({ email: "devdetail@example.com", passwordHash: "h" });
+    await insertSubscription({ userId: user.id, planId: "weekly", status: "active" });
 
     render(await AdminUserDetailPage(props(user.id)));
     expect(screen.queryByText("Resync from Stripe")).not.toBeInTheDocument();

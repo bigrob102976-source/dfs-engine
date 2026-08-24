@@ -14,6 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getSport } = await import("@/lib/db/sports");
@@ -29,20 +30,21 @@ function patchRequest(status: unknown) {
 }
 
 async function loginAsAdmin() {
-  const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-  updateUserRole(admin.id, "ADMIN");
+  const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+  await updateUserRole(admin.id, "ADMIN");
   await establishSession(admin.id, null);
   return admin;
 }
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
 describe("PATCH /api/admin/sports/[code]/status", () => {
   it("403s for a MEMBER", async () => {
-    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    const member = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(member.id, null);
     const res = await setStatus(patchRequest("LIVE"), ctx("NFL"));
     expect(res.status).toBe(403);
@@ -62,13 +64,13 @@ describe("PATCH /api/admin/sports/[code]/status", () => {
 
   it("flips NFL to LIVE and writes an audit row", async () => {
     const admin = await loginAsAdmin();
-    expect(getSport("NFL")?.status).toBe("COMING_SOON");
+    expect((await getSport("NFL"))?.status).toBe("COMING_SOON");
 
     const res = await setStatus(patchRequest("LIVE"), ctx("NFL"));
     expect(res.status).toBe(200);
-    expect(getSport("NFL")?.status).toBe("LIVE");
+    expect((await getSport("NFL"))?.status).toBe("LIVE");
 
-    const entries = listAuditLog({ action: "sport_status_changed" });
+    const entries = await listAuditLog({ action: "sport_status_changed" });
     expect(entries).toHaveLength(1);
     expect(entries[0].actor_user_id).toBe(admin.id);
     expect(entries[0].target_id).toBe("NFL");

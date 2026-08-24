@@ -26,12 +26,14 @@ function stubStripeEnv() {
 }
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, findUserById, markTrialConsumed } = await import("@/lib/db/users");
 const { insertSubscription, getSubscriptionById, findSubscriptionByProviderSubscriptionId } = await import("@/lib/db/subscriptions");
 const { StripeBillingProvider } = await import("../stripeBillingProvider");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   stubStripeEnv();
   mockCustomersCreate.mockReset();
   mockCheckoutSessionsCreate.mockReset();
@@ -50,21 +52,21 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/session/abc" });
 
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "newcustomer@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "newcustomer@example.com", passwordHash: "h" });
 
     const result = await provider.createCheckoutSession({ userId: user.id, planId: "weekly", origin: TEST_ORIGIN });
 
     expect(result).toEqual({ url: "https://checkout.stripe.com/session/abc" });
     expect(mockCustomersCreate).toHaveBeenCalledWith({ email: "newcustomer@example.com", metadata: { bigmoney_user_id: user.id } });
-    expect(findUserById(user.id)?.stripe_customer_id).toBe("cus_new123");
+    expect((await findUserById(user.id))?.stripe_customer_id).toBe("cus_new123");
   });
 
   it("REUSES an existing Stripe customer id instead of creating a new one", async () => {
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/session/xyz" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "existingcustomer@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "existingcustomer@example.com", passwordHash: "h" });
     const { setStripeCustomerId } = await import("@/lib/db/users");
-    setStripeCustomerId(user.id, "cus_existing456");
+    await setStripeCustomerId(user.id, "cus_existing456");
 
     await provider.createCheckoutSession({ userId: user.id, planId: "weekly", origin: TEST_ORIGIN });
 
@@ -76,7 +78,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_1" });
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/x" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "pricecheck@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "pricecheck@example.com", passwordHash: "h" });
 
     // Simulates an attacker trying to smuggle an arbitrary price id in --
     // the interface only accepts a plan id string, so there is no field
@@ -98,7 +100,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_1" });
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/x" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "trialok@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "trialok@example.com", passwordHash: "h" });
 
     await provider.createCheckoutSession({ userId: user.id, planId: "weekly", origin: TEST_ORIGIN });
 
@@ -110,8 +112,8 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_1" });
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/x" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "trialused@example.com", passwordHash: "h" });
-    markTrialConsumed(user.id);
+    const user = await createUser({ email: "trialused@example.com", passwordHash: "h" });
+    await markTrialConsumed(user.id);
 
     await provider.createCheckoutSession({ userId: user.id, planId: "weekly", origin: TEST_ORIGIN });
 
@@ -123,7 +125,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_1" });
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/x" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "identitycheck@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "identitycheck@example.com", passwordHash: "h" });
 
     await provider.createCheckoutSession({ userId: user.id, planId: "monthly", origin: TEST_ORIGIN });
 
@@ -136,7 +138,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
     mockCustomersCreate.mockResolvedValue({ id: "cus_1" });
     mockCheckoutSessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/x" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "urlcheck@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "urlcheck@example.com", passwordHash: "h" });
 
     await provider.createCheckoutSession({ userId: user.id, planId: "weekly", origin: TEST_ORIGIN });
 
@@ -147,7 +149,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
 
   it("returns an error for an unknown plan id (never calls Stripe)", async () => {
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "badplan2@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "badplan2@example.com", passwordHash: "h" });
     const result = await provider.createCheckoutSession({ userId: user.id, planId: "yearly", origin: TEST_ORIGIN });
     expect(result).toHaveProperty("error");
     expect(mockCheckoutSessionsCreate).not.toHaveBeenCalled();
@@ -163,7 +165,7 @@ describe("StripeBillingProvider.createCheckoutSession", () => {
 describe("StripeBillingProvider.createCustomerPortalSession", () => {
   it("returns an error when the user has no Stripe customer on file", async () => {
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "noportal@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "noportal@example.com", passwordHash: "h" });
     const result = await provider.createCustomerPortalSession({ userId: user.id, origin: TEST_ORIGIN });
     expect(result).toHaveProperty("error");
     expect(mockBillingPortalSessionsCreate).not.toHaveBeenCalled();
@@ -172,9 +174,9 @@ describe("StripeBillingProvider.createCustomerPortalSession", () => {
   it("creates a portal session for a customer with a stripe_customer_id, using the server-side return_url", async () => {
     mockBillingPortalSessionsCreate.mockResolvedValue({ url: "https://billing.stripe.com/session/portal1" });
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "hasportal@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "hasportal@example.com", passwordHash: "h" });
     const { setStripeCustomerId } = await import("@/lib/db/users");
-    setStripeCustomerId(user.id, "cus_portalcheck");
+    await setStripeCustomerId(user.id, "cus_portalcheck");
 
     const result = await provider.createCustomerPortalSession({ userId: user.id, origin: TEST_ORIGIN });
 
@@ -190,8 +192,8 @@ describe("StripeBillingProvider.cancelSubscription", () => {
   it("sets cancel_at_period_end on Stripe AND reflects it locally right away", async () => {
     mockSubscriptionsUpdate.mockResolvedValue({});
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "cancelstripe@example.com", passwordHash: "h" });
-    const sub = insertSubscription({
+    const user = await createUser({ email: "cancelstripe@example.com", passwordHash: "h" });
+    const sub = await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "active",
@@ -202,13 +204,13 @@ describe("StripeBillingProvider.cancelSubscription", () => {
     await provider.cancelSubscription(sub.id);
 
     expect(mockSubscriptionsUpdate).toHaveBeenCalledWith("sub_cancelme", { cancel_at_period_end: true });
-    expect(getSubscriptionById(sub.id)?.cancel_at_period_end).toBe(1);
+    expect((await getSubscriptionById(sub.id))?.cancel_at_period_end).toBe(1);
   });
 
   it("refuses to act on a non-Stripe (dev-provider) subscription", async () => {
     const provider = new StripeBillingProvider();
-    const user = createUser({ email: "notstripe@example.com", passwordHash: "h" });
-    const sub = insertSubscription({ userId: user.id, planId: "weekly", status: "active" }); // provider defaults to 'dev'
+    const user = await createUser({ email: "notstripe@example.com", passwordHash: "h" });
+    const sub = await insertSubscription({ userId: user.id, planId: "weekly", status: "active" }); // provider defaults to 'dev'
 
     await expect(provider.cancelSubscription(sub.id)).rejects.toThrow();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
@@ -217,7 +219,7 @@ describe("StripeBillingProvider.cancelSubscription", () => {
 
 describe("StripeBillingProvider.syncSubscription", () => {
   it("retrieves the subscription from Stripe and reconciles it locally via the canonical writer", async () => {
-    const user = createUser({ email: "syncme@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "syncme@example.com", passwordHash: "h" });
     mockSubscriptionsRetrieve.mockResolvedValue({
       id: "sub_syncme",
       status: "active",
@@ -234,6 +236,6 @@ describe("StripeBillingProvider.syncSubscription", () => {
 
     expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith("sub_syncme");
     expect(result?.status).toBe("active");
-    expect(findSubscriptionByProviderSubscriptionId("sub_syncme")).not.toBeNull();
+    expect(await findSubscriptionByProviderSubscriptionId("sub_syncme")).not.toBeNull();
   });
 });

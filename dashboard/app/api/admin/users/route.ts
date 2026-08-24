@@ -18,8 +18,6 @@ export async function GET(request: Request) {
     trialStatus: url.searchParams.get("trialStatus"),
   };
 
-  return NextResponse.json({
-    users: listAdminUsers(filter),
-    total: countAdminUsers(filter),
-  });
+  const [users, total] = await Promise.all([listAdminUsers(filter), countAdminUsers(filter)]);
+  return NextResponse.json({ users, total });
 }

@@ -46,7 +46,7 @@ export async function POST(request: Request) {
   const bytes = Buffer.from(await file.arrayBuffer());
   const result = await uploadDraftKingsCsv(bytes, date, slateLabel.trim(), file.name);
   if (result.status === "ready") {
-    recordAuditLog({
+    await recordAuditLog({
       actorUserId: admin.id, actorLabel: admin.email, action: "dk_csv_uploaded",
       targetType: "slate", targetId: date, metadata: { date, slateLabel: slateLabel.trim(), filename: file.name },
     });

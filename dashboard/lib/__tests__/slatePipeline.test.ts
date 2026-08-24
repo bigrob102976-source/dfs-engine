@@ -126,7 +126,9 @@ beforeEach(async () => {
   tsCounter = 0;
   process.env.MLB_DFS_ROOT = tmpDir;
   const { __resetDbForTests } = await import("../db/client");
+  const { __resetExecutorForTests } = await import("../db/executor");
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 afterEach(async () => {
@@ -167,7 +169,7 @@ describe("runSlatePipeline", () => {
     ]);
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    const status = getSlateStatus(DATE, SLATE_ID)!;
+    const status = (await getSlateStatus(DATE, SLATE_ID))!;
     expect(status.status).toBe("READY");
     expect(status.pool_path).toContain("dk_player_pool_");
     expect(status.native_snapshot_path).toContain("native_projection_");
@@ -189,7 +191,7 @@ describe("runSlatePipeline", () => {
     expect(result.errors.some((e) => e.includes("Native projection engine failed"))).toBe(true);
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("PARTIAL");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("PARTIAL");
   });
 
   it("Milestone 31.1: marks a half-posted-lineup slate PARTIAL (re-pullable), never READY, even when everything else succeeds", async () => {
@@ -226,7 +228,7 @@ describe("runSlatePipeline", () => {
     expect(result.errors).toEqual([]); // not an error -- an expected, re-pullable in-progress state
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("PARTIAL");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("PARTIAL");
   });
 
   it("marks the slate ERROR when the player pool itself fails to build", async () => {
@@ -242,7 +244,7 @@ describe("runSlatePipeline", () => {
     expect(result.errors[0]).toMatch(/player pool build failed/i);
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("ERROR");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("ERROR");
   });
 
   it("Milestone 31.1: recovers source_provenance/source_hash from disk on ERROR when the pool was actually written before a later step failed", async () => {
@@ -280,7 +282,7 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("ERROR");
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    const status = getSlateStatus(DATE, SLATE_ID)!;
+    const status = (await getSlateStatus(DATE, SLATE_ID))!;
     expect(status.status).toBe("ERROR");
     expect(status.source_provenance).toBe("OFFICIAL_USER_UPLOAD");
     expect(status.source_hash).toBe("recovered-hash-xyz");
@@ -299,7 +301,7 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("ERROR");
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    const status = getSlateStatus(DATE, SLATE_ID)!;
+    const status = (await getSlateStatus(DATE, SLATE_ID))!;
     expect(status.source_provenance).toBeNull();
     expect(status.source_hash).toBeNull();
   });
@@ -317,7 +319,7 @@ describe("runSlatePipeline", () => {
     expect(result.errors.some((e) => e.includes("FantasyPros API error"))).toBe(true);
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    const status = getSlateStatus(DATE, SLATE_ID)!;
+    const status = (await getSlateStatus(DATE, SLATE_ID))!;
     expect(status.status).toBe("READY");
     expect(status.native_snapshot_path).toContain("native_projection_");
     expect(status.ai_snapshot_path).toContain("ai_projection_");
@@ -336,7 +338,7 @@ describe("runSlatePipeline", () => {
     expect(result.errors.some((e) => e.includes("FantasyPros fetch failed"))).toBe(true);
 
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("READY");
   });
 
   it("does not record an error when FantasyPros is simply not configured -- that is a normal, expected outcome", async () => {
@@ -376,7 +378,7 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors.some((e) => e.includes("BlueCollar API error"))).toBe(true);
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("READY");
   });
 
   it("still marks the slate READY when BlueCollar's slate match is ambiguous/failed -- recorded as BlueCollar not updated, never fatal", async () => {
@@ -407,7 +409,7 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors.some((e) => e.includes("BlueCollar fetch failed"))).toBe(true);
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("READY");
   });
 
   it("does not record an error when BlueCollar is simply not configured -- that is a normal, expected outcome", async () => {
@@ -447,7 +449,7 @@ describe("runSlatePipeline", () => {
     expect(result.status).toBe("READY");
     expect(result.errors.some((e) => e.includes("Player identity refresh failed"))).toBe(true);
     const { getSlateStatus } = await import("../db/slateStatus");
-    expect(getSlateStatus(DATE, SLATE_ID)!.status).toBe("READY");
+    expect((await getSlateStatus(DATE, SLATE_ID))!.status).toBe("READY");
   });
 
   it("does not record an error when the player identity refresh succeeds normally", async () => {
@@ -567,7 +569,7 @@ describe("runSlatePipeline", () => {
       ...handlers,
       "scripts/fetch_dfs_slate.py": async (args) => {
         const { getSlateStatus } = await import("../db/slateStatus");
-        sawProcessing = getSlateStatus(DATE, SLATE_ID)?.status === "PROCESSING";
+        sawProcessing = (await getSlateStatus(DATE, SLATE_ID))?.status === "PROCESSING";
         return handlers["scripts/fetch_dfs_slate.py"](args);
       },
     };

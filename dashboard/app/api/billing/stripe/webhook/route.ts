@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   // Idempotency: an event already fully processed is a true duplicate
   // delivery -- no-op, still 200 (never re-triggers Stripe's retry
   // backoff for something already handled).
-  const { shouldProcess } = claimWebhookEvent(event.id, event.type);
+  const { shouldProcess } = await claimWebhookEvent(event.id, event.type);
   if (!shouldProcess) {
     return NextResponse.json({ ok: true, deduped: true });
   }
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   try {
     switch (event.type) {
       case "checkout.session.completed":
-        handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
+        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
         break;
       // All three subscription lifecycle events carry a full Subscription
       // object and are handled identically through the same canonical
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        applyStripeSubscription(event.data.object as Stripe.Subscription, eventCreatedIso);
+        await applyStripeSubscription(event.data.object as Stripe.Subscription, eventCreatedIso);
         break;
       case "invoice.paid":
         await handleInvoicePaid(event.data.object as Stripe.Invoice, eventCreatedIso, fetchSubscription);
@@ -81,12 +81,12 @@ export async function POST(request: Request) {
         // An event type we don't act on -- not an error, just nothing to do.
         break;
     }
-    markWebhookEventProcessed(event.id);
+    await markWebhookEventProcessed(event.id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[stripe-webhook] Handler failed for ${event.type} (${event.id}): ${message}`);
-    markWebhookEventFailed(event.id, message);
+    await markWebhookEventFailed(event.id, message);
     // Non-2xx so Stripe's own retry/backoff schedule retries this event later.
     return NextResponse.json({ error: "Webhook handler failed." }, { status: 500 });
   }

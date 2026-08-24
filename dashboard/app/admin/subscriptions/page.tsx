@@ -42,7 +42,7 @@ export default async function AdminSubscriptionsPage(props: PageProps<"/admin/su
   const statusParam = firstParam(params.status);
   const status = statusParam && (VALID_STATUSES as string[]).includes(statusParam) ? (statusParam as SubscriptionStatus) : null;
 
-  const subscriptions = listSubscriptions({ status, search: firstParam(params.search), limit: 100 });
+  const subscriptions = await listSubscriptions({ status, search: firstParam(params.search), limit: 100 });
 
   return (
     <div>

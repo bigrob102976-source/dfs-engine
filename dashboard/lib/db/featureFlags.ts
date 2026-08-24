@@ -1,30 +1,30 @@
-import { getDb } from "./client";
+import { getExecutor } from "./executor";
 import type { FeatureFlag, FeatureFlagState } from "./types";
 
-export function listFeatureFlags(): FeatureFlag[] {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM feature_flags ORDER BY sport_code, key").all();
+export async function listFeatureFlags(): Promise<FeatureFlag[]> {
+  const db = getExecutor();
+  const rows = await db.all<Record<string, unknown>>("SELECT * FROM feature_flags ORDER BY sport_code, key");
   return rows as unknown as FeatureFlag[];
 }
 
-export function listFeatureFlagsForSport(sportCode: string): FeatureFlag[] {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM feature_flags WHERE sport_code = ? ORDER BY key").all(sportCode);
+export async function listFeatureFlagsForSport(sportCode: string): Promise<FeatureFlag[]> {
+  const db = getExecutor();
+  const rows = await db.all<Record<string, unknown>>("SELECT * FROM feature_flags WHERE sport_code = ? ORDER BY key", [sportCode]);
   return rows as unknown as FeatureFlag[];
 }
 
-export function getFeatureFlag(key: string): FeatureFlag | null {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM feature_flags WHERE key = ?").get(key);
+export async function getFeatureFlag(key: string): Promise<FeatureFlag | null> {
+  const db = getExecutor();
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM feature_flags WHERE key = ?", [key]);
   return (row as unknown as FeatureFlag) ?? null;
 }
 
-export function setFeatureFlagState(key: string, state: FeatureFlagState, updatedBy: string | null): void {
-  const db = getDb();
-  db.prepare("UPDATE feature_flags SET state = ?, updated_at = ?, updated_by = ? WHERE key = ?").run(
+export async function setFeatureFlagState(key: string, state: FeatureFlagState, updatedBy: string | null): Promise<void> {
+  const db = getExecutor();
+  await db.run("UPDATE feature_flags SET state = ?, updated_at = ?, updated_by = ? WHERE key = ?", [
     state,
     new Date().toISOString(),
     updatedBy,
     key,
-  );
+  ]);
 }

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   }
   const label = typeof slateLabel === "string" ? slateLabel : null;
 
-  const existing = getSlateStatus(date, slateId);
+  const existing = await getSlateStatus(date, slateId);
   if (existing?.status === "PROCESSING") {
     return NextResponse.json({ error: "This slate is already processing." }, { status: 409 });
   }
@@ -54,22 +54,22 @@ export async function POST(request: Request) {
   // this refresh. See lib/db/slateStatus.ts's docstrings.
 
   ensureSlateJobHandlersRegistered();
-  const { job } = enqueueJob({ jobType: "REFRESH_SLATE", slateDate: date, slateId, createdBy: admin.id, payload: { slateLabel: label } });
+  const { job } = await enqueueJob({ jobType: "REFRESH_SLATE", slateDate: date, slateId, createdBy: admin.id, payload: { slateLabel: label } });
 
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "slate_refresh_started",
     targetType: "slate", targetId: `${date}:${slateId}`, metadata: { date, slateId, slateLabel: label, jobId: job.id },
   });
 
-  runOneQueuedJob(`inline-${job.id}`).then((result) => {
+  runOneQueuedJob(`inline-${job.id}`).then(async (result) => {
     const failed = result.status === "FAILED" || result.status === "NO_HANDLER";
-    recordAuditLog({
+    await recordAuditLog({
       actorUserId: admin.id, actorLabel: admin.email,
       action: failed ? "slate_refresh_failed" : "slate_refresh_completed",
       targetType: "slate", targetId: `${date}:${slateId}`,
       metadata: failed
         ? { date, slateId, jobId: job.id, error: result.job?.safe_error_message ?? null }
-        : { date, slateId, jobId: job.id, status: getSlateStatus(date, slateId)?.status ?? null },
+        : { date, slateId, jobId: job.id, status: (await getSlateStatus(date, slateId))?.status ?? null },
     });
   });
 

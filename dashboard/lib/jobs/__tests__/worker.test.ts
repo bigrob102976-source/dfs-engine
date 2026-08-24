@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { __resetDbForTests } from "../../db/client";
+import { __resetExecutorForTests } from "../../db/executor";
 import { enqueueJob, getJob } from "../queue";
 import { listWorkerHealth } from "../heartbeat";
 import { registerJobHandler, runOneQueuedJob, runOneQueuedJobInBackground, TransientJobError, type JobHandler } from "../worker";
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
 });
 
 describe("runOneQueuedJob", () => {
@@ -21,32 +23,32 @@ describe("runOneQueuedJob", () => {
     });
     registerJobHandler("PROCESS_SLATE", handler);
 
-    const { job } = enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
+    const { job } = await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
     const result = await runOneQueuedJob("worker-1");
 
     expect(result.status).toBe("SUCCEEDED");
     expect(handler).toHaveBeenCalledTimes(1);
-    const finished = getJob(job.id)!;
+    const finished = (await getJob(job.id))!;
     expect(finished.status).toBe("SUCCEEDED");
     expect(finished.progress).toBe(100);
   });
 
   it("records a heartbeat for the worker while it runs", async () => {
     registerJobHandler("PROCESS_SLATE", async () => {});
-    enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
+    await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
     await runOneQueuedJob("worker-heartbeat-test");
-    expect(listWorkerHealth().some((w) => w.workerId === "worker-heartbeat-test")).toBe(true);
+    expect((await listWorkerHealth()).some((w) => w.workerId === "worker-heartbeat-test")).toBe(true);
   });
 
   it("marks the job FAILED (not retryable by default) when the handler throws", async () => {
     registerJobHandler("PROCESS_SLATE", async () => {
       throw new Error("boom");
     });
-    const { job } = enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
+    const { job } = await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
     const result = await runOneQueuedJob("worker-1");
 
     expect(result.status).toBe("FAILED");
-    const failed = getJob(job.id)!;
+    const failed = (await getJob(job.id))!;
     expect(failed.status).toBe("FAILED");
     expect(failed.safe_error_message).toBe("boom");
   });
@@ -55,30 +57,30 @@ describe("runOneQueuedJob", () => {
     registerJobHandler("PROCESS_SLATE", async () => {
       throw new TransientJobError("temporary network blip");
     });
-    const { job } = enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
+    const { job } = await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
     const result = await runOneQueuedJob("worker-1");
 
     expect(result.status).toBe("QUEUED");
-    expect(getJob(job.id)?.status).toBe("QUEUED");
+    expect((await getJob(job.id))?.status).toBe("QUEUED");
   });
 
   it("marks a job NO_HANDLER for a job type with no registered handler, without throwing", async () => {
-    const { job } = enqueueJob({ jobType: "MODEL_EVALUATION", slateDate: null, slateId: null, createdBy: null });
+    const { job } = await enqueueJob({ jobType: "MODEL_EVALUATION", slateDate: null, slateId: null, createdBy: null });
     const result = await runOneQueuedJob("worker-1");
 
     expect(result.status).toBe("NO_HANDLER");
-    const failed = getJob(job.id)!;
+    const failed = (await getJob(job.id))!;
     expect(failed.status).toBe("FAILED");
     expect(failed.error_code).toBe("NO_HANDLER");
   });
 });
 
 describe("runOneQueuedJobInBackground", () => {
-  it("does not throw synchronously even when the handler rejects", () => {
+  it("does not throw synchronously even when the handler rejects", async () => {
     registerJobHandler("PROCESS_SLATE", async () => {
       throw new Error("async boom");
     });
-    enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
+    await enqueueJob({ jobType: "PROCESS_SLATE", slateDate: "2026-08-19", slateId: "main", createdBy: null });
     expect(() => runOneQueuedJobInBackground("worker-1")).not.toThrow();
   });
 });

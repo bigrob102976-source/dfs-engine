@@ -24,5 +24,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "`slateId` query param is required." }, { status: 400 });
   }
 
-  return NextResponse.json({ date, slateId, history: listPublishHistory(date, slateId) });
+  return NextResponse.json({ date, slateId, history: await listPublishHistory(date, slateId) });
 }

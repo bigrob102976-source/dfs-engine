@@ -1,11 +1,12 @@
-import { getDb } from "./client";
-import { LATEST_ROW_PER_USER_SUBQUERY } from "./subscriptions";
+import { getExecutor } from "./executor";
+import { latestRowPerUserSubquery } from "./subscriptions";
 import type { SubscriptionStatus } from "./types";
 
-/** A user row joined to their CURRENT (latest-by-rowid) subscription, if
- * any -- the shape the admin Users list/filter table is built on. A
- * user with no subscription at all has all subscription_* fields null,
- * not omitted, so the caller can render "No subscription" explicitly. */
+/** A user row joined to their CURRENT (latest-by-insertion-order)
+ * subscription, if any -- the shape the admin Users list/filter table is
+ * built on. A user with no subscription at all has all subscription_*
+ * fields null, not omitted, so the caller can render "No subscription"
+ * explicitly. */
 export interface AdminUserRow {
   id: string;
   email: string;
@@ -43,7 +44,7 @@ function buildWhere(filter: AdminUsersFilter): { where: string; params: (string 
   const params: (string | number | null)[] = [];
 
   if (filter.search) {
-    clauses.push("(u.email LIKE ? OR u.display_name LIKE ?)");
+    clauses.push("(LOWER(u.email) LIKE LOWER(?) OR LOWER(u.display_name) LIKE LOWER(?))");
     const pattern = `%${filter.search}%`;
     params.push(pattern, pattern);
   }
@@ -77,37 +78,35 @@ function buildWhere(filter: AdminUsersFilter): { where: string; params: (string 
   return { where, params };
 }
 
-export function listAdminUsers(filter: AdminUsersFilter = {}): AdminUserRow[] {
-  const db = getDb();
+export async function listAdminUsers(filter: AdminUsersFilter = {}): Promise<AdminUserRow[]> {
+  const db = getExecutor();
   const { where, params } = buildWhere(filter);
   const limit = filter.limit ?? 50;
   const offset = filter.offset ?? 0;
-  const rows = db
-    .prepare(
-      `SELECT u.id, u.email, u.role, u.display_name, u.disabled_at, u.email_verified_at, u.created_at, u.beta_access_granted_at,
-              s.id as subscription_id, s.plan_id as plan_id, p.name as plan_name, s.status as subscription_status,
-              s.trial_ends_at as trial_ends_at, s.current_period_end as current_period_end
-       FROM users u
-       LEFT JOIN (${LATEST_ROW_PER_USER_SUBQUERY}) s ON s.user_id = u.id
-       LEFT JOIN plans p ON p.id = s.plan_id
-       ${where}
-       ORDER BY u.created_at DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...params, limit, offset);
+  const rows = await db.all<Record<string, unknown>>(
+    `SELECT u.id, u.email, u.role, u.display_name, u.disabled_at, u.email_verified_at, u.created_at, u.beta_access_granted_at,
+            s.id as subscription_id, s.plan_id as plan_id, p.name as plan_name, s.status as subscription_status,
+            s.trial_ends_at as trial_ends_at, s.current_period_end as current_period_end
+     FROM users u
+     LEFT JOIN (${latestRowPerUserSubquery(db)}) s ON s.user_id = u.id
+     LEFT JOIN plans p ON p.id = s.plan_id
+     ${where}
+     ORDER BY u.created_at DESC
+     LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  );
   return rows as unknown as AdminUserRow[];
 }
 
-export function countAdminUsers(filter: AdminUsersFilter = {}): number {
-  const db = getDb();
+export async function countAdminUsers(filter: AdminUsersFilter = {}): Promise<number> {
+  const db = getExecutor();
   const { where, params } = buildWhere(filter);
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) as c
-       FROM users u
-       LEFT JOIN (${LATEST_ROW_PER_USER_SUBQUERY}) s ON s.user_id = u.id
-       ${where}`,
-    )
-    .get(...params) as { c: number };
-  return row.c;
+  const row = await db.get<{ c: number }>(
+    `SELECT COUNT(*) as c
+     FROM users u
+     LEFT JOIN (${latestRowPerUserSubquery(db)}) s ON s.user_id = u.id
+     ${where}`,
+    params,
+  );
+  return Number(row!.c);
 }

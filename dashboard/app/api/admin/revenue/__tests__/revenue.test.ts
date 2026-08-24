@@ -14,12 +14,14 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { GET: getRevenue } = await import("../route");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
@@ -29,14 +31,14 @@ describe("GET /api/admin/revenue", () => {
   });
 
   it("403s for a MEMBER", async () => {
-    const member = createUser({ email: "member@example.com", passwordHash: "h" });
+    const member = await createUser({ email: "member@example.com", passwordHash: "h" });
     await establishSession(member.id, null);
     expect((await getRevenue()).status).toBe(403);
   });
 
   it("returns real revenue figures for an ADMIN", async () => {
-    const admin = createUser({ email: "admin@example.com", passwordHash: "h" });
-    updateUserRole(admin.id, "ADMIN");
+    const admin = await createUser({ email: "admin@example.com", passwordHash: "h" });
+    await updateUserRole(admin.id, "ADMIN");
     await establishSession(admin.id, null);
 
     const res = await getRevenue();

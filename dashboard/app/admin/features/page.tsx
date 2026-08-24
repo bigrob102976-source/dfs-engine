@@ -7,8 +7,7 @@ import { listSports } from "@/lib/db/sports";
 export const dynamic = "force-dynamic";
 
 export default async function AdminFeaturesPage() {
-  const flags = listFeatureFlags();
-  const sports = listSports();
+  const [flags, sports] = await Promise.all([listFeatureFlags(), listSports()]);
   const sportName = (code: string) => sports.find((s) => s.code === code)?.name ?? code;
 
   return (

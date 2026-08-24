@@ -22,6 +22,7 @@ vi.mock("@/lib/billing/webhookHandlers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { listRecentWebhookEvents } = await import("@/lib/db/stripeWebhookEvents");
 const { POST: webhook } = await import("../route");
 
@@ -48,6 +49,7 @@ function eventPayload(overrides: Record<string, unknown>): Record<string, unknow
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   mockGetStripeConfigStatus.mockReturnValue({ configured: true, blocked: false });
   mockGetStripeEnvConfig.mockReturnValue({
     secretKey: "sk_test_x",
@@ -67,7 +69,7 @@ describe("POST /api/billing/stripe/webhook -- configuration and signature", () =
     mockGetStripeConfigStatus.mockReturnValue({ configured: false, blocked: false, missing: ["STRIPE_WEBHOOK_SECRET"] });
     const res = await webhook(signedRequest(eventPayload({ id: "evt_unconfigured" })));
     expect(res.status).toBe(500);
-    expect(listRecentWebhookEvents()).toHaveLength(0);
+    expect(await listRecentWebhookEvents()).toHaveLength(0);
   });
 
   it("400s when the stripe-signature header is missing", async () => {
@@ -81,7 +83,7 @@ describe("POST /api/billing/stripe/webhook -- configuration and signature", () =
     const res = await webhook(signedRequest(eventPayload({ id: "evt_forged" }), "whsec_wrong_secret"));
     expect(res.status).toBe(400);
     expect(mockApplyStripeSubscription).not.toHaveBeenCalled();
-    expect(listRecentWebhookEvents()).toHaveLength(0);
+    expect(await listRecentWebhookEvents()).toHaveLength(0);
   });
 
   it("accepts a validly-signed event and returns 200", async () => {
@@ -160,7 +162,7 @@ describe("POST /api/billing/stripe/webhook -- idempotency", () => {
     expect(second.status).toBe(200);
     expect(mockApplyStripeSubscription).toHaveBeenCalledTimes(2);
 
-    const events = listRecentWebhookEvents();
+    const events = await listRecentWebhookEvents();
     expect(events.find((e) => e.id === "evt_retry1")?.status).toBe("processed");
   });
 });
@@ -173,7 +175,7 @@ describe("POST /api/billing/stripe/webhook -- handler failure", () => {
     const res = await webhook(signedRequest(eventPayload({ id: "evt_fail1" })));
     expect(res.status).toBe(500);
 
-    const events = listRecentWebhookEvents();
+    const events = await listRecentWebhookEvents();
     const row = events.find((e) => e.id === "evt_fail1");
     expect(row?.status).toBe("failed");
     expect(row?.error).toContain("db exploded");

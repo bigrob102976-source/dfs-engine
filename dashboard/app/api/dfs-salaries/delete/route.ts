@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if ("error" in result) {
     return NextResponse.json(result, { status: 400 });
   }
-  recordAuditLog({
+  await recordAuditLog({
     actorUserId: admin.id, actorLabel: admin.email, action: "dk_csv_deleted",
     targetType: "upload", targetId: path, metadata: { path },
   });

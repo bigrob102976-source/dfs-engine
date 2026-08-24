@@ -15,18 +15,20 @@ vi.mock("next/headers", () => ({
 }));
 
 const { __resetDbForTests } = await import("@/lib/db/client");
+const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { insertSubscription } = await import("@/lib/db/subscriptions");
 
 beforeEach(() => {
   __resetDbForTests();
+  __resetExecutorForTests();
   cookieStore.clear();
 });
 
 describe("AccountPage", () => {
   it("renders profile fields and 'no active membership' when there is no subscription", async () => {
-    const user = createUser({ email: "profile@example.com", passwordHash: "h", displayName: "Test Member" });
+    const user = await createUser({ email: "profile@example.com", passwordHash: "h", displayName: "Test Member" });
     await establishSession(user.id, null);
 
     const AccountPage = (await import("../page")).default;
@@ -39,9 +41,9 @@ describe("AccountPage", () => {
   });
 
   it("renders subscription details when one exists", async () => {
-    const user = createUser({ email: "sub@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "sub@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
-    insertSubscription({
+    await insertSubscription({
       userId: user.id,
       planId: "weekly",
       status: "trialing",
@@ -57,7 +59,7 @@ describe("AccountPage", () => {
   });
 
   it("shows MLB as LIVE and other sports as Coming Soon", async () => {
-    const user = createUser({ email: "sports@example.com", passwordHash: "h" });
+    const user = await createUser({ email: "sports@example.com", passwordHash: "h" });
     await establishSession(user.id, null);
 
     const AccountPage = (await import("../page")).default;
