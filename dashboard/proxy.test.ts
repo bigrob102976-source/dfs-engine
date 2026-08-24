@@ -69,4 +69,21 @@ describe("proxy (cheap Edge session-cookie gate)", () => {
     expect(location.pathname).toBe("/login");
     expect(location.searchParams.get("next")).toBe("/subscribe");
   });
+
+  it("never redirects GET /api/health, even without a cookie -- a load balancer sends none", () => {
+    const res = proxy(requestFor("/api/health"));
+    expect(res.status).toBe(200); // NextResponse.next() -- reaches the route handler, no /login redirect
+  });
+
+  it("still redirects a cookie-less request to a genuinely protected member API route", () => {
+    const res = proxy(requestFor("/api/account"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  it("still redirects a cookie-less request to /admin/slates specifically (not just /admin generically)", () => {
+    const res = proxy(requestFor("/admin/slates"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
 });

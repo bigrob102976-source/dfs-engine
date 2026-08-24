@@ -34,6 +34,14 @@ const PUBLIC_PATH_PREFIXES = [
   // verification (lib/billing/stripeClient.ts's stripeWebhooks) is the
   // entire auth story for this one route, done inside the handler itself.
   "/api/billing/stripe/webhook",
+  // Milestone 33.2.2 hotfix: a load balancer / hosting platform's health
+  // check has no session cookie to send -- app/api/health/route.ts's own
+  // docstring is this route's real security story (SAFE-only fields,
+  // never a credential/path/SQL/stack trace). Exact string, not a
+  // shared prefix -- app/api only has this one "health*" route, so this
+  // can never accidentally widen to cover a different, actually-
+  // protected API route.
+  "/api/health",
 ];
 
 export function proxy(request: NextRequest) {
