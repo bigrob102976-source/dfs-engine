@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fantasypros.models import FantasyProsSnapshot
+from research.artifact_storage import raise_if_exists
 from research.storage import save_json
 
 DEFAULT_SNAPSHOT_ROOT = Path(__file__).resolve().parent.parent / "fantasypros_snapshots"
@@ -31,11 +32,9 @@ def timestamp_tag(iso_timestamp: str) -> str:
 def save_snapshot(snapshot: FantasyProsSnapshot, output_root: Path = DEFAULT_SNAPSHOT_ROOT) -> Path:
     ts = timestamp_tag(snapshot.retrieved_at)
     path = Path(output_root) / snapshot.slate_date / f"fantasypros_projection_{ts}.json"
-    if path.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite existing immutable snapshot: {path}. "
-            f"(Two snapshots requested the same second -- this should be astronomically rare.)"
-        )
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
     save_json(path, snapshot.to_dict())
     return path
 

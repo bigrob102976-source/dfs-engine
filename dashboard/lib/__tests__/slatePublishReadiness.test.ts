@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-19";
 const SLATE_ID = "dkcsv-main-2026-08-19";
@@ -44,17 +46,19 @@ function writeNative() {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-publishreadiness-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("evaluatePublishReadiness", () => {
   it("is not ok when nothing has been built yet", async () => {
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     expect(readiness.required.every((c) => !c.ok)).toBe(true);
   });
@@ -64,7 +68,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport();
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(true);
     expect(readiness.required.every((c) => c.ok)).toBe(true);
     // Optional signals honestly reported missing, never fabricated as ready.
@@ -78,7 +82,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport({ source_provenance: "SYNTHETIC_VALIDATION" });
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     expect(readiness.required.find((c) => c.key === "source_provenance")!.ok).toBe(false);
   });
@@ -88,7 +92,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport({ identity_integrity: { total: 5, valid: 3, warning: 0, invalid: 2 } });
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     expect(readiness.required.find((c) => c.key === "pool_integrity")!.ok).toBe(false);
   });
@@ -97,7 +101,7 @@ describe("evaluatePublishReadiness", () => {
     writePool();
     writeMatchReport();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     expect(readiness.required.find((c) => c.key === "native_projections")!.ok).toBe(false);
   });
@@ -107,7 +111,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport({ dk_games_total: 3, dk_games_matched_to_research: 0 });
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     expect(readiness.required.find((c) => c.key === "game_resolution")!.ok).toBe(false);
   });
@@ -117,7 +121,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport({ teams_awaiting_lineups: ["HOU", "LAA", "WSH"] });
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(false);
     const check = readiness.required.find((c) => c.key === "lineup_confirmation")!;
     expect(check.ok).toBe(false);
@@ -133,7 +137,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport({ teams_awaiting_lineups: [] });
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.ok).toBe(true);
     expect(readiness.required.find((c) => c.key === "lineup_confirmation")!.ok).toBe(true);
   });
@@ -143,7 +147,7 @@ describe("evaluatePublishReadiness", () => {
     writeMatchReport(); // no teams_awaiting_lineups key at all
     writeNative();
     const { evaluatePublishReadiness } = await import("../slatePublishReadiness");
-    const readiness = evaluatePublishReadiness(DATE, SLATE_ID);
+    const readiness = await evaluatePublishReadiness(DATE, SLATE_ID);
     expect(readiness.required.find((c) => c.key === "lineup_confirmation")!.ok).toBe(true);
   });
 });

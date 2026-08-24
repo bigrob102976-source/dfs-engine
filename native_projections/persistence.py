@@ -33,6 +33,7 @@ import json
 from pathlib import Path
 from typing import List
 
+from research.artifact_storage import raise_if_exists
 from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
@@ -50,11 +51,9 @@ def save_native_projection_document(
     timestamp = timestamp_tag(document.generated_at)
     path = Path(output_root) / slate_date / f"{_FILENAME_PREFIX}_{timestamp}.json"
 
-    if path.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite existing immutable native projection snapshot: {path}. "
-            f"(Two snapshots requested the same second -- this should be astronomically rare.)"
-        )
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
     save_json(path, document.to_dict())
     return path

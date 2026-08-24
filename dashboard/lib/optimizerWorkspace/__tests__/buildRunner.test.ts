@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PythonRunner, PythonRunResult } from "../../orchestrator/pythonRunner";
 import type { OptimizerBuildRequest } from "../types";
 
+import { __resetStorageForTests } from "../../storage/getStorage";
+
 let tmpDir: string;
 let tsCounter = 0;
 
@@ -101,6 +103,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-buildrunner-"));
   tsCounter = 0;
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(async () => {
@@ -109,6 +112,7 @@ afterEach(async () => {
   __resetPythonRunnerForTests();
   __resetPoolCacheForTests();
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

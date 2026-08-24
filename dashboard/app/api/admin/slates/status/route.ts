@@ -73,14 +73,18 @@ export async function GET(request: Request) {
 
   const slates = await Promise.all(discovered.slates.map(async (s) => {
     const statusRow = statusById.get(s.slateId) ?? null;
-    const readiness = evaluatePublishReadiness(date, s.slateId);
     // Milestone 30: the most recent QUEUED/RUNNING job for this slate, if
     // any -- lets the Slate Operations UI show a live progress bar/step
     // while a Process/Refresh job is in flight, backed by the durable
     // `jobs` table (lib/jobs/queue.ts) rather than only the coarse
     // PROCESSING/READY/PARTIAL/ERROR status column.
-    const activeJob = (await listJobsForSlate(date, s.slateId)).find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
-    const matchReport = loadLatestDkMatchReport(date, s.slateId).data;
+    const [readiness, jobsForSlate, matchReportLoaded] = await Promise.all([
+      evaluatePublishReadiness(date, s.slateId),
+      listJobsForSlate(date, s.slateId),
+      loadLatestDkMatchReport(date, s.slateId),
+    ]);
+    const activeJob = jobsForSlate.find((j) => j.status === "QUEUED" || j.status === "RUNNING") ?? null;
+    const matchReport = matchReportLoaded.data;
     const eligibility = (matchReport?.eligibility as EligibilityCounts | undefined) ?? null;
     const identity: IdentityCounts | null = matchReport
       ? {
@@ -95,8 +99,11 @@ export async function GET(request: Request) {
     // pool + BlueCollar snapshot, never poolCache.ts's heavier loadPool()
     // (which can invoke Python if nothing is cached yet -- unsafe to call
     // from a route a status-board poll hits every few seconds).
-    const pool = loadLatestDKPlayerPool(date, s.slateId).data;
-    const blueCollarSnapshot = loadLatestBlueCollarSnapshot(date, s.slateId);
+    const [poolLoaded, blueCollarSnapshot] = await Promise.all([
+      loadLatestDKPlayerPool(date, s.slateId),
+      loadLatestBlueCollarSnapshot(date, s.slateId),
+    ]);
+    const pool = poolLoaded.data;
     const optimizerIds = new Set(
       (pool?.players ?? []).filter((p) => p.optimizer_eligible && p.mlb_player_id).map((p) => p.mlb_player_id as string),
     );

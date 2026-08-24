@@ -40,6 +40,8 @@ export default async function AdminSystemPage() {
     webhookCounts,
     lastSuccessfulWebhook,
     recentFailedWebhooksAll,
+    mlShadowStatus,
+    mlHitterShadowStatus,
   ] = await Promise.all([
     getMockModeEnabled(),
     getExternalProjectionsStatus(date),
@@ -53,9 +55,9 @@ export default async function AdminSystemPage() {
     countWebhookEventsByStatus(),
     getLastSuccessfulWebhookEvent(),
     listRecentWebhookEvents(50),
+    getMlShadowStatus(date),
+    getMlHitterShadowStatus(date),
   ]);
-  const mlShadowStatus = getMlShadowStatus(date);
-  const mlHitterShadowStatus = getMlHitterShadowStatus(date);
   const stripeConfigStatus = getStripeConfigStatus();
   const recentFailedWebhooks = recentFailedWebhooksAll.filter((e) => e.status === "failed").slice(0, 5);
 
@@ -92,7 +94,7 @@ export default async function AdminSystemPage() {
                 {objectStorageReadiness.status.replace("_", " ")}
               </span>
             </div>
-            <div className="text-[11px] text-text-faint">S3-compatible</div>
+            <div className="text-[11px] text-text-faint">{objectStorageReadiness.backend === "object" ? "S3-compatible" : "Local disk"}</div>
           </div>
           <div className="rounded border border-border-subtle bg-bg-panel-raised p-3" title={jobQueueReadiness.detail}>
             <div className="mb-1 flex items-center justify-between">

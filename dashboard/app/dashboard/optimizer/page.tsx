@@ -31,7 +31,7 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
   const initialDate = isValidSlateDateString(dateParam) ? dateParam : null;
 
   const today = getTodayChicagoDate();
-  const loaded = listLineupSets(today);
+  const loaded = await listLineupSets(today);
   const runs = loaded
     .filter((r): r is typeof r & { data: LineupSet } => r.data !== null)
     .map((r) => ({ filename: r.filename, data: r.data }));

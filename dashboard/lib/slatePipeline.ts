@@ -15,7 +15,7 @@
 // distinct admin actions/labels purely so the audit trail and status
 // board read naturally ("Process" the first time, "Refresh" afterward).
 
-import { ARTIFACT_DIRS, artifactPath } from "./artifactRoot";
+import { ARTIFACT_DIRS, artifactPath, toArtifactKey } from "./artifactRoot";
 import type { SlateLifecycleStatus } from "./db/types";
 import { upsertSlateStatus } from "./db/slateStatus";
 import { findLatestFile } from "./discovery";
@@ -35,15 +35,15 @@ export interface SlatePipelineResult {
   changeReport: SlateChangeReport;
 }
 
-function nativeSnapshotPath(date: string): string | null {
+async function nativeSnapshotPath(date: string): Promise<string | null> {
   return findLatestFile(artifactPath(ARTIFACT_DIRS.nativeProjectionSnapshots, date), "native_projection_");
 }
 
-function aiSnapshotPath(date: string): string | null {
+async function aiSnapshotPath(date: string): Promise<string | null> {
   return findLatestFile(artifactPath(ARTIFACT_DIRS.aiProjectionSnapshots, date), "ai_projection_");
 }
 
-function vegasSnapshotPath(date: string): string | null {
+async function vegasSnapshotPath(date: string): Promise<string | null> {
   return findLatestFile(artifactPath(ARTIFACT_DIRS.gameEnvironmentSnapshots, date), "environment_");
 }
 
@@ -76,10 +76,19 @@ export async function runSlatePipeline(
   onProgress: (progress: number, step: string) => void = () => {},
 ): Promise<SlatePipelineResult> {
   const now = new Date().toISOString();
-  // M32.7: captured BEFORE anything runs -- the "before" half of the
-  // Admin Change Report (see lib/slateChangeReport.ts). Cheap, read-only.
-  const stateBefore = captureSlateState(date, slateId);
+  // M33.2: the PROCESSING flip is the very first await in this function,
+  // deliberately ahead of captureSlateState() below -- app/api/admin/
+  // slates/process/route.ts's 409-if-already-processing concurrency guard
+  // (and refresh/route.ts's equivalent) depends on this write landing
+  // before a near-simultaneous second request's getSlateStatus() read.
+  // captureSlateState() now goes through the async StorageBackend (real
+  // I/O, potentially several awaits) rather than the synchronous fs reads
+  // it used pre-M33.2, so it can no longer be allowed to run first without
+  // risking that race -- see this function's own callers' docstrings.
   await upsertSlateStatus(date, slateId, { slateLabel, status: "PROCESSING" });
+  // M32.7: captured BEFORE anything else runs -- the "before" half of the
+  // Admin Change Report (see lib/slateChangeReport.ts). Cheap, read-only.
+  const stateBefore = await captureSlateState(date, slateId);
 
   const errors: string[] = [];
 
@@ -139,16 +148,21 @@ export async function runSlatePipeline(
     // recovery only: if nothing was ever written (the common case --
     // e.g. a malformed CSV never got past parsing), these stay null,
     // which is the honest state for a slate that's never built.
-    const recoveredMatchReport = loadLatestDkMatchReport(date, slateId);
-    const recoveredPool = loadLatestDKPlayerPool(date, slateId);
+    const [recoveredMatchReport, recoveredPool] = await Promise.all([
+      loadLatestDkMatchReport(date, slateId),
+      loadLatestDKPlayerPool(date, slateId),
+    ]);
     const recoveredHash = (recoveredPool.data?.players.find((p) => p.source_sha256)?.source_sha256 as string | undefined) ?? null;
     const recoveredProvenance =
       typeof recoveredMatchReport.data?.source_provenance === "string" ? (recoveredMatchReport.data.source_provenance as string) : null;
     await upsertSlateStatus(date, slateId, {
       status: "ERROR",
       lastProcessedAt: now,
-      poolPath: recoveredPool.path,
-      matchReportPath: recoveredMatchReport.path,
+      // M33.2: pinned artifact references are portable, artifact-root-
+      // relative object keys (never an admin-machine-local absolute
+      // path) -- see the same fix on the READY/PARTIAL path below.
+      poolPath: recoveredPool.path ? toArtifactKey(recoveredPool.path) : null,
+      matchReportPath: recoveredMatchReport.path ? toArtifactKey(recoveredMatchReport.path) : null,
       sourceHash: recoveredHash,
       sourceProvenance: recoveredProvenance,
     });
@@ -275,9 +289,16 @@ export async function runSlatePipeline(
 
   onProgress(95, "Finalizing slate status");
 
-  const pool = loadLatestDKPlayerPool(date, slateId);
-  const matchReport = loadLatestDkMatchReport(date, slateId);
-  const ownership = loadLatestOwnershipSnapshot(date, slateId);
+  const [pool, matchReport, ownership, nativePath, aiPath, vegasPath, readiness, stateAfter] = await Promise.all([
+    loadLatestDKPlayerPool(date, slateId),
+    loadLatestDkMatchReport(date, slateId),
+    loadLatestOwnershipSnapshot(date, slateId),
+    nativeSnapshotPath(date),
+    aiSnapshotPath(date),
+    vegasSnapshotPath(date),
+    evaluatePublishReadiness(date, slateId),
+    captureSlateState(date, slateId),
+  ]);
   // Milestone 27.4 stamps source_sha256 per-player (dfs/models.py::DFSPlayer),
   // not once at the top of the match report -- every row from one CSV
   // shares the same hash, so the first player's is the slate's own hash.
@@ -285,19 +306,29 @@ export async function runSlatePipeline(
   const sourceProvenance =
     typeof matchReport.data?.source_provenance === "string" ? (matchReport.data.source_provenance as string) : null;
 
-  const readiness = evaluatePublishReadiness(date, slateId);
   const status: SlateLifecycleStatus = readiness.ok ? "READY" : pool.data ? "PARTIAL" : "ERROR";
-  const changeReport = diffSlateState(stateBefore, captureSlateState(date, slateId));
+  const changeReport = diffSlateState(stateBefore, stateAfter);
 
+  // M33.2: `poolPath`/`matchReportPath`/`ownershipPath`/`nativeSnapshotPath`/
+  // `aiSnapshotPath`/`vegasSnapshotPath` are persisted into the slate_status
+  // table (and copied into slate_publish_history on Publish -- see
+  // lib/db/slateStatus.ts) as portable, artifact-root-relative object keys
+  // via toArtifactKey(), never the admin-machine-local absolute filesystem
+  // path artifactPath()/findLatestFile() return -- a hosted deployment can
+  // have the admin's pipeline-processing machine and a member's read-
+  // serving machine be different hosts, so an absolute local path stored
+  // here would be meaningless to whichever machine reads it back.
+  // researchSnapshotPath is already a relative reference (see
+  // researchSnapshotReference() above), so it's left unwrapped.
   await upsertSlateStatus(date, slateId, {
     slateLabel,
     status,
-    poolPath: pool.path,
-    matchReportPath: matchReport.path,
-    ownershipPath: ownership.path,
-    nativeSnapshotPath: nativeSnapshotPath(date),
-    aiSnapshotPath: aiSnapshotPath(date),
-    vegasSnapshotPath: vegasSnapshotPath(date),
+    poolPath: pool.path ? toArtifactKey(pool.path) : null,
+    matchReportPath: matchReport.path ? toArtifactKey(matchReport.path) : null,
+    ownershipPath: ownership.path ? toArtifactKey(ownership.path) : null,
+    nativeSnapshotPath: nativePath ? toArtifactKey(nativePath) : null,
+    aiSnapshotPath: aiPath ? toArtifactKey(aiPath) : null,
+    vegasSnapshotPath: vegasPath ? toArtifactKey(vegasPath) : null,
     researchSnapshotPath: researchSnapshotReference(date),
     sourceHash,
     sourceProvenance,

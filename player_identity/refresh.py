@@ -53,7 +53,7 @@ from player_identity.crosswalk_builder import build_team_identities
 from player_identity.historical_backfill import DEFAULT_HISTORICAL_CROSSWALK_PATH, load_historical_handedness
 from player_identity.models import CanonicalIdentity
 from player_identity.persistence import (
-    DEFAULT_CROSSWALK_PATH,
+    DEFAULT_CROSSWALK_ROOT,
     DEFAULT_IDENTITY_SNAPSHOT_ROOT,
     load_crosswalk,
     merge_crosswalk,
@@ -93,7 +93,7 @@ def refresh_identity(
     slate_date: str,
     research_output_root: str = "research_output",
     cache_root: Path = DEFAULT_ROSTER_CACHE_ROOT,
-    crosswalk_path: Path = DEFAULT_CROSSWALK_PATH,
+    crosswalk_root: Path = DEFAULT_CROSSWALK_ROOT,
     snapshot_root: Path = DEFAULT_IDENTITY_SNAPSHOT_ROOT,
     historical_crosswalk_path: Path = DEFAULT_HISTORICAL_CROSSWALK_PATH,
 ) -> IdentityRefreshResult:
@@ -108,7 +108,7 @@ def refresh_identity(
     teams = _load_teams(research_output_root, slate_date)
 
     handedness_by_id = load_historical_handedness(historical_crosswalk_path)
-    existing_crosswalk = load_crosswalk(crosswalk_path)
+    existing_crosswalk = load_crosswalk(output_root=crosswalk_root)
 
     new_identities: List[CanonicalIdentity] = []
     teams_fetched = 0
@@ -130,7 +130,7 @@ def refresh_identity(
     backfill_applied = sum(1 for i in new_identities if i.bat_side or i.throw_hand)
 
     merged_crosswalk = merge_crosswalk(existing_crosswalk, new_identities)
-    save_crosswalk(merged_crosswalk, generated_at, path=crosswalk_path)
+    save_crosswalk(merged_crosswalk, generated_at, output_root=crosswalk_root)
 
     result = IdentityRefreshResult(
         slate_date=slate_date,

@@ -89,26 +89,45 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   // unfiltered Full Day view when exactly one real published slate exists.
   const slateCtx = await resolveSlateContext(date, slateId, { autoSelectSoleSlate: true });
   const gameIds = effectiveGameIds(slateCtx);
-  const summary = buildSlateSummary(date);
-  const statuses = buildPipelineStatuses(date);
+  const selectedSlateId = slateCtx.selected?.slateId ?? null;
 
-  const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
-  const batterSnapshot = loadLatestBatterSnapshot(date).data;
-  const ownership = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
-  const fullDayEnvironmentReport = loadLatestEnvironmentReport(date);
+  const [
+    summary,
+    statuses,
+    pitcherSnapshotLoaded,
+    batterSnapshotLoaded,
+    ownershipLoaded,
+    fullDayEnvironmentReport,
+    matchReportLoaded,
+    providerSlateLoaded,
+    // Milestone 27.2: without the real DK pool here, a whole real MLB team
+    // whose lineup hasn't posted yet (confirmed live: LAD @ COL) never got
+    // a row anywhere on Command Center -- see lib/normalize.ts's own
+    // Milestone 27.2 docstring for the full root cause.
+    dkPoolLoaded,
+  ] = await Promise.all([
+    buildSlateSummary(date),
+    buildPipelineStatuses(date),
+    loadLatestPitcherSnapshot(date),
+    loadLatestBatterSnapshot(date),
+    loadLatestOwnershipSnapshot(date, selectedSlateId),
+    loadLatestEnvironmentReport(date),
+    loadLatestDkMatchReport(date, selectedSlateId),
+    loadLatestProviderSlate(date),
+    loadLatestDKPlayerPool(date, selectedSlateId),
+  ]);
+  const pitcherSnapshot = pitcherSnapshotLoaded.data;
+  const batterSnapshot = batterSnapshotLoaded.data;
+  const ownership = ownershipLoaded.data;
   const environmentReport = fullDayEnvironmentReport
     ? (() => {
         const games = filterByGameIdField(fullDayEnvironmentReport.games, gameIds);
         return { ...fullDayEnvironmentReport, games, vegas_slate_analysis: recomputeVegasSlateAnalysis(games) };
       })()
     : null;
-  const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
-  const providerSlate = loadLatestProviderSlate(date).data;
-  // Milestone 27.2: without the real DK pool here, a whole real MLB team
-  // whose lineup hasn't posted yet (confirmed live: LAD @ COL) never got
-  // a row anywhere on Command Center -- see lib/normalize.ts's own
-  // Milestone 27.2 docstring for the full root cause.
-  const dkPool = loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data;
+  const matchReport = matchReportLoaded.data;
+  const providerSlate = providerSlateLoaded.data;
+  const dkPool = dkPoolLoaded.data;
 
   const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
   const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
@@ -116,7 +135,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
 
   // Milestone 20: AI Projection Engine -- joined onto the same rows
   // above, additive only (nothing above this line changes behavior).
-  const aiByPlayerId = getAiProjectionByPlayerId(date);
+  const aiByPlayerId = await getAiProjectionByPlayerId(date);
   const aiHitterRows = joinAiProjections(hitterRows, aiByPlayerId);
   const aiPitcherRows = joinAiProjections(pitcherRows, aiByPlayerId);
   const aiAllRows = [...aiPitcherRows, ...aiHitterRows];
@@ -128,7 +147,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
 
   // Milestone 23: Native Projection Model -- joined onto the same rows
   // above, additive only (nothing above this line changes behavior).
-  const nativeByPlayerId = getNativeProjectionByPlayerId(date);
+  const nativeByPlayerId = await getNativeProjectionByPlayerId(date);
   const nativeHitterRows = joinNativeProjections(hitterRows, nativeByPlayerId);
   const nativePitcherRows = joinNativeProjections(pitcherRows, nativeByPlayerId);
   const nativeAllRows = [...nativePitcherRows, ...nativeHitterRows];
@@ -143,14 +162,17 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   // other Command Center recommendation (see buildMlCoverageSummary's
   // own docstring). Passing both rows lets the summary bucket pitchers
   // and hitters independently in one pass.
-  const mlByPlayerId = getMlProjectionByPlayerId(date);
+  const mlByPlayerId = await getMlProjectionByPlayerId(date);
   const mlCoverage = buildMlCoverageSummary([...pitcherRows, ...hitterRows], mlByPlayerId);
 
   // M32.7: Slate Readiness / Team Readiness -- pure aggregation over
   // data already loaded above (matchReport, joined Native/AI rows, ML
   // coverage, stacks) plus two additive reads (BlueCollar snapshot,
   // real MLB game status) -- see lib/slateReadiness.ts's own docstring.
-  const blueCollarSnapshot = loadLatestBlueCollarSnapshot(date, slateCtx.selected?.slateId ?? null);
+  const [blueCollarSnapshot, researchGamesLoaded] = await Promise.all([
+    loadLatestBlueCollarSnapshot(date, selectedSlateId),
+    loadResearchGames(date),
+  ]);
   const allTeams = Array.from(new Set([...pitcherRows, ...hitterRows].map((r) => r.team)));
   const readiness = buildSlateReadinessSummary(matchReport, allTeams, pitcherRows, nativeAllRows, aiAllRows, mlCoverage, blueCollarSnapshot);
   const hasOwnership = new Set((ownership?.players ?? []).map((p) => p.mlb_player_id).filter((id): id is string => Boolean(id)));
@@ -158,7 +180,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const teamReadinessRows = buildTeamReadinessRows(
     allTeams, pitcherRows, hitterRows, nativeAllRows, aiAllRows, blueCollarSnapshot, hasOwnership, stackStatusByTeam,
   );
-  const researchGames = filterByGameIdField(loadResearchGames(date).data ?? [], gameIds);
+  const researchGames = filterByGameIdField(researchGamesLoaded.data ?? [], gameIds);
   const earliestLockTimeUtc = researchGames
     .map((g) => g.game_datetime_utc)
     .filter((v): v is string => Boolean(v))
@@ -186,9 +208,8 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   if (summary.missingLineupGames > 0) alerts.push(`${summary.missingLineupGames} game(s) still missing a posted starting lineup.`);
   if (batterSnapshot && ownership === null) alerts.push("Ownership has not been projected yet for this slate.");
 
-  const yesterday = buildYesterdaySummary();
-  const evaluatedDate = findLatestEvaluatedDate();
-  const projectionComparison = evaluatedDate ? loadLatestProjectionSourceComparison(evaluatedDate) : null;
+  const [yesterday, evaluatedDate] = await Promise.all([buildYesterdaySummary(), findLatestEvaluatedDate()]);
+  const projectionComparison = evaluatedDate ? await loadLatestProjectionSourceComparison(evaluatedDate) : null;
 
   // Milestone 29: when a slate is selected, "Last Updated" reflects the
   // PUBLISHED version's own timestamp (never a Refresh currently in

@@ -54,3 +54,25 @@ export const ARTIFACT_DIRS = {
 export function artifactPath(...segments: string[]): string {
   return path.join(getArtifactRoot(), ...segments);
 }
+
+/** Milestone 33.2: converts an absolute (or already-relative) filesystem
+ * path built via artifactPath()/getArtifactRoot() into the canonical,
+ * forward-slash, artifact-root-relative object key lib/storage/StorageBackend.ts's
+ * StorageBackend interface expects -- the TS mirror of
+ * research/artifact_storage.py::to_artifact_key(), so both languages
+ * derive object keys from a path the exact same way (Part 18's
+ * cross-language key-parity requirement).
+ *
+ * A path that isn't under getArtifactRoot() (e.g. a genuine temp/scratch
+ * path) is returned as its resolved absolute string unchanged -- callers
+ * passing such a path are choosing not to go through artifact storage,
+ * not hitting an error here. */
+export function toArtifactKey(inputPath: string): string {
+  const root = getArtifactRoot();
+  const resolved = path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(root, inputPath);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return resolved.split(path.sep).join("/");
+  }
+  return relative.split(path.sep).join("/");
+}

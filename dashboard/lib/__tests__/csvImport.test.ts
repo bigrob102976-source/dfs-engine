@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { PythonRunner, PythonRunResult } from "../orchestrator/pythonRunner";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-13";
 
@@ -37,12 +39,14 @@ function makeFakeRunner(handlers: Record<string, Handler>, calls: Array<{ script
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-csvimport-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(async () => {
   const { __resetPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
   __resetPythonRunnerForTests();
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -225,7 +229,7 @@ describe("resolveOwnedImportSnapshotPath", () => {
   it("accepts a path inside external_projection_snapshots/ tagged source=csv_import", async () => {
     writeJson(`external_projection_snapshots/${DATE}/provider_bluecollar_20260813T180000.json`, { source: "csv_import" });
     const { resolveOwnedImportSnapshotPath } = await import("../csvImport");
-    const resolved = resolveOwnedImportSnapshotPath(path.join(tmpDir, `external_projection_snapshots/${DATE}/provider_bluecollar_20260813T180000.json`));
+    const resolved = await resolveOwnedImportSnapshotPath(path.join(tmpDir, `external_projection_snapshots/${DATE}/provider_bluecollar_20260813T180000.json`));
     expect(resolved).not.toBeNull();
   });
 
@@ -234,19 +238,19 @@ describe("resolveOwnedImportSnapshotPath", () => {
     fs.mkdirSync(path.dirname(outside), { recursive: true });
     fs.writeFileSync(outside, JSON.stringify({ source: "csv_import" }));
     const { resolveOwnedImportSnapshotPath } = await import("../csvImport");
-    expect(resolveOwnedImportSnapshotPath(outside)).toBeNull();
+    expect(await resolveOwnedImportSnapshotPath(outside)).toBeNull();
   });
 
   it("rejects a snapshot not tagged source=csv_import (e.g. a live provider fetch)", async () => {
     writeJson(`external_projection_snapshots/${DATE}/provider_mock_external_projections_20260813T180000.json`, { source: "provider_fetch" });
     const { resolveOwnedImportSnapshotPath } = await import("../csvImport");
-    const resolved = resolveOwnedImportSnapshotPath(path.join(tmpDir, `external_projection_snapshots/${DATE}/provider_mock_external_projections_20260813T180000.json`));
+    const resolved = await resolveOwnedImportSnapshotPath(path.join(tmpDir, `external_projection_snapshots/${DATE}/provider_mock_external_projections_20260813T180000.json`));
     expect(resolved).toBeNull();
   });
 
   it("rejects a path-traversal attempt using a filename inside the root", async () => {
     const { resolveOwnedImportSnapshotPath } = await import("../csvImport");
     const traversal = path.join(tmpDir, "external_projection_snapshots", DATE, "..", "..", "..", "etc", "provider_x_1.json");
-    expect(resolveOwnedImportSnapshotPath(traversal)).toBeNull();
+    expect(await resolveOwnedImportSnapshotPath(traversal)).toBeNull();
   });
 });

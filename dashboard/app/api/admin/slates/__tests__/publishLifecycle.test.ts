@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
+const { __resetStorageForTests } = await import("@/lib/storage/getStorage");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getPublishedVersion, getSlateStatus, listPublishedSlateIds, upsertSlateStatus } = await import("@/lib/db/slateStatus");
@@ -79,10 +80,12 @@ beforeEach(() => {
   cookieStore.clear();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-publish-api-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

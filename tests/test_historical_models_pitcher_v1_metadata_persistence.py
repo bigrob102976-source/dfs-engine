@@ -76,6 +76,56 @@ def test_save_model_and_load_model_round_trip_predictions_match(tmp_path):
     assert (reloaded.predict(X) == pipeline.predict(X)).all()
 
 
+def test_load_model_falls_back_to_object_storage_on_local_cache_miss(tmp_path, monkeypatch):
+    # Milestone 33.2 Part 7: a fresh container (nothing cached locally
+    # yet) must pull the model from object storage exactly once, then
+    # read the local cache on every call after -- never a network fetch
+    # per inference call.
+    pipeline, _ = _tiny_fitted_pipeline()
+    source_dir = tmp_path / "source"
+    save_model(source_dir, pipeline)
+    model_bytes = (source_dir / "model.joblib").read_bytes()
+
+    class _FakeStorage:
+        def __init__(self):
+            self.read_calls = 0
+
+        def read_bytes(self, key):
+            self.read_calls += 1
+            return model_bytes
+
+    fake_storage = _FakeStorage()
+    import historical_models.pitcher_v1.persistence as persistence_module
+
+    monkeypatch.setattr(persistence_module, "resolve_artifact_storage", lambda root: fake_storage)
+
+    cache_dir = tmp_path / "cache"
+    assert not (cache_dir / "model.joblib").exists()
+    reloaded = load_model(cache_dir)
+    assert fake_storage.read_calls == 1
+    assert (cache_dir / "model.joblib").exists()  # now cached locally
+
+    # A second call reads the now-populated local cache -- no second
+    # object-storage fetch.
+    load_model(cache_dir)
+    assert fake_storage.read_calls == 1
+
+
+def test_load_model_raises_a_clear_error_when_missing_everywhere(tmp_path, monkeypatch):
+    class _EmptyStorage:
+        def read_bytes(self, key):
+            return None
+
+    import historical_models.pitcher_v1.persistence as persistence_module
+
+    monkeypatch.setattr(persistence_module, "resolve_artifact_storage", lambda root: _EmptyStorage())
+
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        load_model(tmp_path / "nowhere")
+
+
 def test_append_experiment_record_is_append_only_never_overwrites(tmp_path):
     append_experiment_record(tmp_path, {"experiment_id": "exp1", "validation_MAE": 5.0})
     append_experiment_record(tmp_path, {"experiment_id": "exp2", "validation_MAE": 4.5})

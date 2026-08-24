@@ -41,7 +41,7 @@ function exposurePercentByName(lineupSet: LineupSet | null): Map<string, number>
  * run). Returns an all-null/empty report with an explanatory note when
  * there's nothing valid to compare against (first refresh of the day,
  * or a previous run for a different date). */
-export function buildChangeReport(previous: RunState | null, current: RunState): ChangeReport {
+export async function buildChangeReport(previous: RunState | null, current: RunState): Promise<ChangeReport> {
   const report = emptyChangeReport();
 
   if (!previous || previous.status !== "completed" || !previous.summary) {
@@ -73,8 +73,10 @@ export function buildChangeReport(previous: RunState | null, current: RunState):
   report.previousRunId = previous.runId;
   report.previousFinishedAt = previous.finishedAt;
 
-  const prevBatters = safeReadJson<BatterSnapshot>(stepPath(previous, "batters"));
-  const currBatters = safeReadJson<BatterSnapshot>(stepPath(current, "batters"));
+  const [prevBatters, currBatters] = await Promise.all([
+    safeReadJson<BatterSnapshot>(stepPath(previous, "batters")),
+    safeReadJson<BatterSnapshot>(stepPath(current, "batters")),
+  ]);
   if (prevBatters && currBatters) {
     const prevStarters = new Map((prevBatters.hitters ?? []).map((h) => [h.player_id, h]));
     const currStarters = new Map((currBatters.hitters ?? []).map((h) => [h.player_id, h]));
@@ -95,8 +97,10 @@ export function buildChangeReport(previous: RunState | null, current: RunState):
     report.notes.push("Batter snapshot missing for one of the two runs -- cannot compare posted lineups.");
   }
 
-  const prevPool = safeReadJson<DKPlayerPool>(stepPath(previous, "playerPool"));
-  const currPool = safeReadJson<DKPlayerPool>(stepPath(current, "playerPool"));
+  const [prevPool, currPool] = await Promise.all([
+    safeReadJson<DKPlayerPool>(stepPath(previous, "playerPool")),
+    safeReadJson<DKPlayerPool>(stepPath(current, "playerPool")),
+  ]);
   if (prevPool && currPool) {
     const prevByPlayer = new Map((prevPool.players ?? []).map((p) => [p.mlb_player_id ?? p.dk_player_id, p]));
     let salaryChanged = 0;
@@ -113,8 +117,10 @@ export function buildChangeReport(previous: RunState | null, current: RunState):
     report.notes.push("Player pool missing for one of the two runs -- cannot compare salaries/projections.");
   }
 
-  const prevOwnership = safeReadJson<OwnershipSnapshot>(stepPath(previous, "ownership"));
-  const currOwnership = safeReadJson<OwnershipSnapshot>(stepPath(current, "ownership"));
+  const [prevOwnership, currOwnership] = await Promise.all([
+    safeReadJson<OwnershipSnapshot>(stepPath(previous, "ownership")),
+    safeReadJson<OwnershipSnapshot>(stepPath(current, "ownership")),
+  ]);
   if (prevOwnership && currOwnership) {
     const prevByPlayer = new Map((prevOwnership.players ?? []).map((p) => [p.mlb_player_id ?? p.dk_player_id, p]));
     let changed = 0;
@@ -127,8 +133,10 @@ export function buildChangeReport(previous: RunState | null, current: RunState):
     report.notes.push("Ownership snapshot missing for one of the two runs -- cannot compare ownership.");
   }
 
-  const prevLineups = safeReadJson<LineupSet>(previous.summary.lineupSetPaths?.projection ?? null);
-  const currLineups = safeReadJson<LineupSet>(current.summary?.lineupSetPaths?.projection ?? null);
+  const [prevLineups, currLineups] = await Promise.all([
+    safeReadJson<LineupSet>(previous.summary.lineupSetPaths?.projection ?? null),
+    safeReadJson<LineupSet>(current.summary?.lineupSetPaths?.projection ?? null),
+  ]);
   if (prevLineups && currLineups) {
     const prevExposure = exposurePercentByName(prevLineups);
     const currExposure = exposurePercentByName(currLineups);

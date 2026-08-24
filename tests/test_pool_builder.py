@@ -13,7 +13,7 @@ from dfs.providers.adapter import provider_players_to_dk_rows
 def _no_identity_crosswalk_by_default(monkeypatch):
     # Canonical MLB Player Identity Foundation: build_pool() widens
     # identity matching using the on-disk rolling crosswalk
-    # (player_identity/persistence.py's DEFAULT_CROSSWALK_PATH) by
+    # (player_identity/persistence.py's DEFAULT_CROSSWALK_ROOT) by
     # default. Every test in this file predates that milestone and
     # asserts behavior against ONLY research_output's confirmed-lineup
     # identity -- isolate from whatever crosswalk file happens to exist

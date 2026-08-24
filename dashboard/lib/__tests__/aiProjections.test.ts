@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-14";
 
@@ -47,17 +49,19 @@ function aiPlayerRecord(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-aiprojections-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestAiProjectionSnapshot", () => {
   it("returns null when no snapshot exists", async () => {
     const { loadLatestAiProjectionSnapshot } = await import("../aiProjections");
-    expect(loadLatestAiProjectionSnapshot(DATE)).toBeNull();
+    expect(await loadLatestAiProjectionSnapshot(DATE)).toBeNull();
   });
 
   it("returns the latest snapshot by filename timestamp", async () => {
@@ -68,7 +72,7 @@ describe("loadLatestAiProjectionSnapshot", () => {
       slate_date: DATE, generated_at: "2026-08-14T19:00:00Z", model_version: "0.1.0", player_count: 0, players: [], warnings: [],
     });
     const { loadLatestAiProjectionSnapshot } = await import("../aiProjections");
-    const latest = loadLatestAiProjectionSnapshot(DATE);
+    const latest = await loadLatestAiProjectionSnapshot(DATE);
     expect(latest?.generated_at).toBe("2026-08-14T19:00:00Z");
   });
 });
@@ -76,7 +80,7 @@ describe("loadLatestAiProjectionSnapshot", () => {
 describe("getAiProjectionByPlayerId", () => {
   it("returns an empty map (never throws) when no snapshot exists", async () => {
     const { getAiProjectionByPlayerId } = await import("../aiProjections");
-    const map = getAiProjectionByPlayerId(DATE);
+    const map = await getAiProjectionByPlayerId(DATE);
     expect(map.size).toBe(0);
   });
 
@@ -86,7 +90,7 @@ describe("getAiProjectionByPlayerId", () => {
       player_count: 1, players: [aiPlayerRecord()], warnings: [],
     });
     const { getAiProjectionByPlayerId } = await import("../aiProjections");
-    const map = getAiProjectionByPlayerId(DATE);
+    const map = await getAiProjectionByPlayerId(DATE);
     const player = map.get("519242");
     expect(player).toBeDefined();
     expect(player?.ai_projection).toBe(27.4);

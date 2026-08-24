@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "`slateId` is required." }, { status: 400 });
   }
 
-  const readiness = evaluatePublishReadiness(date, slateId);
+  const readiness = await evaluatePublishReadiness(date, slateId);
   if (!readiness.ok) {
     return NextResponse.json(
       { error: "This slate is not ready to publish.", readiness },

@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dfs.providers.base import ProviderAuthenticationError, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.config import get_configured_provider
 from research.adapters.pitcher_input import ResearchPackageNotFoundError, load_research_package
+from research.artifact_storage import raise_if_exists
 from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
@@ -46,8 +47,9 @@ def _load_research_games(date: str) -> list:
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing provider slate artifact: {path}")
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 def _save_document(args, status: str, reason, provider_name=None, source=None, raw_result=None, chosen_slate_id=None) -> Path:

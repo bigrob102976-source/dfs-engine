@@ -51,10 +51,14 @@ function countGamesWaitingForLineups(pool: DKPlayerPool | null): number {
 /** The BIG MONEY ML COVERAGE gate: shown to ADMIN before an ML
  * optimizer build. Reads the M30.1 eligibility denominator directly
  * from the persisted ML snapshots -- never recomputed here. */
-export function getBigMoneyMlCoverage(date: string, slateId?: string | null): BigMoneyMlCoverage {
-  const pitcherDoc = loadLatestMlProjectionSnapshot(date);
-  const hitterDoc = loadLatestMlHitterProjectionSnapshot(date);
-  const pool = loadLatestDKPlayerPool(date, slateId ?? null).data;
+export async function getBigMoneyMlCoverage(date: string, slateId?: string | null): Promise<BigMoneyMlCoverage> {
+  const [pitcherDoc, hitterDoc, poolLoaded, provenance] = await Promise.all([
+    loadLatestMlProjectionSnapshot(date),
+    loadLatestMlHitterProjectionSnapshot(date),
+    loadLatestDKPlayerPool(date, slateId ?? null),
+    getBigMoneyMlProvenance(date),
+  ]);
+  const pool = poolLoaded.data;
 
   const pitchers: BigMoneyMlSourceCoverage = {
     generated: pitcherDoc?.ml_projections_generated ?? 0,
@@ -74,6 +78,6 @@ export function getBigMoneyMlCoverage(date: string, slateId?: string | null): Bi
     hitters,
     combined,
     gamesWaitingForLineups: countGamesWaitingForLineups(pool),
-    ...getBigMoneyMlProvenance(date),
+    ...provenance,
   };
 }

@@ -121,9 +121,9 @@ export interface MlHitterProjectionDocument {
 /** Reads the latest immutable Big Money ML PITCHER shadow snapshot for
  * `date`, if any. Pure filesystem read -- never triggers generation
  * (see scripts/run_ml_shadow_inference.py for that). */
-export function loadLatestMlProjectionSnapshot(date: string): MlProjectionDocument | null {
+export async function loadLatestMlProjectionSnapshot(date: string): Promise<MlProjectionDocument | null> {
   const dir = artifactPath(ARTIFACT_DIRS.mlProjectionSnapshots, date);
-  const path = findLatestFile(dir, "ml_projection_");
+  const path = await findLatestFile(dir, "ml_projection_");
   return safeReadJson<MlProjectionDocument>(path);
 }
 
@@ -132,9 +132,9 @@ export function loadLatestMlProjectionSnapshot(date: string): MlProjectionDocume
  * (see scripts/run_ml_hitter_shadow_inference.py for that). Filename
  * prefix "ml_hitter_projection_" never collides with the pitcher
  * stream's "ml_projection_" prefix despite sharing the same date folder. */
-export function loadLatestMlHitterProjectionSnapshot(date: string): MlHitterProjectionDocument | null {
+export async function loadLatestMlHitterProjectionSnapshot(date: string): Promise<MlHitterProjectionDocument | null> {
   const dir = artifactPath(ARTIFACT_DIRS.mlProjectionSnapshots, date);
-  const path = findLatestFile(dir, "ml_hitter_projection_");
+  const path = await findLatestFile(dir, "ml_hitter_projection_");
   return safeReadJson<MlHitterProjectionDocument>(path);
 }
 
@@ -144,8 +144,8 @@ export function loadLatestMlHitterProjectionSnapshot(date: string): MlHitterProj
  * getMlProjectionByPlayerId below for the unified "BIG MONEY ML" view
  * (pitchers + hitters merged) -- this pitcher-only variant is kept for
  * callers that genuinely only care about pitchers. */
-export function getMlPitcherProjectionByPlayerId(date: string): Map<string, MlPitcherProjection> {
-  const snapshot = loadLatestMlProjectionSnapshot(date);
+export async function getMlPitcherProjectionByPlayerId(date: string): Promise<Map<string, MlPitcherProjection>> {
+  const snapshot = await loadLatestMlProjectionSnapshot(date);
   const map = new Map<string, MlPitcherProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {
@@ -157,8 +157,8 @@ export function getMlPitcherProjectionByPlayerId(date: string): Map<string, MlPi
 /** { player_id -> MlHitterProjection } map from the latest Big Money ML
  * HITTER-only snapshot for `date`. Returns an empty map (never
  * null/throws) when no snapshot exists yet. */
-export function getMlHitterProjectionByPlayerId(date: string): Map<string, MlHitterProjection> {
-  const snapshot = loadLatestMlHitterProjectionSnapshot(date);
+export async function getMlHitterProjectionByPlayerId(date: string): Promise<Map<string, MlHitterProjection>> {
+  const snapshot = await loadLatestMlHitterProjectionSnapshot(date);
   const map = new Map<string, MlHitterProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {
@@ -175,9 +175,8 @@ export function getMlHitterProjectionByPlayerId(date: string): Map<string, MlHit
  * Every entry is stamped with player_type so a caller can distinguish
  * a pitcher's row from a hitter's row without a second lookup; hitter
  * rows carry their real batting_order, pitcher rows always carry null. */
-export function getMlProjectionByPlayerId(date: string): Map<string, MlPitcherProjection> {
-  const map = getMlPitcherProjectionByPlayerId(date);
-  const hitterMap = getMlHitterProjectionByPlayerId(date);
+export async function getMlProjectionByPlayerId(date: string): Promise<Map<string, MlPitcherProjection>> {
+  const [map, hitterMap] = await Promise.all([getMlPitcherProjectionByPlayerId(date), getMlHitterProjectionByPlayerId(date)]);
   for (const [playerId, p] of hitterMap) {
     map.set(playerId, { ...p, player_type: "hitter" });
   }
@@ -195,9 +194,8 @@ export interface BigMoneyMlProvenance {
  * Money ML as the projection source -- read from the latest persisted
  * snapshot of each stream (never invented, never defaulted to "current
  * time"). All null when no snapshot exists yet for that player type. */
-export function getBigMoneyMlProvenance(date: string): BigMoneyMlProvenance {
-  const pitcherDoc = loadLatestMlProjectionSnapshot(date);
-  const hitterDoc = loadLatestMlHitterProjectionSnapshot(date);
+export async function getBigMoneyMlProvenance(date: string): Promise<BigMoneyMlProvenance> {
+  const [pitcherDoc, hitterDoc] = await Promise.all([loadLatestMlProjectionSnapshot(date), loadLatestMlHitterProjectionSnapshot(date)]);
   return {
     pitcherModelVersion: pitcherDoc?.model_version ?? null,
     hitterModelVersion: hitterDoc?.model_version ?? null,

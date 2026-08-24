@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-22";
 
@@ -35,10 +37,12 @@ function hitterRecord(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-mlprojections-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -56,8 +60,8 @@ describe("loadLatestMlProjectionSnapshot / loadLatestMlHitterProjectionSnapshot"
     });
 
     const { loadLatestMlProjectionSnapshot, loadLatestMlHitterProjectionSnapshot } = await import("../mlProjections");
-    const pitcherDoc = loadLatestMlProjectionSnapshot(DATE);
-    const hitterDoc = loadLatestMlHitterProjectionSnapshot(DATE);
+    const pitcherDoc = await loadLatestMlProjectionSnapshot(DATE);
+    const hitterDoc = await loadLatestMlHitterProjectionSnapshot(DATE);
 
     expect(pitcherDoc?.players).toHaveLength(1);
     expect(pitcherDoc?.players[0].player_id).toBe("543037");
@@ -67,15 +71,15 @@ describe("loadLatestMlProjectionSnapshot / loadLatestMlHitterProjectionSnapshot"
 
   it("returns null when no snapshot exists for either stream", async () => {
     const { loadLatestMlProjectionSnapshot, loadLatestMlHitterProjectionSnapshot } = await import("../mlProjections");
-    expect(loadLatestMlProjectionSnapshot(DATE)).toBeNull();
-    expect(loadLatestMlHitterProjectionSnapshot(DATE)).toBeNull();
+    expect(await loadLatestMlProjectionSnapshot(DATE)).toBeNull();
+    expect(await loadLatestMlHitterProjectionSnapshot(DATE)).toBeNull();
   });
 });
 
 describe("getMlProjectionByPlayerId (unified BIG MONEY ML map)", () => {
   it("returns an empty map (never throws) when no snapshots exist", async () => {
     const { getMlProjectionByPlayerId } = await import("../mlProjections");
-    const map = getMlProjectionByPlayerId(DATE);
+    const map = await getMlProjectionByPlayerId(DATE);
     expect(map.size).toBe(0);
   });
 
@@ -92,7 +96,7 @@ describe("getMlProjectionByPlayerId (unified BIG MONEY ML map)", () => {
     });
 
     const { getMlProjectionByPlayerId } = await import("../mlProjections");
-    const map = getMlProjectionByPlayerId(DATE);
+    const map = await getMlProjectionByPlayerId(DATE);
     expect(map.size).toBe(2);
 
     const pitcher = map.get("543037");
@@ -113,7 +117,7 @@ describe("getMlProjectionByPlayerId (unified BIG MONEY ML map)", () => {
       ml_projections_generated: 1, ml_projections_missing: 0, feature_parity_summary: {}, players: [hitterRecord()], warnings: [],
     });
     const { getMlProjectionByPlayerId } = await import("../mlProjections");
-    const map = getMlProjectionByPlayerId(DATE);
+    const map = await getMlProjectionByPlayerId(DATE);
     expect(map.size).toBe(1);
     expect(map.get("660271")?.player_type).toBe("hitter");
   });
@@ -127,7 +131,7 @@ describe("getMlHitterProjectionByPlayerId", () => {
       ml_projections_generated: 1, ml_projections_missing: 0, feature_parity_summary: {}, players: [hitterRecord()], warnings: [],
     });
     const { getMlHitterProjectionByPlayerId } = await import("../mlProjections");
-    const map = getMlHitterProjectionByPlayerId(DATE);
+    const map = await getMlHitterProjectionByPlayerId(DATE);
     const player = map.get("660271");
     expect(player?.batting_order).toBe(1);
     expect(player?.data_quality_score).toBe(0.988);

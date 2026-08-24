@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
+const { __resetStorageForTests } = await import("@/lib/storage/getStorage");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { GET: getSlates } = await import("../route");
@@ -32,11 +33,13 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-slates-api-"));
   originalRoot = process.env.MLB_DFS_ROOT;
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   if (originalRoot === undefined) delete process.env.MLB_DFS_ROOT;
   else process.env.MLB_DFS_ROOT = originalRoot;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

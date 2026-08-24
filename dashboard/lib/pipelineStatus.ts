@@ -19,18 +19,20 @@ function ts(generatedAtUtc?: string | null, generatedAtLocal?: string | null, fa
  * Each stage's "outdated" check compares it against the PREVIOUS stage's
  * timestamp -- a real staleness signal (e.g. ownership computed before
  * the DK pool it should have used was last rebuilt). */
-export function buildPipelineStatuses(date: string | null): ArtifactStatus[] {
+export async function buildPipelineStatuses(date: string | null): Promise<ArtifactStatus[]> {
   if (!date) {
     return [];
   }
 
-  const research = loadResearchSlate(date);
-  const pitcher = loadLatestPitcherSnapshot(date);
-  const batter = loadLatestBatterSnapshot(date);
-  const ownership = loadLatestOwnershipSnapshot(date);
-  const pool = loadLatestDKPlayerPool(date);
-  const lineups = loadLatestLineupSet(date);
-  const evaluation = loadLatestOwnershipEvaluation(date);
+  const [research, pitcher, batter, ownership, pool, lineups, evaluation] = await Promise.all([
+    loadResearchSlate(date),
+    loadLatestPitcherSnapshot(date),
+    loadLatestBatterSnapshot(date),
+    loadLatestOwnershipSnapshot(date),
+    loadLatestDKPlayerPool(date),
+    loadLatestLineupSet(date),
+    loadLatestOwnershipEvaluation(date),
+  ]);
 
   const researchTs = ts(null, null, null);
   const pitcherTs = ts(pitcher.data?.generated_at_utc, pitcher.data?.generated_at_local, pitcher.data?.generated_at);
@@ -108,12 +110,14 @@ export interface SlateSummary {
   missingLineupGames: number;
 }
 
-export function buildSlateSummary(date: string | null): SlateSummary {
+export async function buildSlateSummary(date: string | null): Promise<SlateSummary> {
   if (!date) return { gamesOnResearch: 0, gamesOnDkSlate: null, postedLineupGames: 0, missingLineupGames: 0 };
 
-  const research = loadResearchSlate(date);
-  const batter = loadLatestBatterSnapshot(date);
-  const matchReport = loadLatestDkMatchReport(date);
+  const [research, batter, matchReport] = await Promise.all([
+    loadResearchSlate(date),
+    loadLatestBatterSnapshot(date),
+    loadLatestDkMatchReport(date),
+  ]);
 
   const gamesOnResearch = research.data?.counts?.games ?? 0;
   const missingLineupGames = batter.data?.missing_lineup_game_ids?.length ?? 0;

@@ -20,14 +20,19 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
+from research.artifact_storage import raise_if_exists
 from research.storage import save_json
 
 DEFAULT_BLUECOLLAR_ROOT = Path(__file__).resolve().parent.parent / "bluecollar_projection_snapshots"
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing BlueCollar snapshot: {path}")
+    # Milestone 33.2: delegates to the shared, storage-aware check
+    # (research/artifact_storage.py::raise_if_exists) instead of a local
+    # path.exists() call, which silently never detected a real collision
+    # once OBJECT_STORAGE_* is configured (the artifact lives in the
+    # bucket, not on this local disk).
+    raise_if_exists(path)
 
 
 def _slate_folder(output_root: Path, slate_date: str, dk_slate_id: str) -> Path:

@@ -32,13 +32,18 @@ export interface PublishReadiness {
   optional: ReadinessCheck[];
 }
 
-export function evaluatePublishReadiness(date: string, slateId: string): PublishReadiness {
-  const matchReport = loadLatestDkMatchReport(date, slateId).data;
-  const pool = loadLatestDKPlayerPool(date, slateId).data;
-  const nativeMap = getNativeProjectionByPlayerId(date);
-  const aiMap = getAiProjectionByPlayerId(date);
-  const ownership = loadLatestOwnershipSnapshot(date, slateId).data;
-  const environment = loadLatestEnvironmentReport(date);
+export async function evaluatePublishReadiness(date: string, slateId: string): Promise<PublishReadiness> {
+  const [matchReportLoaded, poolLoaded, nativeMap, aiMap, ownershipLoaded, environment] = await Promise.all([
+    loadLatestDkMatchReport(date, slateId),
+    loadLatestDKPlayerPool(date, slateId),
+    getNativeProjectionByPlayerId(date),
+    getAiProjectionByPlayerId(date),
+    loadLatestOwnershipSnapshot(date, slateId),
+    loadLatestEnvironmentReport(date),
+  ]);
+  const matchReport = matchReportLoaded.data;
+  const pool = poolLoaded.data;
+  const ownership = ownershipLoaded.data;
 
   const provenance = typeof matchReport?.source_provenance === "string" ? (matchReport.source_provenance as string) : null;
   const provenanceOk = provenance !== null && TRUSTED_PROVENANCE.has(provenance);

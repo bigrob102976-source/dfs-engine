@@ -11,8 +11,11 @@ file every run, FileExistsError instead of silent overwrite.
 """
 
 import csv
+import io
 from pathlib import Path
 from typing import Optional
+
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 
 # Reuses the exact same UTC/local/timezone metadata helper the Pitcher and
 # Batter snapshots already use (America/Chicago, tzdata-backed) instead of
@@ -86,32 +89,32 @@ def _slot_players(assignments, slot: str):
 
 def save_lineup_set_csv(document: dict, slate_date: str, timestamp: str, output_root: Path = DEFAULT_LINEUPS_ROOT) -> Path:
     path = Path(output_root) / slate_date / f"dk_lineups_{timestamp}.csv"
-    _no_overwrite(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
 
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(_CSV_COLUMNS)
-        for lineup in document["lineups"]:
-            assignments = lineup["assignments"]
-            pitchers = _slot_players(assignments, "P")
-            ofs = _slot_players(assignments, "OF")
-            by_slot = {a["slot"]: a for a in assignments if a["slot"] not in ("P", "OF")}
-            row = [
-                lineup["index"],
-                pitchers[0]["name"] if len(pitchers) > 0 else "",
-                pitchers[1]["name"] if len(pitchers) > 1 else "",
-                by_slot.get("C", {}).get("name", ""),
-                by_slot.get("1B", {}).get("name", ""),
-                by_slot.get("2B", {}).get("name", ""),
-                by_slot.get("3B", {}).get("name", ""),
-                by_slot.get("SS", {}).get("name", ""),
-                ofs[0]["name"] if len(ofs) > 0 else "",
-                ofs[1]["name"] if len(ofs) > 1 else "",
-                ofs[2]["name"] if len(ofs) > 2 else "",
-                lineup["salary"],
-                lineup["projection"],
-                lineup["ceiling"],
-            ]
-            writer.writerow(row)
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(_CSV_COLUMNS)
+    for lineup in document["lineups"]:
+        assignments = lineup["assignments"]
+        pitchers = _slot_players(assignments, "P")
+        ofs = _slot_players(assignments, "OF")
+        by_slot = {a["slot"]: a for a in assignments if a["slot"] not in ("P", "OF")}
+        row = [
+            lineup["index"],
+            pitchers[0]["name"] if len(pitchers) > 0 else "",
+            pitchers[1]["name"] if len(pitchers) > 1 else "",
+            by_slot.get("C", {}).get("name", ""),
+            by_slot.get("1B", {}).get("name", ""),
+            by_slot.get("2B", {}).get("name", ""),
+            by_slot.get("3B", {}).get("name", ""),
+            by_slot.get("SS", {}).get("name", ""),
+            ofs[0]["name"] if len(ofs) > 0 else "",
+            ofs[1]["name"] if len(ofs) > 1 else "",
+            ofs[2]["name"] if len(ofs) > 2 else "",
+            lineup["salary"],
+            lineup["projection"],
+            lineup["ceiling"],
+        ]
+        writer.writerow(row)
+
+    resolve_artifact_storage(ARTIFACT_ROOT).write_text(to_artifact_key(path), buffer.getvalue(), allow_overwrite=False)
     return path

@@ -50,9 +50,9 @@ export interface FantasyProsSnapshot {
 /** Reads the latest immutable FantasyPros snapshot for `date`, if any.
  * Pure filesystem read -- never calls the FantasyPros API (see
  * scripts/fetch_fantasypros_projections.py for that). */
-export function loadLatestFantasyProsSnapshot(date: string): FantasyProsSnapshot | null {
+export async function loadLatestFantasyProsSnapshot(date: string): Promise<FantasyProsSnapshot | null> {
   const dir = artifactPath(ARTIFACT_DIRS.fantasyProsSnapshots, date);
-  const path = findLatestFile(dir, "fantasypros_projection_");
+  const path = await findLatestFile(dir, "fantasypros_projection_");
   return safeReadJson<FantasyProsSnapshot>(path);
 }
 
@@ -62,8 +62,8 @@ export function loadLatestFantasyProsSnapshot(date: string): FantasyProsSnapshot
  * Returns an empty map (never null/throws) when no snapshot exists yet,
  * so callers can join against it unconditionally, same contract as
  * lib/nativeProjections.ts::getNativeProjectionByPlayerId. */
-export function getFantasyProsProjectionByPlayerId(date: string): Map<string, FantasyProsPlayerProjection> {
-  const snapshot = loadLatestFantasyProsSnapshot(date);
+export async function getFantasyProsProjectionByPlayerId(date: string): Promise<Map<string, FantasyProsPlayerProjection>> {
+  const snapshot = await loadLatestFantasyProsSnapshot(date);
   const map = new Map<string, FantasyProsPlayerProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {

@@ -34,9 +34,14 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
 
-  const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
-  const batterSnapshot = loadLatestBatterSnapshot(date).data;
-  const ownership = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
+  const [pitcherSnapshotLoaded, batterSnapshotLoaded, ownershipLoaded] = await Promise.all([
+    loadLatestPitcherSnapshot(date),
+    loadLatestBatterSnapshot(date),
+    loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null),
+  ]);
+  const pitcherSnapshot = pitcherSnapshotLoaded.data;
+  const batterSnapshot = batterSnapshotLoaded.data;
+  const ownership = ownershipLoaded.data;
 
   if (!pitcherSnapshot && !batterSnapshot) {
     return (
@@ -54,27 +59,37 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
 
   // Milestone 27.2: without the real DK pool, a real DK-salaried player
   // whose team's lineup hasn't posted yet never gets a row here either.
-  const dkPool = loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data;
+  const [
+    dkPoolLoaded,
+    // BlueCollar Live Projection Integration: slate-scoped (never
+    // date-only) -- see lib/blueCollarProjections.ts's module docstring
+    // for why this is a separate pipeline from the older, generic
+    // "External"/"Adjusted" comparison-baseline mechanism.
+    blueCollarByPlayerId,
+    nativeByPlayerId,
+    aiByPlayerId,
+    actualByPlayerId,
+    // Milestone: FantasyPros -- the snapshot itself is date-scoped and
+    // MLB-wide (FantasyPros doesn't know about DK slates); joining it here,
+    // onto rows already filtered to this slate's games via filterByGameIds
+    // above, is what actually satisfies "never show every FantasyPros
+    // player" -- no slate-awareness needed inside fantasyProsProjections.ts.
+    fantasyProsByPlayerId,
+    // Milestone 32.2B: Big Money ML -- SHADOW, comparison-only (pitchers,
+    // starters only). Same date-scoped join discipline as FantasyPros above.
+    mlByPlayerId,
+  ] = await Promise.all([
+    loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null),
+    getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null),
+    getNativeProjectionByPlayerId(date),
+    getAiProjectionByPlayerId(date),
+    loadActualDkPointsByPlayerId(date),
+    getFantasyProsProjectionByPlayerId(date),
+    getMlProjectionByPlayerId(date),
+  ]);
+  const dkPool = dkPoolLoaded.data;
   const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
   const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
-
-  // BlueCollar Live Projection Integration: slate-scoped (never
-  // date-only) -- see lib/blueCollarProjections.ts's module docstring
-  // for why this is a separate pipeline from the older, generic
-  // "External"/"Adjusted" comparison-baseline mechanism.
-  const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null);
-  const nativeByPlayerId = getNativeProjectionByPlayerId(date);
-  const aiByPlayerId = getAiProjectionByPlayerId(date);
-  const actualByPlayerId = loadActualDkPointsByPlayerId(date);
-  // Milestone: FantasyPros -- the snapshot itself is date-scoped and
-  // MLB-wide (FantasyPros doesn't know about DK slates); joining it here,
-  // onto rows already filtered to this slate's games via filterByGameIds
-  // above, is what actually satisfies "never show every FantasyPros
-  // player" -- no slate-awareness needed inside fantasyProsProjections.ts.
-  const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(date);
-  // Milestone 32.2B: Big Money ML -- SHADOW, comparison-only (pitchers,
-  // starters only). Same date-scoped join discipline as FantasyPros above.
-  const mlByPlayerId = getMlProjectionByPlayerId(date);
 
   const rows = buildProjectionLabRows(
     [...pitcherRows, ...hitterRows],

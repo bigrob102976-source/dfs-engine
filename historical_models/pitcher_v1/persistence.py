@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 
 import joblib
 
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
+
 from historical_models.pitcher_v1.config import DEFAULT_ARTIFACT_DIR
 
 MODEL_FILENAME = "model.joblib"
@@ -42,7 +44,29 @@ def save_model(output_dir: Path, pipeline) -> Path:
 
 
 def load_model(output_dir: Path):
-    return joblib.load(output_dir / MODEL_FILENAME)
+    """Milestone 33.2 Part 7: model artifacts are small (a few MB) and
+    versioned, so the deployed process caches model.joblib to LOCAL disk
+    the first time it's needed and reads straight from that local copy
+    on every call after -- never a network fetch per inference call. The
+    local copy is never authoritative: on a cache miss (a fresh
+    container, or output_dir wiped) this pulls from whatever
+    resolve_artifact_storage() resolves to (object storage in
+    production, local disk in dev -- same resolution every other
+    artifact in this project uses). A running process picks up a NEWLY
+    trained model version only via restart (this package has always
+    assumed a fixed model version per process lifetime -- see
+    DEFAULT_ARTIFACT_DIR), so no cache-invalidation logic is needed here."""
+    output_dir = Path(output_dir)
+    model_path = output_dir / MODEL_FILENAME
+    if not model_path.exists():
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        key = to_artifact_key(model_path)
+        data = storage.read_bytes(key)
+        if data is None:
+            raise FileNotFoundError(f"Model artifact not found locally ({model_path}) or in object storage ({key}).")
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        model_path.write_bytes(data)
+    return joblib.load(model_path)
 
 
 def append_experiment_record(output_dir: Path, record: Dict) -> None:

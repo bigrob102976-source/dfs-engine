@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Query param `path` is required." }, { status: 400 });
   }
 
-  const resolved = resolveOwnedImportSnapshotPath(rawPath);
+  const resolved = await resolveOwnedImportSnapshotPath(rawPath);
   if (!resolved) {
     return NextResponse.json({ error: "Not a downloadable CSV-imported snapshot." }, { status: 404 });
   }

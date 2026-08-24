@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-19";
 
@@ -34,17 +36,19 @@ function fpPlayerRecord(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-fantasypros-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestFantasyProsSnapshot", () => {
   it("returns null when no snapshot exists -- never throws", async () => {
     const { loadLatestFantasyProsSnapshot } = await import("../fantasyProsProjections");
-    expect(loadLatestFantasyProsSnapshot(DATE)).toBeNull();
+    expect(await loadLatestFantasyProsSnapshot(DATE)).toBeNull();
   });
 
   it("returns the latest snapshot by filename timestamp", async () => {
@@ -57,7 +61,7 @@ describe("loadLatestFantasyProsSnapshot", () => {
       hitters_matched: 2, pitchers_matched: 0, public_api_limited: true, api_tier: "free", players: [],
     });
     const { loadLatestFantasyProsSnapshot } = await import("../fantasyProsProjections");
-    const latest = loadLatestFantasyProsSnapshot(DATE);
+    const latest = await loadLatestFantasyProsSnapshot(DATE);
     expect(latest?.retrieved_at).toBe("2026-08-19T15:00:00Z");
     expect(latest?.hitters_matched).toBe(2);
   });
@@ -68,7 +72,7 @@ describe("loadLatestFantasyProsSnapshot", () => {
       hitters_matched: 1, pitchers_matched: 0, public_api_limited: true, api_tier: "free", players: [fpPlayerRecord()],
     });
     const { loadLatestFantasyProsSnapshot } = await import("../fantasyProsProjections");
-    const snapshot = loadLatestFantasyProsSnapshot(DATE);
+    const snapshot = await loadLatestFantasyProsSnapshot(DATE);
     expect(JSON.stringify(snapshot)).not.toMatch(/api[_-]?key/i);
   });
 });
@@ -76,7 +80,7 @@ describe("loadLatestFantasyProsSnapshot", () => {
 describe("getFantasyProsProjectionByPlayerId", () => {
   it("returns an empty map (never throws) when no snapshot exists", async () => {
     const { getFantasyProsProjectionByPlayerId } = await import("../fantasyProsProjections");
-    const map = getFantasyProsProjectionByPlayerId(DATE);
+    const map = await getFantasyProsProjectionByPlayerId(DATE);
     expect(map.size).toBe(0);
   });
 
@@ -90,7 +94,7 @@ describe("getFantasyProsProjectionByPlayerId", () => {
       ],
     });
     const { getFantasyProsProjectionByPlayerId } = await import("../fantasyProsProjections");
-    const map = getFantasyProsProjectionByPlayerId(DATE);
+    const map = await getFantasyProsProjectionByPlayerId(DATE);
     expect(map.size).toBe(1);
     const player = map.get("518692");
     expect(player).toBeDefined();
@@ -106,7 +110,7 @@ describe("getFantasyProsProjectionByPlayerId", () => {
       players: [fpPlayerRecord({ match_status: "ambiguous", mlb_player_id: "518692" })],
     });
     const { getFantasyProsProjectionByPlayerId } = await import("../fantasyProsProjections");
-    const map = getFantasyProsProjectionByPlayerId(DATE);
+    const map = await getFantasyProsProjectionByPlayerId(DATE);
     expect(map.size).toBe(0);
   });
 });

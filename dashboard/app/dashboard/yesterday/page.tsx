@@ -51,9 +51,9 @@ function MissCard({ title, record }: { title: string; record: Record<string, unk
   );
 }
 
-export default function YesterdayPage() {
-  const s = buildYesterdaySummary();
-  const projectionComparison = s.date ? loadLatestProjectionSourceComparison(s.date) : null;
+export default async function YesterdayPage() {
+  const s = await buildYesterdaySummary();
+  const projectionComparison = s.date ? await loadLatestProjectionSourceComparison(s.date) : null;
 
   if (!s.date) {
     return (

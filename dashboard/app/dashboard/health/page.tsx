@@ -40,10 +40,16 @@ export default async function ModelHealthPage(props: PageProps<"/dashboard/healt
 
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
-  const pitcherSnapshot = date ? loadLatestPitcherSnapshot(date).data : null;
-  const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
-  const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
-  const matchReport = date ? loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data : null;
+  const [pitcherLoaded, batterLoaded, ownershipLoaded, matchReportLoaded] = await Promise.all([
+    date ? loadLatestPitcherSnapshot(date) : null,
+    date ? loadLatestBatterSnapshot(date) : null,
+    date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null) : null,
+    date ? loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null) : null,
+  ]);
+  const pitcherSnapshot = pitcherLoaded?.data ?? null;
+  const batterSnapshot = batterLoaded?.data ?? null;
+  const ownership = ownershipLoaded?.data ?? null;
+  const matchReport = matchReportLoaded?.data ?? null;
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 
   const pitcherTotal = pitcherSnapshot?.pitcher_count ?? 0;

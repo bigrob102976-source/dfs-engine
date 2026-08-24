@@ -20,8 +20,8 @@ export function fingerprintFixed(filePath: string): Fingerprint {
   return { path: stat ? filePath : null, mtimeMs: stat ? stat.mtimeMs : null };
 }
 
-export function fingerprintLatest(dir: string, prefix: string, ext = ".json"): Fingerprint {
-  const filePath = findLatestFile(dir, prefix, ext);
+export async function fingerprintLatest(dir: string, prefix: string, ext = ".json"): Promise<Fingerprint> {
+  const filePath = await findLatestFile(dir, prefix, ext);
   if (!filePath) return { path: null, mtimeMs: null };
   const stat = safeStat(filePath);
   return { path: filePath, mtimeMs: stat ? stat.mtimeMs : null };
@@ -38,23 +38,23 @@ export function researchSlateFingerprint(date: string): Fingerprint {
   return fingerprintFixed(artifactPath(ARTIFACT_DIRS.research, date, "slate.json"));
 }
 
-export function pitcherSnapshotFingerprint(date: string): Fingerprint {
+export async function pitcherSnapshotFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.predictions, date), "pitcher_board_");
 }
 
-export function batterSnapshotFingerprint(date: string): Fingerprint {
+export async function batterSnapshotFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.predictions, date), "batter_board_");
 }
 
-export function providerSlateFingerprint(date: string): Fingerprint {
+export async function providerSlateFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.dfsInput, date), "provider_slate_");
 }
 
-export function poolFingerprint(date: string): Fingerprint {
+export async function poolFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_player_pool_");
 }
 
-export function matchReportFingerprint(date: string): Fingerprint {
+export async function matchReportFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.dfsInput, date), "dk_match_report_");
 }
 
@@ -62,11 +62,11 @@ export function matchReportFingerprint(date: string): Fingerprint {
  * ownership_predictions/<date>/<slateId>/ directory ownership/
  * persistence.py now saves into per-slate -- omitting it checks the
  * legacy date-only directory (pre-Milestone-26 artifacts). */
-export function ownershipFingerprint(date: string, slateId?: string | null): Fingerprint {
+export async function ownershipFingerprint(date: string, slateId?: string | null): Promise<Fingerprint> {
   const dir = slateId ? artifactPath(ARTIFACT_DIRS.ownershipPredictions, date, slateId) : artifactPath(ARTIFACT_DIRS.ownershipPredictions, date);
   return fingerprintLatest(dir, "ownership_");
 }
 
-export function lineupSetFingerprint(date: string): Fingerprint {
+export async function lineupSetFingerprint(date: string): Promise<Fingerprint> {
   return fingerprintLatest(artifactPath(ARTIFACT_DIRS.lineups, date), "dk_lineups_");
 }

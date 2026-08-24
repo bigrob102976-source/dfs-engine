@@ -198,7 +198,7 @@ export async function activateProjectionImport(importPath: string, date: string)
  * enforces this (see history.py::_validate_owned_path). Returns null for
  * anything outside the snapshot root, not named like a baseline
  * snapshot, or not tagged source == "csv_import". */
-export function resolveOwnedImportSnapshotPath(rawPath: string): string | null {
+export async function resolveOwnedImportSnapshotPath(rawPath: string): Promise<string | null> {
   const root = artifactPath(ARTIFACT_DIRS.externalProjectionSnapshots);
   const resolved = path.resolve(rawPath);
   const relative = path.relative(root, resolved);
@@ -207,7 +207,7 @@ export function resolveOwnedImportSnapshotPath(rawPath: string): string | null {
   const basename = path.basename(resolved);
   if (!basename.startsWith("provider_") || !basename.endsWith(".json")) return null;
 
-  const doc = safeReadJson<{ source?: string }>(resolved);
+  const doc = await safeReadJson<{ source?: string }>(resolved);
   if (!doc || doc.source !== "csv_import") return null;
 
   return resolved;

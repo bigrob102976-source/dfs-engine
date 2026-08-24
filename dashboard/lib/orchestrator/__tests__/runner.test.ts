@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getTodayChicagoDate } from "../../currentDate";
 import type { PythonRunner, PythonRunResult } from "../pythonRunner";
 
+import { __resetStorageForTests } from "../../storage/getStorage";
+
 // This file never spawns a real Python process or touches the network --
 // every script invocation is intercepted by __setPythonRunnerForTests and
 // answered by an in-memory fake that writes the same fixture-shaped JSON
@@ -168,6 +170,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-orchestrator-"));
   tsCounter = 0;
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
   process.env.MLB_DFS_RUNSTATE_DIR = path.join(tmpDir, ".runstate");
 });
 
@@ -177,6 +180,7 @@ afterEach(async () => {
   __resetPythonRunnerForTests();
   __resetOrchestratorStateForTests();
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   delete process.env.MLB_DFS_RUNSTATE_DIR;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

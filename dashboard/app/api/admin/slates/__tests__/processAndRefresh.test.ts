@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
+const { __resetStorageForTests } = await import("@/lib/storage/getStorage");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { getSlateStatus } = await import("@/lib/db/slateStatus");
@@ -65,6 +66,7 @@ beforeEach(async () => {
   tsCounter = 0;
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-admin-process-api-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
   const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
   __setPythonRunnerForTests(async (script) => {
     await new Promise((resolve) => setTimeout(resolve, 15)); // simulate real subprocess latency
@@ -118,6 +120,7 @@ afterEach(async () => {
   __resetPythonRunnerForTests();
   __resetPoolCacheForTests();
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

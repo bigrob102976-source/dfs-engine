@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-22";
 
@@ -43,17 +45,19 @@ function poolPlayer(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-bigmoneymloptimizer-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("getBigMoneyMlCoverage", () => {
   it("returns all zeros when no ML snapshots exist yet", async () => {
     const { getBigMoneyMlCoverage } = await import("../bigMoneyMlOptimizer");
-    const coverage = getBigMoneyMlCoverage(DATE);
+    const coverage = await getBigMoneyMlCoverage(DATE);
     expect(coverage.pitchers).toEqual({ generated: 0, eligible: 0 });
     expect(coverage.hitters).toEqual({ generated: 0, eligible: 0 });
     expect(coverage.combined).toEqual({ generated: 0, eligible: 0 });
@@ -65,7 +69,7 @@ describe("getBigMoneyMlCoverage", () => {
     writeJson(`ml_projection_snapshots/${DATE}/ml_hitter_projection_20260822T221156.json`, hitterDoc());
 
     const { getBigMoneyMlCoverage } = await import("../bigMoneyMlOptimizer");
-    const coverage = getBigMoneyMlCoverage(DATE);
+    const coverage = await getBigMoneyMlCoverage(DATE);
     expect(coverage.pitchers).toEqual({ generated: 22, eligible: 22 });
     expect(coverage.hitters).toEqual({ generated: 81, eligible: 81 });
     expect(coverage.combined).toEqual({ generated: 103, eligible: 103 });
@@ -78,7 +82,7 @@ describe("getBigMoneyMlCoverage", () => {
   it("reports honest partial coverage when ML projections are missing for some players", async () => {
     writeJson(`ml_projection_snapshots/${DATE}/ml_projection_20260822T201843.json`, pitcherDoc({ ml_projections_generated: 20, ml_projections_missing: 2 }));
     const { getBigMoneyMlCoverage } = await import("../bigMoneyMlOptimizer");
-    const coverage = getBigMoneyMlCoverage(DATE);
+    const coverage = await getBigMoneyMlCoverage(DATE);
     expect(coverage.pitchers).toEqual({ generated: 20, eligible: 22 });
   });
 
@@ -92,7 +96,7 @@ describe("getBigMoneyMlCoverage", () => {
       ],
     });
     const { getBigMoneyMlCoverage } = await import("../bigMoneyMlOptimizer");
-    const coverage = getBigMoneyMlCoverage(DATE);
+    const coverage = await getBigMoneyMlCoverage(DATE);
     expect(coverage.gamesWaitingForLineups).toBe(1); // only g2
   });
 
@@ -105,7 +109,7 @@ describe("getBigMoneyMlCoverage", () => {
       ],
     });
     const { getBigMoneyMlCoverage } = await import("../bigMoneyMlOptimizer");
-    const coverage = getBigMoneyMlCoverage(DATE);
+    const coverage = await getBigMoneyMlCoverage(DATE);
     expect(coverage.gamesWaitingForLineups).toBe(0);
   });
 });

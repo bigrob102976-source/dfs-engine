@@ -41,12 +41,15 @@ export default async function AdminSlatesPage(props: PageProps<"/admin/slates">)
   // ever produces valid YYYY-MM-DD values, so this only guards a
   // hand-edited URL.
   const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
-  const summary = buildSlateSummary(date);
-  const statuses = buildPipelineStatuses(date);
-  const environmentReport = loadLatestEnvironmentReport(date);
-  const matchReport = loadLatestDkMatchReport(date).data;
+  const [summary, statuses, environmentReport, matchReportLoaded, environmentStatus] = await Promise.all([
+    buildSlateSummary(date),
+    buildPipelineStatuses(date),
+    loadLatestEnvironmentReport(date),
+    loadLatestDkMatchReport(date),
+    getGameEnvironmentStatus(date),
+  ]);
+  const matchReport = matchReportLoaded.data;
   const vegasCoverage = buildDkSlateVegasCoverage(matchReport, environmentReport);
-  const environmentStatus = await getGameEnvironmentStatus(date);
   const vegasProvider = "error" in environmentStatus ? null : environmentStatus.providers.vegas;
 
   return (

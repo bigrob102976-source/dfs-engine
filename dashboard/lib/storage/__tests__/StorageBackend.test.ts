@@ -68,6 +68,16 @@ describe("LocalStorageBackend", () => {
     expect(latest && path.basename(latest)).toBe("snap_0000000002.json");
     expect(await backend.latestFile("d", "nonexistent_prefix_")).toBeNull();
   });
+
+  it("listSubdirectories returns immediate child directory names sorted ascending, ignoring files, [] for a missing directory", async () => {
+    fs.mkdirSync(path.join(tmpDir, "predictions", "2026-08-19"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, "predictions", "2026-08-18"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "predictions", "not_a_date_dir.json"), "{}"); // a file, not a directory -- must be excluded
+
+    const backend = new LocalStorageBackend(tmpDir);
+    expect(await backend.listSubdirectories("predictions")).toEqual(["2026-08-18", "2026-08-19"]);
+    expect(await backend.listSubdirectories("no/such/dir")).toEqual([]);
+  });
 });
 
 describe("ProductionObjectStorageBackend", () => {
@@ -77,5 +87,6 @@ describe("ProductionObjectStorageBackend", () => {
     await expect(backend.exists("x.json")).rejects.toThrow(/not configured/i);
     await expect(backend.listFiles("dir", "p_")).rejects.toThrow(/not configured/i);
     await expect(backend.latestFile("dir", "p_")).rejects.toThrow(/not configured/i);
+    await expect(backend.listSubdirectories("dir")).rejects.toThrow(/not configured/i);
   });
 });

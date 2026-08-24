@@ -11,7 +11,10 @@ instead of silent overwrite.
 """
 
 import csv
+import io
 from pathlib import Path
+
+from research.artifact_storage import ARTIFACT_ROOT, raise_if_exists, resolve_artifact_storage, to_artifact_key
 
 # Reuses the same UTC/local/timezone metadata helper every other
 # immutable artifact in this project uses (America/Chicago, tzdata-backed).
@@ -28,8 +31,9 @@ _CSV_COLUMNS = [
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing ownership evaluation: {path}")
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 def build_evaluation_document(report_dict: dict, generated_at_utc: str) -> dict:
@@ -48,19 +52,19 @@ def save_evaluation_csv(document: dict, slate_date: str, contest_id: str, timest
                          output_root: Path = DEFAULT_OWNERSHIP_EVALUATIONS_ROOT) -> Path:
     path = Path(output_root) / slate_date / f"contest_{contest_id}_ownership_eval_{timestamp}.csv"
     _no_overwrite(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
 
     model_version = document.get("ownership_model_version")
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(_CSV_COLUMNS)
-        for r in document.get("records", []):
-            if not r.get("matched"):
-                continue
-            writer.writerow([
-                slate_date, contest_id, r.get("dk_player_id"), r.get("name"), r.get("team"),
-                "/".join(r.get("dk_positions") or []), r.get("salary"),
-                r.get("projected_ownership"), r.get("actual_ownership"), r.get("error"), r.get("abs_error"),
-                r.get("projected_rank"), r.get("actual_rank"), model_version,
-            ])
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(_CSV_COLUMNS)
+    for r in document.get("records", []):
+        if not r.get("matched"):
+            continue
+        writer.writerow([
+            slate_date, contest_id, r.get("dk_player_id"), r.get("name"), r.get("team"),
+            "/".join(r.get("dk_positions") or []), r.get("salary"),
+            r.get("projected_ownership"), r.get("actual_ownership"), r.get("error"), r.get("abs_error"),
+            r.get("projected_rank"), r.get("actual_rank"), model_version,
+        ])
+    resolve_artifact_storage(ARTIFACT_ROOT).write_text(to_artifact_key(path), buffer.getvalue(), allow_overwrite=False)
     return path

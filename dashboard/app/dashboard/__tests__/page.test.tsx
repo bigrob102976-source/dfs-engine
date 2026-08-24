@@ -5,6 +5,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getTodayChicagoDate } from "@/lib/currentDate";
+import { __resetStorageForTests } from "@/lib/storage/getStorage";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -31,6 +32,7 @@ beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-command-center-page-"));
   originalRoot = process.env.MLB_DFS_ROOT;
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
   vi.stubGlobal("fetch", vi.fn(() => jsonResponse({ run: null })));
   // AnimatedCounter (KPI cards) animates numeric values in over 600ms via
   // requestAnimationFrame -- stub prefers-reduced-motion so it renders its
@@ -62,6 +64,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (originalRoot === undefined) delete process.env.MLB_DFS_ROOT;
   else process.env.MLB_DFS_ROOT = originalRoot;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

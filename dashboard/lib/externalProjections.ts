@@ -84,18 +84,18 @@ export interface AdjustedProjectionSnapshot {
 /** Reads the latest immutable external-projection baseline snapshot for
  * `date`, if any. Pure filesystem read -- never triggers generation
  * (see scripts/build_external_projection_baseline.py for that). */
-export function loadLatestBaselineSnapshot(date: string): ExternalBaselineSnapshot | null {
+export async function loadLatestBaselineSnapshot(date: string): Promise<ExternalBaselineSnapshot | null> {
   const dir = artifactPath(ARTIFACT_DIRS.externalProjectionSnapshots, date);
-  const path = findLatestFile(dir, "provider_");
+  const path = await findLatestFile(dir, "provider_");
   return safeReadJson<ExternalBaselineSnapshot>(path);
 }
 
 /** Reads the latest immutable Big Money adjusted-projection snapshot
  * for `date`, if any. Pure filesystem read -- never triggers generation
  * (see scripts/run_projection_adjustment.py for that). */
-export function loadLatestAdjustedSnapshot(date: string): AdjustedProjectionSnapshot | null {
+export async function loadLatestAdjustedSnapshot(date: string): Promise<AdjustedProjectionSnapshot | null> {
   const dir = artifactPath(ARTIFACT_DIRS.adjustedProjectionSnapshots, date);
-  const path = findLatestFile(dir, "adjusted_");
+  const path = await findLatestFile(dir, "adjusted_");
   return safeReadJson<AdjustedProjectionSnapshot>(path);
 }
 
@@ -114,8 +114,8 @@ export interface ProjectionComparisonRow {
  * external_projections/models.py's PlayerProjectionRecord). Returns an
  * empty map (never null/throws) when no adjusted snapshot exists yet,
  * so callers can join against it unconditionally. */
-export function getProjectionComparisonByPlayerId(date: string): Map<string, ProjectionComparisonRow> {
-  const snapshot = loadLatestAdjustedSnapshot(date);
+export async function getProjectionComparisonByPlayerId(date: string): Promise<Map<string, ProjectionComparisonRow>> {
+  const snapshot = await loadLatestAdjustedSnapshot(date);
   const map = new Map<string, ProjectionComparisonRow>();
   if (!snapshot) return map;
 

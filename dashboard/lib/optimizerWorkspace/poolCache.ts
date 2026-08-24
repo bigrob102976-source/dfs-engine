@@ -94,10 +94,12 @@ function matchReportPathFor(poolPath: string): string {
   return path.join(path.dirname(poolPath), path.basename(poolPath).replace("dk_player_pool_", "dk_match_report_"));
 }
 
-function readPoolResult(entry: CachedPool): OptimizerPoolResult {
-  const pool = safeReadJson<DKPlayerPool>(entry.poolPath);
-  const matchReport = safeReadJson<Record<string, unknown>>(matchReportPathFor(entry.poolPath));
-  const ownership = entry.ownershipPath ? safeReadJson<OwnershipSnapshot>(entry.ownershipPath) : null;
+async function readPoolResult(entry: CachedPool): Promise<OptimizerPoolResult> {
+  const [pool, matchReport, ownership] = await Promise.all([
+    safeReadJson<DKPlayerPool>(entry.poolPath),
+    safeReadJson<Record<string, unknown>>(matchReportPathFor(entry.poolPath)),
+    entry.ownershipPath ? safeReadJson<OwnershipSnapshot>(entry.ownershipPath) : Promise.resolve(null),
+  ]);
 
   const ownershipByDkId = new Map<string, OwnershipSnapshot["players"][number]>();
   const ownershipByMlbId = new Map<string, OwnershipSnapshot["players"][number]>();
@@ -106,17 +108,31 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     if (p.mlb_player_id) ownershipByMlbId.set(p.mlb_player_id, p);
   }
 
-  const comparisonByPlayerId = getProjectionComparisonByPlayerId(entry.date);
-  const aiByPlayerId = getAiProjectionByPlayerId(entry.date);
-  const nativeByPlayerId = getNativeProjectionByPlayerId(entry.date);
-  const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(entry.date);
-  // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only join.
-  const mlByPlayerId = getMlProjectionByPlayerId(entry.date);
-  // BlueCollar DFS -- comparison + optional ADMIN-only optimizer source,
-  // always slate-scoped (never date-only like FantasyPros above).
-  const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(entry.date, entry.slateId);
-  const blueCollarSnapshot = loadLatestBlueCollarSnapshot(entry.date, entry.slateId);
-  const vegasCoverage = buildDkSlateVegasCoverage(matchReport, loadLatestEnvironmentReport(entry.date));
+  const [
+    comparisonByPlayerId,
+    aiByPlayerId,
+    nativeByPlayerId,
+    fantasyProsByPlayerId,
+    // Milestone 32.2B: Big Money ML -- SHADOW MODE, comparison-only join.
+    mlByPlayerId,
+    // BlueCollar DFS -- comparison + optional ADMIN-only optimizer source,
+    // always slate-scoped (never date-only like FantasyPros above).
+    blueCollarByPlayerId,
+    blueCollarSnapshot,
+    environmentReport,
+    externalBaselineSnapshot,
+  ] = await Promise.all([
+    getProjectionComparisonByPlayerId(entry.date),
+    getAiProjectionByPlayerId(entry.date),
+    getNativeProjectionByPlayerId(entry.date),
+    getFantasyProsProjectionByPlayerId(entry.date),
+    getMlProjectionByPlayerId(entry.date),
+    getBlueCollarProjectionByPlayerId(entry.date, entry.slateId),
+    loadLatestBlueCollarSnapshot(entry.date, entry.slateId),
+    loadLatestEnvironmentReport(entry.date),
+    loadLatestBaselineSnapshot(entry.date),
+  ]);
+  const vegasCoverage = buildDkSlateVegasCoverage(matchReport, environmentReport);
 
   const players: PoolPlayerRow[] = (pool?.players ?? []).map((p) => {
     const own = ownershipByDkId.get(p.dk_player_id) ?? (p.mlb_player_id ? ownershipByMlbId.get(p.mlb_player_id) : undefined);
@@ -226,7 +242,7 @@ function readPoolResult(entry: CachedPool): OptimizerPoolResult {
     // dashboard can label this slot honestly ("BlueCollar" vs "External
     // Other") instead of a bare, ambiguous "External." null whenever no
     // baseline is loaded at all (hasExternalProjections is also false then).
-    externalProviderName: loadLatestBaselineSnapshot(entry.date)?.provider_name ?? null,
+    externalProviderName: externalBaselineSnapshot?.provider_name ?? null,
     hasAiProjections: aiByPlayerId.size > 0,
     hasNativeProjections: nativeByPlayerId.size > 0,
     hasFantasyProsProjections: fantasyProsByPlayerId.size > 0,
@@ -261,25 +277,25 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
     return readPoolResult(cached);
   }
 
-  const providerBefore = providerSlateFingerprint(date);
+  const providerBefore = await providerSlateFingerprint(date);
   const fetchResult = await runPythonScript("scripts/fetch_dfs_slate.py", ["--date", date, "--slate-id", slateId]);
-  const providerAfter = providerSlateFingerprint(date);
+  const providerAfter = await providerSlateFingerprint(date);
   if (fetchResult.exitCode !== 0 || !fingerprintChanged(providerBefore, providerAfter) || !providerAfter.path) {
     throw new Error(`Failed to fetch DFS slate ${slateId}: ${tail(fetchResult.stdout + fetchResult.stderr, 1000)}`);
   }
-  const providerDoc = safeReadJson<Record<string, unknown>>(providerAfter.path);
+  const providerDoc = await safeReadJson<Record<string, unknown>>(providerAfter.path);
   if (providerDoc?.status !== "ready") {
     throw new Error(`Provider slate ${slateId} is not ready (status: ${providerDoc?.status}). ${providerDoc?.reason ?? ""}`);
   }
 
-  const poolBefore = poolFingerprint(date);
+  const poolBefore = await poolFingerprint(date);
   const poolResult = await runPythonScript("scripts/build_dfs_pool_from_provider.py", [
     "--date",
     date,
     "--provider-slate",
     providerAfter.path,
   ]);
-  const poolAfter = poolFingerprint(date);
+  const poolAfter = await poolFingerprint(date);
   if (poolResult.exitCode !== 0 || !fingerprintChanged(poolBefore, poolAfter) || !poolAfter.path) {
     throw new Error(`Failed to build player pool for slate ${slateId}: ${tail(poolResult.stdout + poolResult.stderr, 1000)}`);
   }
@@ -290,7 +306,7 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   // anything else goes wrong, browsing/building continues without
   // ownership rather than failing slate selection entirely.
   let ownershipPath: string | null = null;
-  const ownBefore = ownershipFingerprint(date, slateId);
+  const ownBefore = await ownershipFingerprint(date, slateId);
   const ownResult = await runPythonScript("scripts/project_dk_ownership.py", [
     "--date",
     date,
@@ -299,7 +315,7 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
     "--slate-id",
     slateId,
   ]);
-  const ownAfter = ownershipFingerprint(date, slateId);
+  const ownAfter = await ownershipFingerprint(date, slateId);
   if (ownResult.exitCode === 0 && fingerprintChanged(ownBefore, ownAfter)) {
     ownershipPath = ownAfter.path;
   }

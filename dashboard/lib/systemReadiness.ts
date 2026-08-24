@@ -17,6 +17,7 @@ import { getDb } from "./db/client";
 import { checkPostgresConnection, checkPostgresSchemaReadiness } from "./db/postgresClient";
 import { listRecentJobs } from "./jobs/queue";
 import { isAnyWorkerOnline, listWorkerHealth, type WorkerHealth } from "./jobs/heartbeat";
+import { ProductionStorageNotConfiguredError, resolveStorageBackend } from "./storage/backend";
 import { checkObjectStorageConnection, getObjectStorageConfigStatus, resolveObjectStorageConfigFromEnv } from "./storage/StorageBackend";
 
 export interface DatabaseReadiness {
@@ -71,18 +72,46 @@ export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
 }
 
 export interface ObjectStorageReadiness {
+  /** Which backend getStorage() actually resolves to right now -- "local"
+   * in dev/test or an explicit ALLOW_LOCAL_STORAGE_IN_PRODUCTION override,
+   * "object" once OBJECT_STORAGE_* is configured. Milestone 33.2: this is
+   * the field lib/storage/getStorage.ts::getStorage() itself uses to pick
+   * an implementation, so this card always reflects the SAME decision the
+   * running app is actually making, never a separate/stale computation. */
+  backend: "local" | "object";
   status: "CONNECTED" | "NOT_CONFIGURED" | "ERROR";
   detail: string;
 }
 
 export async function getObjectStorageReadiness(): Promise<ObjectStorageReadiness> {
+  let decision;
+  try {
+    decision = resolveStorageBackend();
+  } catch (err) {
+    // Production, fail-closed, no OBJECT_STORAGE_* configured -- a real,
+    // expected state to SHOW on this page, not crash it.
+    return {
+      backend: "object",
+      status: "NOT_CONFIGURED",
+      detail: err instanceof ProductionStorageNotConfiguredError ? err.message : String(err),
+    };
+  }
+
+  if (decision.kind === "local") {
+    return { backend: "local", status: "CONNECTED", detail: decision.reason };
+  }
+
   const configStatus = getObjectStorageConfigStatus();
   if (!configStatus.configured) {
-    return { status: "NOT_CONFIGURED", detail: `Missing: ${configStatus.missing.join(", ")}` };
+    return { backend: "object", status: "NOT_CONFIGURED", detail: `Missing: ${configStatus.missing.join(", ")}` };
   }
   const config = resolveObjectStorageConfigFromEnv()!;
   const result = await checkObjectStorageConnection(config);
-  return { status: result.connected ? "CONNECTED" : "ERROR", detail: result.error ?? `Bucket "${config.bucket}" reachable.` };
+  return {
+    backend: "object",
+    status: result.connected ? "CONNECTED" : "ERROR",
+    detail: result.error ?? `Bucket "${config.bucket}" reachable.`,
+  };
 }
 
 export interface JobQueueReadiness {

@@ -5,8 +5,8 @@ import { buildHistorySeries } from "@/lib/history";
 
 export const dynamic = "force-dynamic";
 
-export default function HistoryPage() {
-  const series = buildHistorySeries();
+export default async function HistoryPage() {
+  const series = await buildHistorySeries();
 
   return (
     <div>

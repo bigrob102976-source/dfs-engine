@@ -25,10 +25,19 @@ export interface SlateStateSnapshot {
   blueCollarUpdated: string | null;
 }
 
-export function captureSlateState(date: string, slateId: string): SlateStateSnapshot {
-  const matchReport = loadLatestDkMatchReport(date, slateId).data;
+export async function captureSlateState(date: string, slateId: string): Promise<SlateStateSnapshot> {
+  const [matchReportLoaded, poolLoaded, nativeMap, aiMap, mlMap, environmentReport, blueCollarSnapshot] = await Promise.all([
+    loadLatestDkMatchReport(date, slateId),
+    loadLatestDKPlayerPool(date, slateId),
+    getNativeProjectionByPlayerId(date),
+    getAiProjectionByPlayerId(date),
+    getMlProjectionByPlayerId(date),
+    loadLatestEnvironmentReport(date),
+    loadLatestBlueCollarSnapshot(date, slateId),
+  ]);
+  const matchReport = matchReportLoaded.data;
   const eligibility = (matchReport?.eligibility as Record<string, number> | undefined) ?? {};
-  const pool = loadLatestDKPlayerPool(date, slateId).data;
+  const pool = poolLoaded.data;
 
   const startingPitcherIdByTeam: Record<string, string> = {};
   for (const p of pool?.players ?? []) {
@@ -42,11 +51,11 @@ export function captureSlateState(date: string, slateId: string): SlateStateSnap
     confirmedHitters: eligibility.confirmed_hitters ?? 0,
     optimizerEligible: eligibility.optimizer_eligible ?? 0,
     startingPitcherIdByTeam,
-    nativePlayerCount: getNativeProjectionByPlayerId(date).size,
-    aiPlayerCount: getAiProjectionByPlayerId(date).size,
-    mlPlayerCount: getMlProjectionByPlayerId(date).size,
-    environmentGeneratedAt: loadLatestEnvironmentReport(date)?.generated_at ?? null,
-    blueCollarUpdated: loadLatestBlueCollarSnapshot(date, slateId)?.bluecollar_updated ?? null,
+    nativePlayerCount: nativeMap.size,
+    aiPlayerCount: aiMap.size,
+    mlPlayerCount: mlMap.size,
+    environmentGeneratedAt: environmentReport?.generated_at ?? null,
+    blueCollarUpdated: blueCollarSnapshot?.bluecollar_updated ?? null,
   };
 }
 

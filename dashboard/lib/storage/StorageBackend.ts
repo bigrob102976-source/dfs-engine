@@ -53,6 +53,15 @@ export interface StorageBackend {
   /** The single newest matching file's relative path, or null -- mirrors
    * lib/discovery.ts::findLatestFile. */
   latestFile(dirRelativePath: string, prefix: string, ext?: string): Promise<string | null>;
+
+  /** Milestone 33.2: immediate child "directory" names one level under
+   * `dirRelativePath` -- e.g. the YYYY-MM-DD slate-date folders under an
+   * artifact root, for lib/discovery.ts::listSlateDates. Local disk has
+   * real directories; object storage has none, so this is derived from
+   * key prefixes up to the next "/" (S3's own delimiter-listing
+   * convention). Empty array, never a throw, when the "directory"
+   * doesn't exist. Sorted ascending. */
+  listSubdirectories(dirRelativePath: string): Promise<string[]>;
 }
 
 /** Reads/lists from local disk relative to getArtifactRoot() -- the
@@ -62,11 +71,26 @@ export interface StorageBackend {
 export class LocalStorageBackend implements StorageBackend {
   constructor(private readonly rootDir: string) {}
 
+  /** Milestone 33.2: `relativePath` is USUALLY root-relative (the normal
+   * case), but lib/artifactRoot.ts::toArtifactKey() deliberately returns
+   * an already-ABSOLUTE string for a path outside the artifact root (a
+   * scratch/temp path, or a test operating on its own tmpdir) rather
+   * than erroring -- see that function's own docstring. `path.join`
+   * does NOT special-case an absolute later segment the way Python's
+   * pathlib `/` operator does, so joining an absolute `relativePath`
+   * onto `rootDir` here would silently produce a garbage nested path.
+   * This mirrors research/artifact_storage.py::LocalArtifactStorage's
+   * identical behavior (Path.__truediv__ ignores `self` when the RHS is
+   * absolute) so both languages resolve a fallback key the same way. */
+  private async resolve(relativePath: string): Promise<string> {
+    const path = await import("node:path");
+    return path.normalize(path.isAbsolute(relativePath) ? relativePath : path.join(this.rootDir, relativePath));
+  }
+
   async readJson<T>(relativePath: string): Promise<T | null> {
     const fs = await import("node:fs");
-    const path = await import("node:path");
     try {
-      const raw = fs.readFileSync(path.join(this.rootDir, relativePath), "utf-8");
+      const raw = fs.readFileSync(await this.resolve(relativePath), "utf-8");
       return JSON.parse(raw) as T;
     } catch {
       return null;
@@ -75,9 +99,8 @@ export class LocalStorageBackend implements StorageBackend {
 
   async exists(relativePath: string): Promise<boolean> {
     const fs = await import("node:fs");
-    const path = await import("node:path");
     try {
-      return fs.existsSync(path.join(this.rootDir, relativePath));
+      return fs.existsSync(await this.resolve(relativePath));
     } catch {
       return false;
     }
@@ -85,14 +108,22 @@ export class LocalStorageBackend implements StorageBackend {
 
   async listFiles(dirRelativePath: string, prefix: string, ext = ".json"): Promise<string[]> {
     const fs = await import("node:fs");
-    const path = await import("node:path");
-    const dir = path.join(this.rootDir, dirRelativePath);
+    const dir = await this.resolve(dirRelativePath);
+    // Milestone 33.2: joined with a literal "/", NOT path.join -- these
+    // returned strings are KEYS (mirroring ProductionObjectStorageBackend's
+    // S3 keys, always forward-slash), not native filesystem paths.
+    // path.join normalizes to the OS-native separator (backslash on
+    // Windows) even when its inputs already used "/", which would
+    // silently break every caller that treats a returned key as an
+    // S3-style, forward-slash string (e.g. lib/discovery.ts::safeListDir
+    // splitting on "/" to get a bare filename).
+    const keyPrefix = dirRelativePath.replace(/\\/g, "/").replace(/\/+$/, "");
     try {
       return fs
         .readdirSync(dir)
         .filter((name) => name.startsWith(prefix) && name.endsWith(ext))
         .sort()
-        .map((name) => path.join(dirRelativePath, name));
+        .map((name) => `${keyPrefix}/${name}`);
     } catch {
       return [];
     }
@@ -101,6 +132,20 @@ export class LocalStorageBackend implements StorageBackend {
   async latestFile(dirRelativePath: string, prefix: string, ext = ".json"): Promise<string | null> {
     const files = await this.listFiles(dirRelativePath, prefix, ext);
     return files.length ? files[files.length - 1] : null;
+  }
+
+  async listSubdirectories(dirRelativePath: string): Promise<string[]> {
+    const fs = await import("node:fs");
+    const dir = await this.resolve(dirRelativePath);
+    try {
+      return fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort();
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -247,6 +292,23 @@ export class ProductionObjectStorageBackend implements StorageBackend {
   async latestFile(dirRelativePath: string, prefix: string, ext = ".json"): Promise<string | null> {
     const files = await this.listFiles(dirRelativePath, prefix, ext);
     return files.length ? files[files.length - 1] : null;
+  }
+
+  async listSubdirectories(dirRelativePath: string): Promise<string[]> {
+    const { mod, client, bucket } = await this.requireClient();
+    const keyPrefix = `${dirRelativePath.replace(/\/+$/, "")}/`;
+    try {
+      const result = await client.send(new mod.ListObjectsV2Command({ Bucket: bucket, Prefix: keyPrefix, Delimiter: "/" }));
+      return (result.CommonPrefixes ?? [])
+        .map((p) => p.Prefix)
+        .filter((p): p is string => Boolean(p))
+        .map((p) => p.slice(keyPrefix.length).replace(/\/+$/, ""))
+        .filter((name) => name.length > 0)
+        .sort();
+    } catch (err) {
+      console.error(`ProductionObjectStorageBackend.listSubdirectories failed for prefix "${keyPrefix}":`, err instanceof Error ? err.message : err);
+      return [];
+    }
   }
 }
 

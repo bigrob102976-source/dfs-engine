@@ -22,7 +22,7 @@ def _entry(player_id, name, position="OF"):
 def test_refresh_identity_returns_zero_teams_when_no_schedule_exists(tmp_path):
     result = refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(tmp_path / "research_output"),
-        cache_root=tmp_path / "cache", crosswalk_path=tmp_path / "crosswalk.json",
+        cache_root=tmp_path / "cache", crosswalk_root=tmp_path / "crosswalk",
         snapshot_root=tmp_path / "snapshots", historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
     assert result.teams_total == 0
@@ -42,10 +42,10 @@ def test_refresh_identity_fetches_each_teams_roster_and_persists_the_crosswalk(t
 
     monkeypatch.setattr(refresh_module, "fetch_cached_team_roster", lambda team_id, date, cache_root: fake_fetch(team_id))
 
-    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_root = tmp_path / "crosswalk"
     result = refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=crosswalk_path, snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=crosswalk_root, snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
 
@@ -55,7 +55,7 @@ def test_refresh_identity_fetches_each_teams_roster_and_persists_the_crosswalk(t
     assert result.players_seen_this_refresh == 2
     assert result.crosswalk_size_after == 2
 
-    persisted = load_crosswalk(crosswalk_path)
+    persisted = load_crosswalk(output_root=crosswalk_root)
     assert len(persisted) == 2
 
 
@@ -75,7 +75,7 @@ def test_refresh_identity_records_a_teams_failed_fetch_without_blocking_the_othe
 
     result = refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=tmp_path / "crosswalk.json", snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=tmp_path / "crosswalk", snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
 
@@ -91,7 +91,7 @@ def test_refresh_identity_saves_an_immutable_audit_snapshot(tmp_path, monkeypatc
 
     result = refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=tmp_path / "crosswalk.json", snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=tmp_path / "crosswalk", snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
 
@@ -101,14 +101,14 @@ def test_refresh_identity_saves_an_immutable_audit_snapshot(tmp_path, monkeypatc
 
 def test_refresh_identity_merges_with_an_existing_crosswalk_rather_than_replacing_it(tmp_path, monkeypatch):
     research_root = tmp_path / "research_output"
-    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_root = tmp_path / "crosswalk"
 
     # First refresh: only NYY.
     _write_teams(research_root, "2026-08-23", [{"team_id": "147", "abbreviation": "NYY"}])
     monkeypatch.setattr(refresh_module, "fetch_cached_team_roster", lambda team_id, date, cache_root: _roster([_entry(1, "Yankee")]))
     refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=crosswalk_path, snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=crosswalk_root, snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
 
@@ -119,14 +119,43 @@ def test_refresh_identity_merges_with_an_existing_crosswalk_rather_than_replacin
     monkeypatch.setattr(refresh_module, "fetch_cached_team_roster", lambda team_id, date, cache_root: _roster([_entry(2, "Red Sox Player")]))
     result = refresh_module.refresh_identity(
         "2026-08-24", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=crosswalk_path, snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=crosswalk_root, snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
 
     assert result.crosswalk_size_after == 2
-    persisted = load_crosswalk(crosswalk_path)
+    persisted = load_crosswalk(output_root=crosswalk_root)
     assert "1" in persisted
     assert "2" in persisted
+
+
+def test_refresh_identity_writes_a_new_crosswalk_version_each_run_rather_than_overwriting(tmp_path, monkeypatch):
+    # Milestone 33.2: the rolling crosswalk changed from a single mutable
+    # file to immutable versioned snapshots -- prove two refreshes leave
+    # TWO version files on disk, not one overwritten file. Uses two
+    # different slate dates (like the "merges" test above) so the two
+    # runs' immutable audit snapshots -- scoped by slate_date -- can
+    # never collide even if both execute within the same wall-clock
+    # second.
+    research_root = tmp_path / "research_output"
+    crosswalk_root = tmp_path / "crosswalk"
+    _write_teams(research_root, "2026-08-23", [{"team_id": "147", "abbreviation": "NYY"}])
+    monkeypatch.setattr(refresh_module, "fetch_cached_team_roster", lambda team_id, date, cache_root: _roster([_entry(1, "X")]))
+
+    refresh_module.refresh_identity(
+        "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
+        crosswalk_root=crosswalk_root, snapshot_root=tmp_path / "snapshots",
+        historical_crosswalk_path=tmp_path / "no_historical.parquet",
+    )
+    _write_teams(research_root, "2026-08-24", [{"team_id": "147", "abbreviation": "NYY"}])
+    refresh_module.refresh_identity(
+        "2026-08-24", research_output_root=str(research_root), cache_root=tmp_path / "cache",
+        crosswalk_root=crosswalk_root, snapshot_root=tmp_path / "snapshots",
+        historical_crosswalk_path=tmp_path / "no_historical.parquet",
+    )
+
+    versions = list(crosswalk_root.glob("crosswalk_*.json"))
+    assert len(versions) == 2
 
 
 def test_refresh_identity_never_calls_a_teams_roster_more_than_once_per_refresh(tmp_path, monkeypatch):
@@ -144,7 +173,7 @@ def test_refresh_identity_never_calls_a_teams_roster_more_than_once_per_refresh(
     monkeypatch.setattr(refresh_module, "fetch_cached_team_roster", fake_fetch)
     refresh_module.refresh_identity(
         "2026-08-23", research_output_root=str(research_root), cache_root=tmp_path / "cache",
-        crosswalk_path=tmp_path / "crosswalk.json", snapshot_root=tmp_path / "snapshots",
+        crosswalk_root=tmp_path / "crosswalk", snapshot_root=tmp_path / "snapshots",
         historical_crosswalk_path=tmp_path / "no_historical.parquet",
     )
     assert all(n == 1 for n in call_counts.values())

@@ -251,9 +251,9 @@ export interface SlateEnvironmentReport {
 /** Reads the latest immutable Game Environment snapshot for `date`, if
  * any. Pure filesystem read -- never triggers generation (see
  * scripts/build_game_environment_report.py for that). */
-export function loadLatestEnvironmentReport(date: string): SlateEnvironmentReport | null {
+export async function loadLatestEnvironmentReport(date: string): Promise<SlateEnvironmentReport | null> {
   const dir = artifactPath(ARTIFACT_DIRS.gameEnvironmentSnapshots, date);
-  const path = findLatestFile(dir, "environment_");
+  const path = await findLatestFile(dir, "environment_");
   return safeReadJson<SlateEnvironmentReport>(path);
 }
 
@@ -265,9 +265,9 @@ export function loadLatestEnvironmentReport(date: string): SlateEnvironmentRepor
  * point in time; the milestone explicitly forbids fabricating
  * intermediate history points, so this is the one honest source. Pure
  * filesystem read -- never triggers generation. */
-export function loadEnvironmentReportHistory(date: string): SlateEnvironmentReport[] {
+export async function loadEnvironmentReportHistory(date: string): Promise<SlateEnvironmentReport[]> {
   const dir = artifactPath(ARTIFACT_DIRS.gameEnvironmentSnapshots, date);
-  return findAllFiles(dir, "environment_")
-    .map((path) => safeReadJson<SlateEnvironmentReport>(path))
-    .filter((report): report is SlateEnvironmentReport => report !== null);
+  const files = await findAllFiles(dir, "environment_");
+  const reports = await Promise.all(files.map((path) => safeReadJson<SlateEnvironmentReport>(path)));
+  return reports.filter((report): report is SlateEnvironmentReport => report !== null);
 }

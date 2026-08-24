@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
+from research.artifact_storage import raise_if_exists
 from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
@@ -24,11 +25,9 @@ DEFAULT_ADJUSTED_SNAPSHOT_ROOT = Path(__file__).resolve().parent.parent / "adjus
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite existing immutable snapshot: {path}. "
-            f"(Two snapshots requested the same second -- this should be astronomically rare.)"
-        )
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 # ----------------------------------------------------------------------------

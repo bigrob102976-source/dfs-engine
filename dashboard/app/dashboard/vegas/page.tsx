@@ -33,7 +33,7 @@ export default async function VegasPage(props: PageProps<"/dashboard/vegas">) {
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
-  const fullDayReport = loadLatestEnvironmentReport(date);
+  const fullDayReport = await loadLatestEnvironmentReport(date);
   const report = fullDayReport
     ? (() => {
         const games = filterByGameIdField(fullDayReport.games, gameIds);
@@ -80,12 +80,16 @@ export default async function VegasPage(props: PageProps<"/dashboard/vegas">) {
     );
   }
 
-  const pitcherSnapshot = loadLatestPitcherSnapshot(date).data;
+  const [pitcherSnapshotLoaded, fullDayHistory, matchReportLoaded] = await Promise.all([
+    loadLatestPitcherSnapshot(date),
+    loadEnvironmentReportHistory(date),
+    loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null),
+  ]);
+  const pitcherSnapshot = pitcherSnapshotLoaded.data;
   const rows = buildVegasGameRows(report.games, pitcherSnapshot?.pitchers ?? []);
   const sampleVegas = gamesWithVegas[0]?.vegas ?? null;
-  const fullDayHistory = loadEnvironmentReportHistory(date);
   const history = fullDayHistory.map((h) => ({ ...h, games: filterByGameIdField(h.games, gameIds) }));
-  const matchReport = loadLatestDkMatchReport(date, slateCtx.selected?.slateId ?? null).data;
+  const matchReport = matchReportLoaded.data;
   const coverage = buildDkSlateVegasCoverage(matchReport, report);
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 

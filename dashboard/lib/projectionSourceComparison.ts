@@ -38,9 +38,9 @@ export interface ProjectionSourceComparisonDocument {
  * the same "evaluations" artifact directory as pitcher evaluations --
  * both are postgame grading artifacts for the same slate date, just
  * different filename prefixes. */
-export function loadLatestProjectionSourceComparison(date: string): ProjectionSourceComparisonDocument | null {
+export async function loadLatestProjectionSourceComparison(date: string): Promise<ProjectionSourceComparisonDocument | null> {
   const dir = artifactPath(ARTIFACT_DIRS.pitcherEvaluations, date);
-  const path = findLatestFile(dir, "projection_source_comparison_");
+  const path = await findLatestFile(dir, "projection_source_comparison_");
   return safeReadJson<ProjectionSourceComparisonDocument>(path);
 }
 

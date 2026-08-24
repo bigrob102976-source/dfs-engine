@@ -62,10 +62,10 @@ export interface BlueCollarSnapshot {
  * scripts/fetch_bluecollar_projections.py for that). `slateId` is
  * required (unlike FantasyPros' date-only loader) since BlueCollar is
  * always fetched scoped to one specific DK slate. */
-export function loadLatestBlueCollarSnapshot(date: string, slateId: string | null): BlueCollarSnapshot | null {
+export async function loadLatestBlueCollarSnapshot(date: string, slateId: string | null): Promise<BlueCollarSnapshot | null> {
   if (!slateId) return null;
   const dir = artifactPath(ARTIFACT_DIRS.blueCollarProjectionSnapshots, date, slateId);
-  const path = findLatestFile(dir, "bluecollar_projection_");
+  const path = await findLatestFile(dir, "bluecollar_projection_");
   return safeReadJson<BlueCollarSnapshot>(path);
 }
 
@@ -75,8 +75,8 @@ export function loadLatestBlueCollarSnapshot(date: string, slateId: string | nul
  * Returns an empty map (never null/throws) when no snapshot exists yet,
  * so callers can join against it unconditionally, same contract as
  * lib/nativeProjections.ts::getNativeProjectionByPlayerId. */
-export function getBlueCollarProjectionByPlayerId(date: string, slateId: string | null): Map<string, BlueCollarPlayerProjection> {
-  const snapshot = loadLatestBlueCollarSnapshot(date, slateId);
+export async function getBlueCollarProjectionByPlayerId(date: string, slateId: string | null): Promise<Map<string, BlueCollarPlayerProjection>> {
+  const snapshot = await loadLatestBlueCollarSnapshot(date, slateId);
   const map = new Map<string, BlueCollarPlayerProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {

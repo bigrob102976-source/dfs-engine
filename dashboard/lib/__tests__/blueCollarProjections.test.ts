@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-23";
 const SLATE_ID = "dkunofficial-152551";
@@ -45,29 +47,31 @@ function snapshotDoc(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-bluecollar-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestBlueCollarSnapshot", () => {
   it("returns null when no slateId is given -- BlueCollar is always slate-scoped, never date-only", async () => {
     const { loadLatestBlueCollarSnapshot } = await import("../blueCollarProjections");
-    expect(loadLatestBlueCollarSnapshot(DATE, null)).toBeNull();
+    expect(await loadLatestBlueCollarSnapshot(DATE, null)).toBeNull();
   });
 
   it("returns null when no snapshot exists -- never throws", async () => {
     const { loadLatestBlueCollarSnapshot } = await import("../blueCollarProjections");
-    expect(loadLatestBlueCollarSnapshot(DATE, SLATE_ID)).toBeNull();
+    expect(await loadLatestBlueCollarSnapshot(DATE, SLATE_ID)).toBeNull();
   });
 
   it("returns the latest snapshot by filename timestamp, scoped to the slate", async () => {
     writeJson(`bluecollar_projection_snapshots/${DATE}/${SLATE_ID}/bluecollar_projection_20260823T170000.json`, snapshotDoc({ retrieved_at: "2026-08-23T17:00:00Z", usable_projection_count: 100 }));
     writeJson(`bluecollar_projection_snapshots/${DATE}/${SLATE_ID}/bluecollar_projection_20260823T180000.json`, snapshotDoc({ retrieved_at: "2026-08-23T18:00:00Z", usable_projection_count: 159 }));
     const { loadLatestBlueCollarSnapshot } = await import("../blueCollarProjections");
-    const latest = loadLatestBlueCollarSnapshot(DATE, SLATE_ID);
+    const latest = await loadLatestBlueCollarSnapshot(DATE, SLATE_ID);
     expect(latest?.retrieved_at).toBe("2026-08-23T18:00:00Z");
     expect(latest?.usable_projection_count).toBe(159);
   });
@@ -76,14 +80,14 @@ describe("loadLatestBlueCollarSnapshot", () => {
     writeJson(`bluecollar_projection_snapshots/${DATE}/${SLATE_ID}/bluecollar_projection_20260823T170000.json`, snapshotDoc({ dk_slate_id: SLATE_ID, bluecollar_slate_name: "Main" }));
     writeJson(`bluecollar_projection_snapshots/${DATE}/dkunofficial-turbo/bluecollar_projection_20260823T170500.json`, snapshotDoc({ dk_slate_id: "dkunofficial-turbo", bluecollar_slate_name: "Turbo" }));
     const { loadLatestBlueCollarSnapshot } = await import("../blueCollarProjections");
-    expect(loadLatestBlueCollarSnapshot(DATE, SLATE_ID)?.bluecollar_slate_name).toBe("Main");
-    expect(loadLatestBlueCollarSnapshot(DATE, "dkunofficial-turbo")?.bluecollar_slate_name).toBe("Turbo");
+    expect((await loadLatestBlueCollarSnapshot(DATE, SLATE_ID))?.bluecollar_slate_name).toBe("Main");
+    expect((await loadLatestBlueCollarSnapshot(DATE, "dkunofficial-turbo"))?.bluecollar_slate_name).toBe("Turbo");
   });
 
   it("never contains an api_key field, regardless of what's on disk", async () => {
     writeJson(`bluecollar_projection_snapshots/${DATE}/${SLATE_ID}/bluecollar_projection_20260823T170000.json`, snapshotDoc({ players: [bcPlayerRecord()] }));
     const { loadLatestBlueCollarSnapshot } = await import("../blueCollarProjections");
-    const snapshot = loadLatestBlueCollarSnapshot(DATE, SLATE_ID);
+    const snapshot = await loadLatestBlueCollarSnapshot(DATE, SLATE_ID);
     expect(JSON.stringify(snapshot)).not.toMatch(/api[_-]?key/i);
   });
 });
@@ -91,12 +95,12 @@ describe("loadLatestBlueCollarSnapshot", () => {
 describe("getBlueCollarProjectionByPlayerId", () => {
   it("returns an empty map (never throws) when no snapshot exists", async () => {
     const { getBlueCollarProjectionByPlayerId } = await import("../blueCollarProjections");
-    expect(getBlueCollarProjectionByPlayerId(DATE, SLATE_ID).size).toBe(0);
+    expect((await getBlueCollarProjectionByPlayerId(DATE, SLATE_ID)).size).toBe(0);
   });
 
   it("returns an empty map when slateId is null", async () => {
     const { getBlueCollarProjectionByPlayerId } = await import("../blueCollarProjections");
-    expect(getBlueCollarProjectionByPlayerId(DATE, null).size).toBe(0);
+    expect((await getBlueCollarProjectionByPlayerId(DATE, null)).size).toBe(0);
   });
 
   it("builds a map keyed by mlb_player_id, for MATCHED players only", async () => {
@@ -107,7 +111,7 @@ describe("getBlueCollarProjectionByPlayerId", () => {
       ],
     }));
     const { getBlueCollarProjectionByPlayerId } = await import("../blueCollarProjections");
-    const map = getBlueCollarProjectionByPlayerId(DATE, SLATE_ID);
+    const map = await getBlueCollarProjectionByPlayerId(DATE, SLATE_ID);
     expect(map.size).toBe(1);
     const player = map.get("650911");
     expect(player?.usable_projection).toBe(19.5);
@@ -119,7 +123,7 @@ describe("getBlueCollarProjectionByPlayerId", () => {
       players: [bcPlayerRecord({ match_status: "ambiguous" })],
     }));
     const { getBlueCollarProjectionByPlayerId } = await import("../blueCollarProjections");
-    expect(getBlueCollarProjectionByPlayerId(DATE, SLATE_ID).size).toBe(0);
+    expect((await getBlueCollarProjectionByPlayerId(DATE, SLATE_ID)).size).toBe(0);
   });
 
   it("preserves usable_projection as null (NOT AVAILABLE) without coercing to zero", async () => {
@@ -127,7 +131,7 @@ describe("getBlueCollarProjectionByPlayerId", () => {
       players: [bcPlayerRecord({ raw_projection: 0.0, usable_projection: null })],
     }));
     const { getBlueCollarProjectionByPlayerId } = await import("../blueCollarProjections");
-    const player = getBlueCollarProjectionByPlayerId(DATE, SLATE_ID).get("650911");
+    const player = (await getBlueCollarProjectionByPlayerId(DATE, SLATE_ID)).get("650911");
     expect(player?.usable_projection).toBeNull();
     expect(player?.raw_projection).toBe(0.0);
   });

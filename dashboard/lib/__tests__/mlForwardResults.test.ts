@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-22";
 const SLATE_ID = "dkunofficial-152547";
@@ -30,31 +32,33 @@ function baseDoc(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-mlforwardresults-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestMlForwardResults", () => {
   it("returns null when no document exists", async () => {
     const { loadLatestMlForwardResults } = await import("../mlForwardResults");
-    expect(loadLatestMlForwardResults(DATE, SLATE_ID)).toBeNull();
+    expect(await loadLatestMlForwardResults(DATE, SLATE_ID)).toBeNull();
   });
 
   it("returns the latest document by filename timestamp", async () => {
     writeJson(`ml_forward_results/${DATE}/${SLATE_ID}/ml_forward_results_20260822T230000.json`, baseDoc({ players_graded: 1 }));
     writeJson(`ml_forward_results/${DATE}/${SLATE_ID}/ml_forward_results_20260822T235900.json`, baseDoc({ players_graded: 60 }));
     const { loadLatestMlForwardResults } = await import("../mlForwardResults");
-    const doc = loadLatestMlForwardResults(DATE, SLATE_ID);
+    const doc = await loadLatestMlForwardResults(DATE, SLATE_ID);
     expect(doc?.players_graded).toBe(60);
   });
 
   it("never mixes a different slate_id's documents in the same date folder", async () => {
     writeJson(`ml_forward_results/${DATE}/dkunofficial-OTHER/ml_forward_results_20260822T230000.json`, baseDoc({ slate_id: "dkunofficial-OTHER", players_graded: 999 }));
     const { loadLatestMlForwardResults } = await import("../mlForwardResults");
-    expect(loadLatestMlForwardResults(DATE, SLATE_ID)).toBeNull();
+    expect(await loadLatestMlForwardResults(DATE, SLATE_ID)).toBeNull();
   });
 });
 
@@ -63,8 +67,8 @@ describe("listMlForwardResultsSlateIds / listMlForwardResultsDates", () => {
     writeJson(`ml_forward_results/${DATE}/${SLATE_ID}/ml_forward_results_20260822T230000.json`, baseDoc());
     writeJson(`ml_forward_results/2026-08-21/dkunofficial-A/ml_forward_results_20260821T230000.json`, baseDoc({ slate_date: "2026-08-21", slate_id: "dkunofficial-A" }));
     const { listMlForwardResultsSlateIds, listMlForwardResultsDates } = await import("../mlForwardResults");
-    expect(listMlForwardResultsSlateIds(DATE)).toEqual([SLATE_ID]);
-    expect(listMlForwardResultsDates()).toEqual([DATE, "2026-08-21"]);
+    expect(await listMlForwardResultsSlateIds(DATE)).toEqual([SLATE_ID]);
+    expect(await listMlForwardResultsDates()).toEqual([DATE, "2026-08-21"]);
   });
 });
 

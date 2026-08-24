@@ -18,12 +18,12 @@ export default async function AdminPerformancePage(props: PageProps<"/admin/perf
   const dateParam = typeof searchParams.date === "string" ? searchParams.date : undefined;
   const slateIdParam = typeof searchParams.slateId === "string" ? searchParams.slateId : undefined;
 
-  const knownDates = listMlForwardResultsDates();
+  const knownDates = await listMlForwardResultsDates();
   const date = dateParam ?? knownDates[0] ?? getTodayChicagoDate();
-  const knownSlateIds = listMlForwardResultsSlateIds(date);
+  const knownSlateIds = await listMlForwardResultsSlateIds(date);
   const slateId = slateIdParam ?? knownSlateIds[0] ?? "";
 
-  const document = slateId ? loadLatestMlForwardResults(date, slateId) : null;
+  const document = slateId ? await loadLatestMlForwardResults(date, slateId) : null;
 
   return (
     <div>

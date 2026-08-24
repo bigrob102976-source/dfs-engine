@@ -28,15 +28,16 @@ function biggerAbsError(records: JsonRecord[] | undefined, errorKey: string): Js
 /** The most recent slate date that has ANY evaluation on disk (pitcher
  * or ownership) -- "yesterday" in the sense of "the last slate we
  * actually graded", not necessarily the calendar date before today. */
-export function findLatestEvaluatedDate(): string | null {
-  for (const date of listAllKnownSlateDates()) {
-    if (loadLatestPitcherEvaluation(date).data || loadLatestOwnershipEvaluation(date).data) return date;
+export async function findLatestEvaluatedDate(): Promise<string | null> {
+  for (const date of await listAllKnownSlateDates()) {
+    const [pitcherEval, ownershipEval] = await Promise.all([loadLatestPitcherEvaluation(date), loadLatestOwnershipEvaluation(date)]);
+    if (pitcherEval.data || ownershipEval.data) return date;
   }
   return null;
 }
 
-export function buildYesterdaySummary(): YesterdaySummary {
-  const date = findLatestEvaluatedDate();
+export async function buildYesterdaySummary(): Promise<YesterdaySummary> {
+  const date = await findLatestEvaluatedDate();
   if (!date) {
     return {
       date: null, priorDate: null, pitcherMae: null, ownershipMae: null, projectionCorrelation: null,
@@ -45,8 +46,9 @@ export function buildYesterdaySummary(): YesterdaySummary {
     };
   }
 
-  const pitcherEval = loadLatestPitcherEvaluation(date).data;
-  const ownershipEval = loadLatestOwnershipEvaluation(date).data;
+  const [pitcherEvalLoaded, ownershipEvalLoaded] = await Promise.all([loadLatestPitcherEvaluation(date), loadLatestOwnershipEvaluation(date)]);
+  const pitcherEval = pitcherEvalLoaded.data;
+  const ownershipEval = ownershipEvalLoaded.data;
 
   const topProjectionMiss = biggerAbsError(
     [...(pitcherEval?.biggest_busts ?? []), ...(pitcherEval?.biggest_positive_surprises ?? [])],
@@ -63,13 +65,24 @@ export function buildYesterdaySummary(): YesterdaySummary {
   const chalkTag = (ownershipEval?.tag_performance ?? []).find((t) => t.tag === "chalk");
 
   // Find prior evaluated date (strictly before `date`) for trend arrows.
-  const allDates = listAllKnownSlateDates();
-  const priorDate = allDates.filter((d) => d < date).find((d) => loadLatestPitcherEvaluation(d).data || loadLatestOwnershipEvaluation(d).data) ?? null;
+  const allDates = await listAllKnownSlateDates();
+  let priorDate: string | null = null;
+  for (const d of allDates.filter((d) => d < date)) {
+    const [priorPitcherEval, priorOwnershipEval] = await Promise.all([loadLatestPitcherEvaluation(d), loadLatestOwnershipEvaluation(d)]);
+    if (priorPitcherEval.data || priorOwnershipEval.data) {
+      priorDate = d;
+      break;
+    }
+  }
 
   let trend: TrendDelta | null = null;
   if (priorDate) {
-    const priorPitcher = loadLatestPitcherEvaluation(priorDate).data;
-    const priorOwnership = loadLatestOwnershipEvaluation(priorDate).data;
+    const [priorPitcherLoaded, priorOwnershipLoaded] = await Promise.all([
+      loadLatestPitcherEvaluation(priorDate),
+      loadLatestOwnershipEvaluation(priorDate),
+    ]);
+    const priorPitcher = priorPitcherLoaded.data;
+    const priorOwnership = priorOwnershipLoaded.data;
     const curPitcherMae = pitcherEval?.slate_metrics?.mae ?? null;
     const priorPitcherMae = priorPitcher?.slate_metrics?.mae ?? null;
     const curOwnershipMae = ownershipEval?.overall_metrics?.mae ?? null;

@@ -39,15 +39,15 @@ function slateFolder(date: string, slateId: string): string {
 /** Reads the latest immutable forward-grading document for one
  * (date, slate_id) pair, if any. Pure filesystem read -- never
  * triggers collection. */
-export function loadLatestMlForwardResults(date: string, slateId: string): MlForwardResultsDocument | null {
+export async function loadLatestMlForwardResults(date: string, slateId: string): Promise<MlForwardResultsDocument | null> {
   const dir = slateFolder(date, slateId);
-  const path = findLatestFile(dir, "ml_forward_results_");
+  const path = await findLatestFile(dir, "ml_forward_results_");
   return safeReadJson<MlForwardResultsDocument>(path);
 }
 
 /** Every slate_id that has at least one persisted forward-results
  * document for `date`, newest-collected first. */
-export function listMlForwardResultsSlateIds(date: string): string[] {
+export async function listMlForwardResultsSlateIds(date: string): Promise<string[]> {
   const dir = artifactPath(ARTIFACT_DIRS.mlForwardResults, date);
   return safeListDir(dir);
 }
@@ -55,9 +55,10 @@ export function listMlForwardResultsSlateIds(date: string): string[] {
 /** Every date that has at least one persisted forward-results document
  * for ANY slate, newest first -- used to seed the admin page's slate
  * picker with a sensible default (the most recently graded slate). */
-export function listMlForwardResultsDates(): string[] {
+export async function listMlForwardResultsDates(): Promise<string[]> {
   const dir = artifactPath(ARTIFACT_DIRS.mlForwardResults);
-  return safeListDir(dir)
+  const names = await safeListDir(dir);
+  return names
     .filter((name) => /^\d{4}-\d{2}-\d{2}$/.test(name))
     .sort()
     .reverse();

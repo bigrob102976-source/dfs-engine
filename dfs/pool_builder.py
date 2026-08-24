@@ -133,9 +133,10 @@ def build_pool(
     provider, so its live-proven-real pitcher-pool shape never BLOCKs.
 
     `identity_crosswalk_path` (Canonical MLB Player Identity Foundation):
-    optional override for the roster-derived crosswalk file
-    (player_identity/persistence.py's DEFAULT_CROSSWALK_PATH when None)
-    -- lets a test point at an isolated tmp_path crosswalk. This ONLY
+    optional override loading one EXACT crosswalk version file instead of
+    the latest version under player_identity/persistence.py's
+    DEFAULT_CROSSWALK_ROOT (the default when None) -- lets a test point
+    at an isolated tmp_path crosswalk. This ONLY
     widens the pool of candidates build_canonical_index/resolve_all can
     match a DK row against (see player_identity/identity_package.py's
     module docstring for why eligibility below is deliberately

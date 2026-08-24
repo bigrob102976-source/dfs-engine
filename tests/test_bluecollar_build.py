@@ -18,7 +18,7 @@ from external_projections.bluecollar_provider import BlueCollarProvider
 def _no_identity_crosswalk_by_default(monkeypatch):
     # Canonical MLB Player Identity Foundation: build_bluecollar_snapshot()
     # widens identity matching using the on-disk rolling crosswalk by
-    # default (player_identity/persistence.py's DEFAULT_CROSSWALK_PATH).
+    # default (player_identity/persistence.py's DEFAULT_CROSSWALK_ROOT).
     # Isolate every test in this file from whatever crosswalk happens to
     # exist on this machine -- mirrors tests/test_pool_builder.py's own
     # identical fixture, added for the identical reason.

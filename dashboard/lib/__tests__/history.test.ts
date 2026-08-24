@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 
 function writeJson(filePath: string, data: unknown) {
@@ -13,31 +15,33 @@ function writeJson(filePath: string, data: unknown) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-dashboard-history-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("buildHistorySeries", () => {
   it("returns an empty array when nothing exists", async () => {
     const { buildHistorySeries } = await import("../history");
-    expect(buildHistorySeries()).toEqual([]);
+    expect(await buildHistorySeries()).toEqual([]);
   });
 
   it("orders points oldest-first", async () => {
     writeJson(path.join(tmpDir, "research_output", "2026-08-11", "slate.json"), { slate_date: "2026-08-11", counts: { games: 15, teams: 0, pitchers: 0, batters: 0 } });
     writeJson(path.join(tmpDir, "research_output", "2026-08-05", "slate.json"), { slate_date: "2026-08-05", counts: { games: 10, teams: 0, pitchers: 0, batters: 0 } });
     const { buildHistorySeries } = await import("../history");
-    const series = buildHistorySeries();
+    const series = await buildHistorySeries();
     expect(series.map((p) => p.date)).toEqual(["2026-08-05", "2026-08-11"]);
   });
 
   it("leaves ungenerated fields null instead of zero-filling", async () => {
     writeJson(path.join(tmpDir, "research_output", "2026-08-05", "slate.json"), { slate_date: "2026-08-05", counts: { games: 10, teams: 0, pitchers: 0, batters: 0 } });
     const { buildHistorySeries } = await import("../history");
-    const [point] = buildHistorySeries();
+    const [point] = await buildHistorySeries();
     expect(point.games).toBe(10);
     expect(point.pitcherMae).toBeNull();
     expect(point.ownershipMae).toBeNull();
@@ -50,7 +54,7 @@ describe("buildHistorySeries", () => {
       slate_metrics: { mae: 8.2, projection_correlation: 0.37 },
     });
     const { buildHistorySeries } = await import("../history");
-    const [point] = buildHistorySeries();
+    const [point] = await buildHistorySeries();
     expect(point.pitcherMae).toBe(8.2);
     expect(point.projectionCorrelation).toBe(0.37);
   });

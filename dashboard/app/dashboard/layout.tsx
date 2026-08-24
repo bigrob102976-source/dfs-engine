@@ -45,17 +45,26 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
     redirect("/beta-access-required");
   }
   const today = getTodayChicagoDate();
-  const searchDate = latestKnownSlateDate();
-  const mockModeEnabled = await getMockModeEnabled();
-  const slateCtx = await resolveSlateContext(today);
+  const [searchDate, mockModeEnabled, slateCtx] = await Promise.all([
+    latestKnownSlateDate(),
+    getMockModeEnabled(),
+    resolveSlateContext(today),
+  ]);
 
   let searchIndex: ReturnType<typeof buildSearchIndex> = [];
   if (searchDate) {
-    const pitcherSnapshot = loadLatestPitcherSnapshot(searchDate).data;
-    const batterSnapshot = loadLatestBatterSnapshot(searchDate).data;
-    const ownership = loadLatestOwnershipSnapshot(searchDate).data;
-    const lineupSet = loadLatestLineupSet(searchDate).data;
-    const pitcherEvaluation = loadLatestPitcherEvaluation(searchDate).data;
+    const [pitcherLoaded, batterLoaded, ownershipLoaded, lineupSetLoaded, pitcherEvaluationLoaded] = await Promise.all([
+      loadLatestPitcherSnapshot(searchDate),
+      loadLatestBatterSnapshot(searchDate),
+      loadLatestOwnershipSnapshot(searchDate),
+      loadLatestLineupSet(searchDate),
+      loadLatestPitcherEvaluation(searchDate),
+    ]);
+    const pitcherSnapshot = pitcherLoaded.data;
+    const batterSnapshot = batterLoaded.data;
+    const ownership = ownershipLoaded.data;
+    const lineupSet = lineupSetLoaded.data;
+    const pitcherEvaluation = pitcherEvaluationLoaded.data;
 
     const pitcherRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, null);
     const hitterRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, null);

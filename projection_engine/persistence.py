@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from external_projections.persistence import load_latest_adjusted_snapshot
 from ownership.persistence import load_latest_ownership_snapshot
+from research.artifact_storage import raise_if_exists
 from research.game_environment.storage import load_latest_environment_report
 from research.prediction_snapshot import load_latest_snapshot as _load_latest_research_snapshot
 from research.prediction_snapshot import timestamp_tag
@@ -25,11 +26,9 @@ DEFAULT_DFS_INPUT_ROOT = Path(__file__).resolve().parent.parent / "dfs_input"
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite existing immutable snapshot: {path}. "
-            f"(Two snapshots requested the same second -- this should be astronomically rare.)"
-        )
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 # ----------------------------------------------------------------------------

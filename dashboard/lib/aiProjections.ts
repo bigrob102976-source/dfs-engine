@@ -67,17 +67,17 @@ export interface AiProjectionSnapshot {
 /** Reads the latest immutable AI Projection snapshot for `date`, if any.
  * Pure filesystem read -- never triggers generation (see
  * scripts/run_ai_projection_engine.py for that). */
-export function loadLatestAiProjectionSnapshot(date: string): AiProjectionSnapshot | null {
+export async function loadLatestAiProjectionSnapshot(date: string): Promise<AiProjectionSnapshot | null> {
   const dir = artifactPath(ARTIFACT_DIRS.aiProjectionSnapshots, date);
-  const path = findLatestFile(dir, "ai_projection_");
+  const path = await findLatestFile(dir, "ai_projection_");
   return safeReadJson<AiProjectionSnapshot>(path);
 }
 
 /** { player_id -> AiPlayerProjection } map from the latest AI Projection
  * snapshot for `date`. Returns an empty map (never null/throws) when no
  * snapshot exists yet, so callers can join against it unconditionally. */
-export function getAiProjectionByPlayerId(date: string): Map<string, AiPlayerProjection> {
-  const snapshot = loadLatestAiProjectionSnapshot(date);
+export async function getAiProjectionByPlayerId(date: string): Promise<Map<string, AiPlayerProjection>> {
+  const snapshot = await loadLatestAiProjectionSnapshot(date);
   const map = new Map<string, AiPlayerProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {

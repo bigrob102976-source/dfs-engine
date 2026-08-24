@@ -21,22 +21,26 @@ export interface HistoryPoint {
  * nullable -- a slate that only has a research package but no evaluation
  * yet still appears, with the ungenerated fields left null rather than
  * dropped or zero-filled. */
-export function buildHistorySeries(): HistoryPoint[] {
-  const dates = [...listAllKnownSlateDates()].reverse();
-  return dates.map((date) => {
-    const research = loadResearchSlate(date).data;
-    const pitcherEval = loadLatestPitcherEvaluation(date).data;
-    const ownershipEval = loadLatestOwnershipEvaluation(date).data;
-    const lineupSet = loadLatestLineupSet(date).data;
+export async function buildHistorySeries(): Promise<HistoryPoint[]> {
+  const dates = [...(await listAllKnownSlateDates())].reverse();
+  return Promise.all(
+    dates.map(async (date) => {
+      const [research, pitcherEval, ownershipEval, lineupSet] = await Promise.all([
+        loadResearchSlate(date),
+        loadLatestPitcherEvaluation(date),
+        loadLatestOwnershipEvaluation(date),
+        loadLatestLineupSet(date),
+      ]);
 
-    return {
-      date,
-      games: research?.counts?.games ?? null,
-      pitcherMae: pitcherEval?.slate_metrics?.mae ?? null,
-      ownershipMae: ownershipEval?.overall_metrics?.mae ?? null,
-      projectionCorrelation: pitcherEval?.slate_metrics?.projection_correlation ?? null,
-      ownershipCorrelation: ownershipEval?.overall_metrics?.correlation ?? null,
-      lineupsGenerated: lineupSet?.lineups_generated ?? null,
-    };
-  });
+      return {
+        date,
+        games: research.data?.counts?.games ?? null,
+        pitcherMae: pitcherEval.data?.slate_metrics?.mae ?? null,
+        ownershipMae: ownershipEval.data?.overall_metrics?.mae ?? null,
+        projectionCorrelation: pitcherEval.data?.slate_metrics?.projection_correlation ?? null,
+        ownershipCorrelation: ownershipEval.data?.overall_metrics?.correlation ?? null,
+        lineupsGenerated: lineupSet.data?.lineups_generated ?? null,
+      };
+    }),
+  );
 }

@@ -122,18 +122,20 @@ function markStepStatus(state: RunState, id: PipelineStepId, status: StepStatus,
 /** Runs one Python CLI step and marks it ready/failed based on whether
  * exit code was 0 AND the step's own artifact actually changed -- see
  * artifacts.ts for why exit code alone isn't sufficient. */
+type FingerprintFn = (date: string) => Fingerprint | Promise<Fingerprint>;
+
 async function runStep(
   state: RunState,
   id: PipelineStepId,
   scriptPath: string,
   args: string[],
-  fingerprintFn: (date: string) => Fingerprint,
+  fingerprintFn: FingerprintFn,
 ): Promise<{ ok: boolean; artifactPath: string | null }> {
-  const before = fingerprintFn(state.slateDate);
+  const before = await fingerprintFn(state.slateDate);
   markStepStatus(state, id, "running", { startedAt: new Date().toISOString(), command: ["python", scriptPath, ...args] });
 
   const result = await runPythonScript(scriptPath, args);
-  const after = fingerprintFn(state.slateDate);
+  const after = await fingerprintFn(state.slateDate);
   const ok = result.exitCode === 0 && fingerprintChanged(before, after);
 
   markStepStatus(state, id, ok ? "ready" : "failed", {
@@ -165,15 +167,16 @@ async function runOrSkip(
   chain: Set<PipelineStepId>,
   smart: boolean,
   isReady: boolean,
-  fingerprintFn: (date: string) => Fingerprint,
+  fingerprintFn: FingerprintFn,
   run: () => Promise<{ ok: boolean; artifactPath: string | null }>,
 ): Promise<{ ok: boolean; artifactPath: string | null }> {
   if (!chain.has(id)) {
-    markStepStatus(state, id, "skipped", { message: "Not required for this action.", artifactPath: fingerprintFn(state.slateDate).path });
-    return { ok: true, artifactPath: fingerprintFn(state.slateDate).path };
+    const existing = await fingerprintFn(state.slateDate);
+    markStepStatus(state, id, "skipped", { message: "Not required for this action.", artifactPath: existing.path });
+    return { ok: true, artifactPath: existing.path };
   }
   if (smart && isReady) {
-    const existing = fingerprintFn(state.slateDate);
+    const existing = await fingerprintFn(state.slateDate);
     markStepStatus(state, id, "ready", { finishedAt: new Date().toISOString(), artifactPath: existing.path, message: "Already up to date." });
     return { ok: true, artifactPath: existing.path };
   }
@@ -189,7 +192,7 @@ const EMPTY_LINEUP_PATHS: LineupSetPaths = { projection: null, balanced: null, l
 type ExternalProjectionRefreshResult = { status: RunSummary["externalProjectionStatus"]; recordCount: number | null };
 const NOT_ATTEMPTED: ExternalProjectionRefreshResult = { status: "not_attempted", recordCount: null };
 
-function finalize(
+async function finalize(
   state: RunState,
   status: RunState["status"],
   outcome: RunOutcome,
@@ -210,9 +213,9 @@ function finalize(
   }
 
   if (status === "completed") {
-    state.summary = buildRunSummary(state, lineupCounts, lineupSetPaths, externalProjection);
+    state.summary = await buildRunSummary(state, lineupCounts, lineupSetPaths, externalProjection);
     const previous = lastCompletedRun ?? readPersistedLastCompletedRun();
-    state.changeReport = buildChangeReport(previous, state);
+    state.changeReport = await buildChangeReport(previous, state);
     lastCompletedRun = state;
     persistLastCompletedRun(state);
   }
@@ -254,19 +257,22 @@ function parseJsonLine(stdout: string): Record<string, unknown> | null {
   return null;
 }
 
-function buildRunSummary(
+async function buildRunSummary(
   state: RunState,
   lineupCounts: LineupCounts,
   lineupSetPaths: LineupSetPaths,
   externalProjection: ExternalProjectionRefreshResult = NOT_ATTEMPTED,
-): RunState["summary"] {
+): Promise<RunState["summary"]> {
   const date = state.slateDate;
-  const slate = safeReadJson<SlateIndex>(artifactPath(ARTIFACT_DIRS.research, date, "slate.json"));
-  const pitcherSnap = safeReadJson<PitcherSnapshot>(findStep(state, "pitchers").artifactPath);
-  const batterSnap = safeReadJson<BatterSnapshot>(findStep(state, "batters").artifactPath);
-  const pool = safeReadJson<DKPlayerPool>(findStep(state, "playerPool").artifactPath);
-  const matchReport = safeReadJson<Record<string, unknown>>(matchReportFingerprint(date).path);
-  const providerSlate = safeReadJson<Record<string, unknown>>(findStep(state, "dfsSalaries").artifactPath);
+  const matchReportFp = await matchReportFingerprint(date);
+  const [slate, pitcherSnap, batterSnap, pool, matchReport, providerSlate] = await Promise.all([
+    safeReadJson<SlateIndex>(artifactPath(ARTIFACT_DIRS.research, date, "slate.json")),
+    safeReadJson<PitcherSnapshot>(findStep(state, "pitchers").artifactPath),
+    safeReadJson<BatterSnapshot>(findStep(state, "batters").artifactPath),
+    safeReadJson<DKPlayerPool>(findStep(state, "playerPool").artifactPath),
+    safeReadJson<Record<string, unknown>>(matchReportFp.path),
+    safeReadJson<Record<string, unknown>>(findStep(state, "dfsSalaries").artifactPath),
+  ]);
 
   const distinctGamesWithLineups = new Set((batterSnap?.hitters ?? []).map((h) => h.game_id)).size;
 
@@ -314,9 +320,9 @@ async function runDfsSalariesStep(
     command: ["python", "scripts/fetch_dfs_slate.py", ...args],
   });
 
-  const before = providerSlateFingerprint(state.slateDate);
+  const before = await providerSlateFingerprint(state.slateDate);
   const result = await runPythonScript("scripts/fetch_dfs_slate.py", args);
-  const after = providerSlateFingerprint(state.slateDate);
+  const after = await providerSlateFingerprint(state.slateDate);
 
   if (result.exitCode !== 0 || !fingerprintChanged(before, after)) {
     // fetch_dfs_slate.py is designed to always write an artifact and exit 0 --
@@ -332,7 +338,7 @@ async function runDfsSalariesStep(
     return { status: "unavailable", doc: null, path: after.path };
   }
 
-  const doc = safeReadJson<Record<string, unknown>>(after.path);
+  const doc = await safeReadJson<Record<string, unknown>>(after.path);
   const status = (doc?.status as string | undefined) ?? "unavailable";
 
   if (status === "ready") {
@@ -399,9 +405,9 @@ async function runOptimizerStep(
     const args = ["--date", state.slateDate, "--pool", poolPath, "--lineups", "20", "--min-unique", "2", "--objective", objective.flag];
     if (ownershipPath) args.push("--ownership", ownershipPath);
 
-    const before = lineupSetFingerprint(state.slateDate);
+    const before = await lineupSetFingerprint(state.slateDate);
     const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
-    const after = lineupSetFingerprint(state.slateDate);
+    const after = await lineupSetFingerprint(state.slateDate);
     const ok = result.exitCode === 0 && fingerprintChanged(before, after);
 
     lastStdout = result.stdout;
@@ -411,7 +417,7 @@ async function runOptimizerStep(
 
     if (ok && after.path) {
       lineupSetPaths[objective.key] = after.path;
-      const doc = safeReadJson<Record<string, unknown>>(after.path);
+      const doc = await safeReadJson<Record<string, unknown>>(after.path);
       lineupCounts[objective.key] = typeof doc?.lineups_generated === "number" ? (doc.lineups_generated as number) : null;
     } else {
       allOk = false;
@@ -440,29 +446,33 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
 
   if (!chain.has("playerPool")) {
     // Player Pool (and everything that depends on it) wasn't requested.
-    markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFingerprint(state.slateDate).path });
-    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
-    finalize(state, "completed", "ready");
+    const [ownershipFp, lineupSetFp] = await Promise.all([ownershipFingerprint(state.slateDate), lineupSetFingerprint(state.slateDate)]);
+    markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFp.path });
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFp.path });
+    await finalize(state, "completed", "ready");
     return;
   }
 
   if (!poolResult.ok || !poolResult.artifactPath) {
-    finalize(state, "failed", "player_matching_failure", "Player pool build failed or produced no pool.");
+    await finalize(state, "failed", "player_matching_failure", "Player pool build failed or produced no pool.");
     return;
   }
 
-  const pool = safeReadJson<DKPlayerPool>(poolResult.artifactPath);
-  const matchReport = safeReadJson<Record<string, unknown>>(matchReportFingerprint(state.slateDate).path);
+  const matchReportFp = await matchReportFingerprint(state.slateDate);
+  const [pool, matchReport] = await Promise.all([
+    safeReadJson<DKPlayerPool>(poolResult.artifactPath),
+    safeReadJson<Record<string, unknown>>(matchReportFp.path),
+  ]);
   const matchedToMlb = typeof matchReport?.matched_to_mlb === "number" ? (matchReport.matched_to_mlb as number) : null;
 
   if (matchedToMlb === 0) {
     findStep(state, "playerPool").message = "Zero DFS entries matched to MLB identities.";
-    finalize(state, "failed", "player_matching_failure", "Zero DFS entries matched to MLB identities.");
+    await finalize(state, "failed", "player_matching_failure", "Zero DFS entries matched to MLB identities.");
     return;
   }
   if (!pool?.roster_feasibility_pass) {
     findStep(state, "playerPool").message = "Matched pool cannot fill a legal roster (roster feasibility FAILED).";
-    finalize(state, "failed", "roster_infeasible", "Matched pool cannot fill a legal DK roster.");
+    await finalize(state, "failed", "roster_infeasible", "Matched pool cannot fill a legal DK roster.");
     return;
   }
 
@@ -471,13 +481,14 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
   );
 
   if (!chain.has("ownership")) {
-    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
-    finalize(state, "completed", "ready");
+    const lineupSetFp = await lineupSetFingerprint(state.slateDate);
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFp.path });
+    await finalize(state, "completed", "ready");
     return;
   }
 
   if (!ownershipResult.ok) {
-    finalize(state, "failed", "ownership_failure", "Ownership projection failed or produced no snapshot.");
+    await finalize(state, "failed", "ownership_failure", "Ownership projection failed or produced no snapshot.");
     return;
   }
 
@@ -489,21 +500,22 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
   const externalProjection = ownershipAlreadyReady ? NOT_ATTEMPTED : await runExternalProjectionRefresh(state);
 
   if (!chain.has("optimizer")) {
-    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
-    finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
+    const lineupSetFp = await lineupSetFingerprint(state.slateDate);
+    markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFp.path });
+    await finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
     return;
   }
 
   if (smart && readiness?.optimizer) {
-    const existing = lineupSetFingerprint(state.slateDate);
+    const existing = await lineupSetFingerprint(state.slateDate);
     markStepStatus(state, "optimizer", "ready", { finishedAt: new Date().toISOString(), artifactPath: existing.path, message: "Already up to date." });
-    finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
+    await finalize(state, "completed", "ready", undefined, EMPTY_LINEUP_COUNTS, EMPTY_LINEUP_PATHS, externalProjection);
     return;
   }
 
   const optimizer = await runOptimizerStep(state, poolResult.artifactPath, ownershipResult.artifactPath);
   if (!optimizer.ok) {
-    finalize(
+    await finalize(
       state,
       "failed",
       "optimizer_infeasible",
@@ -514,19 +526,19 @@ async function continueAfterDfsSalaries(state: RunState, chain: Set<PipelineStep
     return;
   }
 
-  finalize(state, "completed", "ready", undefined, optimizer.lineupCounts, optimizer.lineupSetPaths, externalProjection);
+  await finalize(state, "completed", "ready", undefined, optimizer.lineupCounts, optimizer.lineupSetPaths, externalProjection);
 }
 
 async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<PipelineStepId> = new Set(STEP_ORDER), smart = false) {
   try {
-    const readiness = smart ? getArtifactStatus(state.slateDate) : null;
+    const readiness = smart ? await getArtifactStatus(state.slateDate) : null;
 
     if (!resumeSlateId) {
       const research = await runOrSkip(state, "research", chain, smart, Boolean(readiness?.research), researchSlateFingerprint, () =>
         runStep(state, "research", "scripts/build_research_package.py", ["--date", state.slateDate], researchSlateFingerprint),
       );
       if (!research.ok) {
-        finalize(state, "failed", "mlb_data_failure", "Research package build failed.");
+        await finalize(state, "failed", "mlb_data_failure", "Research package build failed.");
         return;
       }
 
@@ -534,7 +546,7 @@ async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<Pi
         runStep(state, "pitchers", "scripts/run_real_pitcher_agent.py", ["--date", state.slateDate], pitcherSnapshotFingerprint),
       );
       if (!pitchers.ok) {
-        finalize(state, "failed", "pitcher_agent_failure", "Pitcher Agent run failed.");
+        await finalize(state, "failed", "pitcher_agent_failure", "Pitcher Agent run failed.");
         return;
       }
 
@@ -542,27 +554,33 @@ async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<Pi
         runStep(state, "batters", "scripts/run_real_batter_agent.py", ["--date", state.slateDate], batterSnapshotFingerprint),
       );
       if (!batters.ok) {
-        finalize(state, "failed", "batter_agent_failure", "Batter Agent run failed.");
+        await finalize(state, "failed", "batter_agent_failure", "Batter Agent run failed.");
         return;
       }
     }
 
     if (!chain.has("dfsSalaries")) {
+      const [dfsSalariesFp, poolFp, ownershipFp, lineupSetFp] = await Promise.all([
+        providerSlateFingerprint(state.slateDate),
+        poolFingerprint(state.slateDate),
+        ownershipFingerprint(state.slateDate),
+        lineupSetFingerprint(state.slateDate),
+      ]);
       markStepStatus(state, "dfsSalaries", "skipped", {
         message: "Not required for this action.",
-        artifactPath: providerSlateFingerprint(state.slateDate).path,
+        artifactPath: dfsSalariesFp.path,
       });
-      markStepStatus(state, "playerPool", "skipped", { message: "Not required for this action.", artifactPath: poolFingerprint(state.slateDate).path });
-      markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFingerprint(state.slateDate).path });
-      markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFingerprint(state.slateDate).path });
-      finalize(state, "completed", "ready");
+      markStepStatus(state, "playerPool", "skipped", { message: "Not required for this action.", artifactPath: poolFp.path });
+      markStepStatus(state, "ownership", "skipped", { message: "Not required for this action.", artifactPath: ownershipFp.path });
+      markStepStatus(state, "optimizer", "skipped", { message: "Not required for this action.", artifactPath: lineupSetFp.path });
+      await finalize(state, "completed", "ready");
       return;
     }
 
     let dfsResult: { status: string; doc: Record<string, unknown> | null; path: string | null };
     if (smart && !resumeSlateId && readiness?.dfsSalaries) {
-      const existing = providerSlateFingerprint(state.slateDate);
-      const doc = safeReadJson<Record<string, unknown>>(existing.path);
+      const existing = await providerSlateFingerprint(state.slateDate);
+      const doc = await safeReadJson<Record<string, unknown>>(existing.path);
       markStepStatus(state, "dfsSalaries", "ready", {
         finishedAt: new Date().toISOString(),
         artifactPath: existing.path,
@@ -594,13 +612,13 @@ async function executeRun(state: RunState, resumeSlateId?: string, chain: Set<Pi
 
     if (dfsResult.status !== "ready") {
       const outcome = DFS_STATUS_TO_OUTCOME[dfsResult.status] ?? "dfs_unavailable";
-      finalize(state, "failed", outcome, (dfsResult.doc?.reason as string | undefined) ?? `DFS provider status: ${dfsResult.status}`);
+      await finalize(state, "failed", outcome, (dfsResult.doc?.reason as string | undefined) ?? `DFS provider status: ${dfsResult.status}`);
       return;
     }
 
     await continueAfterDfsSalaries(state, chain, smart, readiness);
   } catch (err) {
-    finalize(state, "failed", "unexpected_error", err instanceof Error ? err.message : String(err));
+    await finalize(state, "failed", "unexpected_error", err instanceof Error ? err.message : String(err));
   }
 }
 

@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 /** Research Package overview: the raw counts and any data-quality notes
  * from today's research build. Pure read of research_output/ -- no
  * research/scoring logic lives here. */
-export default function ResearchPage() {
+export default async function ResearchPage() {
   const date = getTodayChicagoDate();
-  const slate = loadResearchSlate(date).data;
+  const slate = (await loadResearchSlate(date)).data;
 
   return (
     <div>

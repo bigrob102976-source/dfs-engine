@@ -24,12 +24,17 @@ export default async function TopPitchersPage(props: PageProps<"/dashboard/pitch
 
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
-  const pitcherSnapshot = date ? loadLatestPitcherSnapshot(date).data : null;
-  const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
-  const pool = date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data : null;
-  // BlueCollar Live Projection Integration: optional comparison column.
-  // Slate-scoped (see lib/blueCollarProjections.ts) -- never date-only.
-  const blueCollarByPlayerId = date ? getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null) : new Map();
+  const [pitcherLoaded, ownershipLoaded, poolLoaded, blueCollarByPlayerId] = await Promise.all([
+    date ? loadLatestPitcherSnapshot(date) : null,
+    date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null) : null,
+    date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null) : null,
+    // BlueCollar Live Projection Integration: optional comparison column.
+    // Slate-scoped (see lib/blueCollarProjections.ts) -- never date-only.
+    date ? getBlueCollarProjectionByPlayerId(date, slateCtx.selected?.slateId ?? null) : new Map(),
+  ]);
+  const pitcherSnapshot = pitcherLoaded?.data ?? null;
+  const ownership = ownershipLoaded?.data ?? null;
+  const pool = poolLoaded?.data ?? null;
 
   const allRows = buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, pool, blueCollarByPlayerId);
   const gameFiltered = filterByGameIds(allRows, effectiveGameIds(slateCtx));

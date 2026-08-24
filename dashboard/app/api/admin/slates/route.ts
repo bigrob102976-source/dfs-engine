@@ -11,9 +11,6 @@ export async function GET() {
   if (userOrRes instanceof NextResponse) return userOrRes;
 
   const date = getTodayChicagoDate();
-  return NextResponse.json({
-    date,
-    summary: buildSlateSummary(date),
-    statuses: buildPipelineStatuses(date),
-  });
+  const [summary, statuses] = await Promise.all([buildSlateSummary(date), buildPipelineStatuses(date)]);
+  return NextResponse.json({ date, summary, statuses });
 }

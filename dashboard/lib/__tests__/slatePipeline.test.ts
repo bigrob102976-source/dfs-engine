@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { PythonRunner, PythonRunResult } from "../orchestrator/pythonRunner";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 let tsCounter = 0;
 const DATE = "2026-08-19";
@@ -125,6 +127,7 @@ beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-slatepipeline-"));
   tsCounter = 0;
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
   const { __resetDbForTests } = await import("../db/client");
   const { __resetExecutorForTests } = await import("../db/executor");
   __resetDbForTests();
@@ -137,6 +140,7 @@ afterEach(async () => {
   __resetPythonRunnerForTests();
   __resetPoolCacheForTests();
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

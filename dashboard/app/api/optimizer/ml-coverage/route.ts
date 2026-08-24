@@ -26,6 +26,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: dateResolution.error }, { status: 400 });
   }
 
-  const coverage = getBigMoneyMlCoverage(dateResolution.date, slateId);
+  const coverage = await getBigMoneyMlCoverage(dateResolution.date, slateId);
   return NextResponse.json({ coverage });
 }

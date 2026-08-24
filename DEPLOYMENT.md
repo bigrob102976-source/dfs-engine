@@ -142,14 +142,115 @@ against an actual hosted multi-instance deployment.
   `@aws-sdk/client-s3`) and `S3ArtifactStorage` (Python, `boto3`). Both are
   real, tested implementations (mocked S3 client in unit tests — no cloud
   resources required to run the test suite).
-- Neither the dashboard's loaders (`lib/loaders.ts`, `lib/discovery.ts`) nor
-  most of the Python persistence modules are wired to read/write through
-  these abstractions yet — `research/storage.py::save_json()` (the shared
-  primitive underneath `dfs/persistence.py`, `ownership/persistence.py`,
-  `native_projections/persistence.py`, and others) now routes through
-  `LocalArtifactStorage` internally, which is the centralization point; a
-  full swap to `S3ArtifactStorage` for every writer, and swapping every
-  dashboard loader to `StorageBackend`, is real, separate follow-up work.
+- **Milestone 33.2 — wired end to end.** Every production-critical reader and
+  writer now routes through this abstraction instead of raw `node:fs` /
+  Python `Path`/`open()` calls:
+  - Node: `lib/discovery.ts` (the shared low-level primitive under
+    `lib/loaders.ts` and every `lib/*Projections.ts`/`lib/gameEnvironment.ts`/
+    etc. reader) now calls `lib/storage/getStorage.ts::getStorage()` — a
+    lazy singleton mirroring `lib/db/executor.ts::getExecutor()`'s exact
+    shape, resolved once via `resolveStorageBackend()`. Every function in
+    `discovery.ts` is `async` now; its external contract (still absolute,
+    `artifactPath()`-shaped paths in and out) is otherwise unchanged, so
+    callers only needed `await` added, not a rewrite.
+  - Python: `research/storage.py::save_json()` and every persistence module
+    that previously wrote raw JSON/CSV/bytes directly to disk (`dfs/`,
+    `ownership/`, `optimizer/`, `bluecollar/`, `evaluation/`,
+    `native_projections/`, `external_projections/`, `projection_engine/`,
+    `big_money_ml/`, `fantasypros/`, `player_identity/`,
+    `research/game_environment/`, `dfs/providers/draftkings_csv_storage.py`)
+    now calls `research/artifact_storage.py::resolve_artifact_storage()`
+    (JSON, plus new `write_bytes`/`write_text`/`read_bytes`/`delete` methods
+    for the two CSV-writing call sites and the raw-CSV-upload storage module).
+  - Both languages resolve the SAME five `OBJECT_STORAGE_*` env vars to the
+    SAME bucket, so a Process/Refresh run on one machine and a member read on
+    another see identical artifacts once object storage is configured.
+
+### Canonical object keys
+
+Every object key is simply the artifact's existing repo-relative path,
+forward-slash-normalized — the smallest possible migration, since every
+artifact directory (`research_output/`, `predictions/`, `dfs_input/`,
+`native_projection_snapshots/`, etc.) was already organized
+`<artifact-dir>/<date>/[<slate-id>/]<filename>`, which is already
+date-scoped, already slate-scoped where a slate can genuinely collide
+(ownership, DK CSV uploads, ML forward-results), and already collision-free
+across Main/Turbo/Night (distinct `slate-id` path segments). No new key
+hierarchy was invented. Both languages derive this identically:
+`dashboard/lib/artifactRoot.ts::toArtifactKey()` (Node) and
+`research/artifact_storage.py::to_artifact_key()` (Python) each resolve a
+path to an artifact-root-relative, forward-slash string; a path genuinely
+outside the artifact root (a scratch/temp file) falls back to its resolved
+absolute-path string instead of erroring, since such a path is a deliberate
+"don't go through object storage" signal, not a bug.
+
+### Model artifacts (`data/models/`)
+
+**Decision: object storage, cached to local disk once per process, never
+re-fetched per inference call.** `data/models/mlb/{hitter,pitcher}/v1/` is
+small (~1.7 MB total: `model.joblib` + metadata/metrics JSON per player
+type) and is `.gitignore`d by existing project convention (Milestone 32.2:
+"reproducible by re-running training against the warehouse, never source") —
+so baking it into a Docker image would mean either breaking that convention
+(committing binary model artifacts to git) or a separate image-build step
+outside this milestone's scope. Object storage keeps the existing
+"generated, not source" convention intact and reuses the SAME bucket/
+abstraction as every other artifact, rather than a third mechanism.
+`historical_models/pitcher_v1/persistence.py::load_model()` (reused
+verbatim by `hitter_v1` and by `big_money_ml/{artifact,hitter_artifact}.py`
+— the one real choke point for every model-loading call site in this repo)
+now checks local disk first and only calls
+`resolve_artifact_storage().read_bytes()` on a cache miss, writing the
+result to local disk before returning — so a warm process never makes a
+network call to load a model it already has. A process picks up a newly
+trained model version only via restart (this package has always assumed a
+fixed version per process lifetime); no cache-invalidation logic exists or
+is needed. **Training remains fully out of scope for this milestone** — no
+model was retrained, and `save_model()` still only writes locally (a
+freshly trained model must be uploaded to the bucket as a manual/deploy-time
+step — see the seeding inventory below).
+
+### Historical warehouse (`data/historical/mlb/`, `historical_mlb/`)
+
+**Decision: stays out of normal production runtime entirely, by design.**
+It's `.gitignore`d (`/data/historical/`) and was already never read by any
+live-inference or member-facing code path — `historical_mlb/` builds and
+`historical_models/*/train.py` consumes it strictly offline, against
+whatever warehouse exists on the machine running the training command. This
+milestone changes nothing here: no warehouse code was routed through the
+object-storage abstraction, and none should be — a live member request
+never needs it, and routing gigabytes of historical training data through
+the same bucket used for member-facing snapshots would be pure unnecessary
+complexity (and unnecessary object-storage cost) with no product benefit.
+
+### Health check
+
+`GET`-style readiness in both languages, SAFE-only (never a credential,
+endpoint, bucket-contents, or object-key value):
+- Node: `lib/systemReadiness.ts::getObjectStorageReadiness()` → `{ backend:
+  "local" | "object", status: "CONNECTED" | "NOT_CONFIGURED" | "ERROR",
+  detail }`. Feeds the Admin System page's Object Storage card
+  (`/admin/system`), which now also shows which backend is actually active
+  ("Local disk" vs "S3-compatible"), not just its status.
+- Python: `research/artifact_storage.py::check_artifact_storage_health()` →
+  `{ backend, connectivity: "healthy" | "unreachable" | "not_configured",
+  bucket, detail }` — same shape and semantics, callable directly or via
+  `python scripts/check_storage_health.py` (prints one JSON line). Uses
+  `HeadBucket`, which only confirms reachability, never touches or lists any
+  object.
+
+### Production seeding inventory
+
+What a first hosted deployment needs uploaded into the bucket before it can
+serve real traffic, versus what must NOT be uploaded:
+
+| Artifact | Seed before launch? | Why |
+|---|---|---|
+| `data/models/mlb/{hitter,pitcher}/v1/*` | **REQUIRED** | Live inference (Native/AI/Big Money ML projections) fails loudly (`FileNotFoundError`) without it — see Model artifacts above. |
+| `research_output/`, `predictions/`, `dfs_input/`, `ownership_predictions/`, `native_projection_snapshots/`, `ai_projection_snapshots/`, `ml_projection_snapshots/`, `game_environment_snapshots/`, `bluecollar_projection_snapshots/`, `fantasypros_snapshots/`, `external_projection_snapshots/`, `adjusted_projection_snapshots/`, `lineups/`, `results/`, `ml_forward_results/`, `evaluations/`, `ownership_evaluations/`, `actual_ownership/` | Optional | Slate/prediction/evaluation history. A fresh empty bucket is a valid, honest starting state — the product just shows "no data yet" until the first real Process/Refresh run populates it. Pre-seeding old local dev/test artifacts would misrepresent real prediction history (CLAUDE.md's evaluation-integrity rules) and is explicitly NOT recommended. |
+| `player_identity_crosswalk/`, `player_identity_snapshots/` | Optional | Rebuilds itself from live MLB rosters on the first identity refresh; pre-seeding saves that one refresh's cold-start cost, nothing more. |
+| `data/historical/mlb/` (historical warehouse), `historical_mlb/` outputs | **DO NOT UPLOAD** | Offline-training-only (see above) — has no role in serving member traffic and would add nothing but cost/clutter to the production bucket. |
+| Any local dev/test cache (`research/cache.py`'s cache dir, `data/draftkings_unofficial/` dev-only archive) | **DO NOT UPLOAD** | Regenerable, dev-only, or explicitly out of the artifact-storage abstraction by design (Category D/E — see this module's own docstrings). |
 
 ## Background jobs
 

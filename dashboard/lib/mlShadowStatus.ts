@@ -29,8 +29,8 @@ export interface MlHitterShadowStatus {
  * failure during Process/Refresh appears in that run's errors, not here
  * -- this card only reflects the last persisted snapshot (same division
  * of concerns lib/fantasyProsStatus.ts already documents for itself). */
-export function getMlShadowStatus(date: string): MlShadowStatus {
-  const doc = loadLatestMlProjectionSnapshot(date);
+export async function getMlShadowStatus(date: string): Promise<MlShadowStatus> {
+  const doc = await loadLatestMlProjectionSnapshot(date);
   if (!doc) {
     return {
       status: "NO_SNAPSHOT", slate_date: date, model_version: null, starting_pitcher_count: 0,
@@ -57,8 +57,8 @@ export function getMlShadowStatus(date: string): MlShadowStatus {
  * ml_hitter_projection_*.json snapshot stream. Same division of
  * concerns: reflects only the last persisted snapshot, never triggers
  * generation, never blocks slate publication. */
-export function getMlHitterShadowStatus(date: string): MlHitterShadowStatus {
-  const doc = loadLatestMlHitterProjectionSnapshot(date);
+export async function getMlHitterShadowStatus(date: string): Promise<MlHitterShadowStatus> {
+  const doc = await loadLatestMlHitterProjectionSnapshot(date);
   if (!doc) {
     return {
       status: "NO_SNAPSHOT", slate_date: date, model_version: null, confirmed_starting_hitter_count: 0,

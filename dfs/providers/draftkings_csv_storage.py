@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 from research.prediction_snapshot import timestamp_tag
 
 DEFAULT_DFS_INPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "dfs_input"
@@ -67,10 +68,6 @@ class DraftKingsUpload:
     def to_dict(self) -> dict:
         return asdict(self)
 
-
-def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing DraftKings CSV upload: {path}")
 
 
 def _safe_label(slate_label: str) -> str:
@@ -104,23 +101,22 @@ def save_upload(
     second resolution, same as every other immutable snapshot type in
     this project."""
     dest_dir = Path(output_root) / slate_date / _SUBDIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
 
     uploaded_at = uploaded_at or datetime.now(timezone.utc).isoformat()
     ts = timestamp_tag(uploaded_at)
     stem = f"{_safe_label(slate_label)}_{ts}"
     csv_path = dest_dir / f"{stem}.csv"
     meta_path = dest_dir / f"{stem}.meta.json"
-    _no_overwrite(csv_path)
-    _no_overwrite(meta_path)
+    csv_key, meta_key = to_artifact_key(csv_path), to_artifact_key(meta_path)
 
-    csv_path.write_bytes(csv_bytes)
+    storage.write_bytes(csv_key, csv_bytes, allow_overwrite=False)
     upload = DraftKingsUpload(
         path=str(csv_path), meta_path=str(meta_path), slate_date=slate_date,
         slate_label=slate_label, original_filename=original_filename, uploaded_at=uploaded_at,
         sha256=hashlib.sha256(csv_bytes).hexdigest(), row_count=_row_count(csv_bytes),
     )
-    meta_path.write_text(json.dumps(upload.to_dict(), indent=2), encoding="utf-8")
+    storage.write_json(meta_key, upload.to_dict(), allow_overwrite=False)
     return upload
 
 
@@ -131,17 +127,18 @@ def list_uploads(slate_date: str, output_root: Path = DEFAULT_DFS_INPUT_ROOT) ->
     draftkings_csv_provider.py). Skips any sidecar that fails to parse
     rather than failing the whole listing."""
     dest_dir = Path(output_root) / slate_date / _SUBDIR
-    if not dest_dir.exists():
-        return []
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    dir_key = to_artifact_key(dest_dir)
     uploads = []
-    for meta_path in sorted(dest_dir.glob("*.meta.json")):
-        try:
-            with meta_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            uploads.append(DraftKingsUpload(**data))
-        except (OSError, ValueError, TypeError):
+    for meta_key in storage.list_files(dir_key, prefix="", ext=".meta.json"):
+        data = storage.read_json(meta_key)
+        if data is None:
             continue
-    return uploads
+        try:
+            uploads.append(DraftKingsUpload(**data))
+        except (ValueError, TypeError):
+            continue
+    return sorted(uploads, key=lambda u: u.path)
 
 
 def delete_upload(csv_path: str, output_root: Path = DEFAULT_DFS_INPUT_ROOT) -> None:
@@ -158,7 +155,6 @@ def delete_upload(csv_path: str, output_root: Path = DEFAULT_DFS_INPUT_ROOT) -> 
         raise ValueError(f"Path is not inside the DFS input root: {csv_path}") from e
 
     meta_path = resolved.with_name(resolved.stem + ".meta.json")
-    if resolved.exists():
-        resolved.unlink()
-    if meta_path.exists():
-        meta_path.unlink()
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    storage.delete(to_artifact_key(resolved))
+    storage.delete(to_artifact_key(meta_path))

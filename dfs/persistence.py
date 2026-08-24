@@ -14,27 +14,26 @@ and every version matters.
 """
 
 import json
-import shutil
 from pathlib import Path
 from typing import List, Optional
 
 from dfs.models import DFSPlayer
+from research.artifact_storage import ARTIFACT_ROOT, raise_if_exists, resolve_artifact_storage, to_artifact_key
 from research.storage import save_json
 
 DEFAULT_DFS_INPUT_ROOT = Path(__file__).resolve().parent.parent / "dfs_input"
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing DFS import artifact: {path}")
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 def save_raw_csv(csv_path, slate_date: str, timestamp: str, output_root: Path = DEFAULT_DFS_INPUT_ROOT) -> Path:
     dest_dir = Path(output_root) / slate_date / "raw"
-    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"DKSalaries_{timestamp}.csv"
-    _no_overwrite(dest)
-    shutil.copyfile(Path(csv_path), dest)
+    resolve_artifact_storage(ARTIFACT_ROOT).copy_file(Path(csv_path), to_artifact_key(dest), allow_overwrite=False)
     return dest
 
 

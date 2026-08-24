@@ -65,30 +65,30 @@ export function isStrictProjectionSource(source: OptimizerBuildRequest["projecti
   return source === "big_money_ml" || source === "bluecollar";
 }
 
-function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | null {
+async function writeProjectionOverridesFile(request: OptimizerBuildRequest): Promise<string | null> {
   if (request.projectionSource === "independent") return null;
 
   const overrides: Record<string, { projection: number | null; ceiling: number | null; floor: number | null }> = {};
 
   if (request.projectionSource === "ai") {
-    const aiByPlayerId = getAiProjectionByPlayerId(request.date);
+    const aiByPlayerId = await getAiProjectionByPlayerId(request.date);
     for (const [mlbPlayerId, player] of aiByPlayerId) {
       if (player.ai_projection === null) continue;
       overrides[mlbPlayerId] = { projection: player.ai_projection, ceiling: player.ai_ceiling, floor: player.ai_floor };
     }
   } else if (request.projectionSource === "native") {
-    const nativeByPlayerId = getNativeProjectionByPlayerId(request.date);
+    const nativeByPlayerId = await getNativeProjectionByPlayerId(request.date);
     for (const [mlbPlayerId, player] of nativeByPlayerId) {
       overrides[mlbPlayerId] = { projection: player.native_projection, ceiling: player.native_ceiling, floor: player.native_floor };
     }
   } else if (request.projectionSource === "fantasypros") {
-    const fantasyProsByPlayerId = getFantasyProsProjectionByPlayerId(request.date);
+    const fantasyProsByPlayerId = await getFantasyProsProjectionByPlayerId(request.date);
     for (const [mlbPlayerId, player] of fantasyProsByPlayerId) {
       if (player.dk_points === null) continue;
       overrides[mlbPlayerId] = { projection: player.dk_points, ceiling: null, floor: null };
     }
   } else if (request.projectionSource === "big_money_ml") {
-    const mlByPlayerId = getMlProjectionByPlayerId(request.date);
+    const mlByPlayerId = await getMlProjectionByPlayerId(request.date);
     for (const [mlbPlayerId, player] of mlByPlayerId) {
       if (player.projection === null) continue;
       if (player.projection_status !== "LIVE_PREGAME" && player.projection_status !== "PREGAME_FROZEN") continue;
@@ -113,13 +113,13 @@ function writeProjectionOverridesFile(request: OptimizerBuildRequest): string | 
     // independent ceiling/floor, same documented exception as
     // big_money_ml/FantasyPros above. Only the PROJECTION itself is
     // held to strict source purity.
-    const blueCollarByPlayerId = getBlueCollarProjectionByPlayerId(request.date, request.slateId);
+    const blueCollarByPlayerId = await getBlueCollarProjectionByPlayerId(request.date, request.slateId);
     for (const [mlbPlayerId, player] of blueCollarByPlayerId) {
       if (player.usable_projection === null) continue;
       overrides[mlbPlayerId] = { projection: player.usable_projection, ceiling: null, floor: null };
     }
   } else {
-    const comparisonByPlayerId = getProjectionComparisonByPlayerId(request.date);
+    const comparisonByPlayerId = await getProjectionComparisonByPlayerId(request.date);
     for (const [mlbPlayerId, row] of comparisonByPlayerId) {
       const projection = request.projectionSource === "external" ? row.externalProjection : row.adjustedProjection;
       if (projection === null) continue;
@@ -150,9 +150,9 @@ function cleanupProjectionOverridesFile(filePath: string | null): void {
   }
 }
 
-function buildArgv(
+async function buildArgv(
   request: OptimizerBuildRequest, poolPath: string, ownershipPath: string | null, projectionOverridesPath: string | null, extra: string[],
-): string[] {
+): Promise<string[]> {
   const args: string[] = ["--date", request.date, "--pool", poolPath];
   if (ownershipPath) args.push("--ownership", ownershipPath);
   if (projectionOverridesPath) args.push("--projection-overrides", projectionOverridesPath);
@@ -164,7 +164,7 @@ function buildArgv(
     // report, so this stays scoped to big_money_ml only, even though
     // both sources share the general --strict-projection-source flag.
     if (request.projectionSource === "big_money_ml") {
-      const provenance = getBigMoneyMlProvenance(request.date);
+      const provenance = await getBigMoneyMlProvenance(request.date);
       if (provenance.pitcherModelVersion) args.push("--pitcher-model-version", provenance.pitcherModelVersion);
       if (provenance.hitterModelVersion) args.push("--hitter-model-version", provenance.hitterModelVersion);
       if (provenance.pitcherSnapshotGeneratedAt) args.push("--pitcher-projection-snapshot-generated-at", provenance.pitcherSnapshotGeneratedAt);
@@ -205,9 +205,9 @@ export async function validateBuildRequest(request: OptimizerBuildRequest): Prom
   if (!cached) {
     return { errors: ["No player pool loaded for this slate yet -- select a slate first."], coverage: null };
   }
-  const overridesPath = writeProjectionOverridesFile(request);
+  const overridesPath = await writeProjectionOverridesFile(request);
   try {
-    const args = buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, ["--validate-only"]);
+    const args = await buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, ["--validate-only"]);
     const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
     const doc = parseLastJsonLine(result.stdout);
     if (!doc) {
@@ -261,16 +261,16 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     };
   }
 
-  const before = lineupSetFingerprint(request.date);
-  const overridesPath = writeProjectionOverridesFile(request);
+  const before = await lineupSetFingerprint(request.date);
+  const overridesPath = await writeProjectionOverridesFile(request);
   let result;
   try {
-    const args = buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, []);
+    const args = await buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, []);
     result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
   } finally {
     cleanupProjectionOverridesFile(overridesPath);
   }
-  const after = lineupSetFingerprint(request.date);
+  const after = await lineupSetFingerprint(request.date);
   const elapsedMs = Date.now() - startedAt;
 
   if (result.exitCode !== 0 || !fingerprintChanged(before, after) || !after.path) {
@@ -290,7 +290,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
     };
   }
 
-  const doc = safeReadJson<LineupSet>(after.path);
+  const doc = await safeReadJson<LineupSet>(after.path);
   const csvPath = after.path.replace(/\.json$/, ".csv");
 
   return {

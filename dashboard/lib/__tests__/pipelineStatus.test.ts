@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 
 function writeJson(filePath: string, data: unknown) {
@@ -13,17 +15,19 @@ function writeJson(filePath: string, data: unknown) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-dashboard-root-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("buildPipelineStatuses", () => {
   it("returns an empty array when there is no known slate date", async () => {
     const { buildPipelineStatuses } = await import("../pipelineStatus");
-    expect(buildPipelineStatuses(null)).toEqual([]);
+    expect(await buildPipelineStatuses(null)).toEqual([]);
   });
 
   it("marks every stage missing when nothing has been generated", async () => {
@@ -32,7 +36,7 @@ describe("buildPipelineStatuses", () => {
       counts: { games: 10, teams: 20, pitchers: 30, batters: 100 },
     });
     const { buildPipelineStatuses } = await import("../pipelineStatus");
-    const statuses = buildPipelineStatuses("2026-08-11");
+    const statuses = await buildPipelineStatuses("2026-08-11");
     const byLabel = Object.fromEntries(statuses.map((s) => [s.label, s]));
     expect(byLabel["Research Package"].state).toBe("ready");
     expect(byLabel["Pitcher Snapshot"].state).toBe("missing");
@@ -57,7 +61,7 @@ describe("buildPipelineStatuses", () => {
       normalization_checks: {},
     });
     const { buildPipelineStatuses } = await import("../pipelineStatus");
-    const statuses = buildPipelineStatuses("2026-08-11");
+    const statuses = await buildPipelineStatuses("2026-08-11");
     const ownership = statuses.find((s) => s.label === "Ownership")!;
     expect(ownership.state).toBe("outdated");
   });
@@ -79,7 +83,7 @@ describe("buildPipelineStatuses", () => {
       normalization_checks: {},
     });
     const { buildPipelineStatuses } = await import("../pipelineStatus");
-    const statuses = buildPipelineStatuses("2026-08-11");
+    const statuses = await buildPipelineStatuses("2026-08-11");
     const ownership = statuses.find((s) => s.label === "Ownership")!;
     expect(ownership.state).toBe("ready");
   });
@@ -88,7 +92,7 @@ describe("buildPipelineStatuses", () => {
 describe("buildSlateSummary", () => {
   it("returns zeros when there is no slate date", async () => {
     const { buildSlateSummary } = await import("../pipelineStatus");
-    expect(buildSlateSummary(null)).toEqual({
+    expect(await buildSlateSummary(null)).toEqual({
       gamesOnResearch: 0,
       gamesOnDkSlate: null,
       postedLineupGames: 0,
@@ -113,7 +117,7 @@ describe("buildSlateSummary", () => {
       ],
     });
     const { buildSlateSummary } = await import("../pipelineStatus");
-    const summary = buildSlateSummary("2026-08-11");
+    const summary = await buildSlateSummary("2026-08-11");
     expect(summary.gamesOnResearch).toBe(10);
     expect(summary.postedLineupGames).toBe(2);
     expect(summary.missingLineupGames).toBe(2);

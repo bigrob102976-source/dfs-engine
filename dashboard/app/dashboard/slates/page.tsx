@@ -75,7 +75,7 @@ export default async function SlateManagerPage(props: PageProps<"/dashboard/slat
     // Milestone 30.1: the same match report already pinned by publish
     // (version.matchReportPath) -- never a fresh/unpinned load, so this
     // widget always matches whatever slate a member is actually seeing.
-    const matchReport = safeReadJson<{ dk_games_total?: number; eligibility?: EligibilityCounts }>(version?.matchReportPath ?? null);
+    const matchReport = await safeReadJson<{ dk_games_total?: number; eligibility?: EligibilityCounts }>(version?.matchReportPath ?? null);
     const eligibility = matchReport?.eligibility ?? null;
     const gamesTotal = matchReport?.dk_games_total ?? 0;
     const playerPool: PlayerPoolSummary | null = eligibility

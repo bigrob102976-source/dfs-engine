@@ -32,7 +32,7 @@ export default async function EnvironmentPage(props: PageProps<"/dashboard/envir
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
-  const fullDayReport = loadLatestEnvironmentReport(date);
+  const fullDayReport = await loadLatestEnvironmentReport(date);
   const report = fullDayReport ? { ...fullDayReport, games: filterByGameIdField(fullDayReport.games, gameIds) } : null;
   const slateDescription = slateCtx.selected ? ` -- ${formatSlateLabel(slateCtx.selected)}` : "";
 

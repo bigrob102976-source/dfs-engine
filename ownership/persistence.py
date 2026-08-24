@@ -34,6 +34,7 @@ from typing import Dict, List, Optional
 # Reuses the exact same UTC/local/timezone metadata helper the Pitcher,
 # Batter, and lineup-set outputs already use (America/Chicago,
 # tzdata-backed) instead of re-deriving the same logic a fourth time.
+from research.artifact_storage import raise_if_exists
 from research.prediction_snapshot import _timezone_metadata
 from research.storage import save_json
 
@@ -43,8 +44,9 @@ DEFAULT_OWNERSHIP_ROOT = Path(__file__).resolve().parent.parent / "ownership_pre
 
 
 def _no_overwrite(path: Path) -> None:
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite existing ownership snapshot: {path}")
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
 
 def build_ownership_document(

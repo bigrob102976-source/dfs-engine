@@ -35,13 +35,18 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
 
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
-  const batterSnapshot = date ? loadLatestBatterSnapshot(date).data : null;
-  const ownership = date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data : null;
-  // Milestone 27.2: without the real DK pool, a team whose lineup hasn't
-  // posted yet is invisible here even though its Stack Environment
-  // Score (a game-level, Vegas/park/weather-driven signal) can still
-  // rank #1 -- exactly the reported inconsistency. See lib/normalize.ts.
-  const dkPool = date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null).data : null;
+  const [batterLoaded, ownershipLoaded, dkPoolLoaded] = await Promise.all([
+    date ? loadLatestBatterSnapshot(date) : null,
+    date ? loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null) : null,
+    // Milestone 27.2: without the real DK pool, a team whose lineup hasn't
+    // posted yet is invisible here even though its Stack Environment
+    // Score (a game-level, Vegas/park/weather-driven signal) can still
+    // rank #1 -- exactly the reported inconsistency. See lib/normalize.ts.
+    date ? loadLatestDKPlayerPool(date, slateCtx.selected?.slateId ?? null) : null,
+  ]);
+  const batterSnapshot = batterLoaded?.data ?? null;
+  const ownership = ownershipLoaded?.data ?? null;
+  const dkPool = dkPoolLoaded?.data ?? null;
 
   const allRows = buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool);
   const rows = filterByGameIds(allRows, effectiveGameIds(slateCtx));

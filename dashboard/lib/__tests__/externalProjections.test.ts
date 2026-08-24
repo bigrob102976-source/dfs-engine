@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-13";
 
@@ -42,17 +44,19 @@ function adjustedRecord(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-externalprojections-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestBaselineSnapshot", () => {
   it("returns null when no snapshot exists", async () => {
     const { loadLatestBaselineSnapshot } = await import("../externalProjections");
-    expect(loadLatestBaselineSnapshot(DATE)).toBeNull();
+    expect(await loadLatestBaselineSnapshot(DATE)).toBeNull();
   });
 
   it("returns the latest snapshot by filename timestamp", async () => {
@@ -63,7 +67,7 @@ describe("loadLatestBaselineSnapshot", () => {
       slate_date: DATE, provider: "mock_external_projections", retrieved_at: "2026-08-13T19:00:00Z", players: [],
     });
     const { loadLatestBaselineSnapshot } = await import("../externalProjections");
-    const latest = loadLatestBaselineSnapshot(DATE);
+    const latest = await loadLatestBaselineSnapshot(DATE);
     expect(latest?.retrieved_at).toBe("2026-08-13T19:00:00Z");
   });
 });
@@ -71,7 +75,7 @@ describe("loadLatestBaselineSnapshot", () => {
 describe("loadLatestAdjustedSnapshot", () => {
   it("returns null when no snapshot exists", async () => {
     const { loadLatestAdjustedSnapshot } = await import("../externalProjections");
-    expect(loadLatestAdjustedSnapshot(DATE)).toBeNull();
+    expect(await loadLatestAdjustedSnapshot(DATE)).toBeNull();
   });
 
   it("reads records from the latest adjusted snapshot", async () => {
@@ -79,7 +83,7 @@ describe("loadLatestAdjustedSnapshot", () => {
       slate_date: DATE, generated_at: "2026-08-13T20:00:00Z", records: [adjustedRecord()],
     });
     const { loadLatestAdjustedSnapshot } = await import("../externalProjections");
-    const snapshot = loadLatestAdjustedSnapshot(DATE);
+    const snapshot = await loadLatestAdjustedSnapshot(DATE);
     expect(snapshot?.records).toHaveLength(1);
     expect(snapshot?.records[0].name).toBe("Kyle Schwarber");
   });
@@ -88,7 +92,7 @@ describe("loadLatestAdjustedSnapshot", () => {
 describe("getProjectionComparisonByPlayerId", () => {
   it("returns an empty map (never throws) when no adjusted snapshot exists", async () => {
     const { getProjectionComparisonByPlayerId } = await import("../externalProjections");
-    const map = getProjectionComparisonByPlayerId(DATE);
+    const map = await getProjectionComparisonByPlayerId(DATE);
     expect(map.size).toBe(0);
   });
 
@@ -97,7 +101,7 @@ describe("getProjectionComparisonByPlayerId", () => {
       slate_date: DATE, generated_at: "2026-08-13T20:00:00Z", records: [adjustedRecord()],
     });
     const { getProjectionComparisonByPlayerId } = await import("../externalProjections");
-    const map = getProjectionComparisonByPlayerId(DATE);
+    const map = await getProjectionComparisonByPlayerId(DATE);
     const row = map.get("h1");
     expect(row).toBeDefined();
     expect(row?.externalProjection).toBe(11.2);
@@ -112,8 +116,8 @@ describe("getProjectionComparisonByPlayerId", () => {
       slate_date: DATE, generated_at: "2026-08-13T20:00:00Z", records: [adjustedRecord()],
     });
     const { getProjectionComparisonByPlayerId } = await import("../externalProjections");
-    const first = getProjectionComparisonByPlayerId(DATE).get("h1");
-    const second = getProjectionComparisonByPlayerId(DATE).get("h1");
+    const first = (await getProjectionComparisonByPlayerId(DATE)).get("h1");
+    const second = (await getProjectionComparisonByPlayerId(DATE)).get("h1");
     expect(first).toEqual(second);
   });
 });

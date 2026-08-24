@@ -110,9 +110,9 @@ export interface NativeProjectionDocument {
 /** Reads the latest immutable Native Projection snapshot for `date`, if
  * any. Pure filesystem read -- never triggers generation (see
  * scripts/run_native_projection_engine.py for that). */
-export function loadLatestNativeProjectionSnapshot(date: string): NativeProjectionDocument | null {
+export async function loadLatestNativeProjectionSnapshot(date: string): Promise<NativeProjectionDocument | null> {
   const dir = artifactPath(ARTIFACT_DIRS.nativeProjectionSnapshots, date);
-  const path = findLatestFile(dir, "native_projection_");
+  const path = await findLatestFile(dir, "native_projection_");
   return safeReadJson<NativeProjectionDocument>(path);
 }
 
@@ -120,8 +120,8 @@ export function loadLatestNativeProjectionSnapshot(date: string): NativeProjecti
  * Projection snapshot for `date`. Returns an empty map (never
  * null/throws) when no snapshot exists yet, so callers can join against
  * it unconditionally. */
-export function getNativeProjectionByPlayerId(date: string): Map<string, NativePlayerProjection> {
-  const snapshot = loadLatestNativeProjectionSnapshot(date);
+export async function getNativeProjectionByPlayerId(date: string): Promise<Map<string, NativePlayerProjection>> {
+  const snapshot = await loadLatestNativeProjectionSnapshot(date);
   const map = new Map<string, NativePlayerProjection>();
   if (!snapshot) return map;
   for (const p of snapshot.players) {

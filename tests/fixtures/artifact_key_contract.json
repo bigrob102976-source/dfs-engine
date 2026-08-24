@@ -1,0 +1,8 @@
+[
+  { "description": "date-scoped prediction snapshot", "segments": ["predictions", "2026-08-19", "pitcher_board_20260819T120000.json"], "expectedKey": "predictions/2026-08-19/pitcher_board_20260819T120000.json" },
+  { "description": "slate-scoped ownership snapshot (Milestone 26 -- Main/Turbo/Night isolation)", "segments": ["ownership_predictions", "2026-08-19", "turbo", "ownership_20260819T120500.json"], "expectedKey": "ownership_predictions/2026-08-19/turbo/ownership_20260819T120500.json" },
+  { "description": "DraftKings CSV upload (raw bytes, not JSON)", "segments": ["dfs_input", "2026-08-19", "raw", "DKSalaries_20260819T110000.csv"], "expectedKey": "dfs_input/2026-08-19/raw/DKSalaries_20260819T110000.csv" },
+  { "description": "lineup-set CSV export", "segments": ["lineups", "2026-08-19", "dk_lineups_20260819T130000.csv"], "expectedKey": "lineups/2026-08-19/dk_lineups_20260819T130000.csv" },
+  { "description": "per-(date, slate_id) ML forward-results document -- never conflated across slates sharing a date", "segments": ["ml_forward_results", "2026-08-19", "main", "ml_forward_results_20260819T235900.json"], "expectedKey": "ml_forward_results/2026-08-19/main/ml_forward_results_20260819T235900.json" },
+  { "description": "player identity crosswalk version (Milestone 33.2 Part 9 -- immutable versioned snapshot)", "segments": ["player_identity_crosswalk", "crosswalk_20260819T120000123456_a1b2c3d4.json"], "expectedKey": "player_identity_crosswalk/crosswalk_20260819T120000123456_a1b2c3d4.json" }
+]

@@ -6,19 +6,20 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List
 
-from research.artifact_storage import LocalArtifactStorage
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 from research.models import BatterRecord, Game, PitcherRecord, ResearchMetadata, SlateIndex, Team
 
 
 def save_json(path: Path, data) -> None:
     """Writes `data` as JSON to `path`, creating parent directories and
     overwriting silently -- unchanged behavior from before Milestone 30.
-    Routed through LocalArtifactStorage (research/artifact_storage.py) so
-    every one of this repo's persistence modules that imports save_json
-    shares one centralized write primitive, swappable for a production
-    object-storage backend without touching each call site."""
-    path = Path(path)
-    LocalArtifactStorage(root=path.parent).write_json(path.name, data, allow_overwrite=True)
+    Milestone 33.2: routed through resolve_artifact_storage() (local disk
+    in development, S3-compatible object storage in production once
+    OBJECT_STORAGE_* is configured) instead of a hardcoded
+    LocalArtifactStorage, so every one of this repo's persistence modules
+    that imports save_json gets the production backend automatically."""
+    key = to_artifact_key(Path(path))
+    resolve_artifact_storage(ARTIFACT_ROOT).write_json(key, data, allow_overwrite=True)
 
 
 def save_package(

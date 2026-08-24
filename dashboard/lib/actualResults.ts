@@ -23,18 +23,18 @@ interface RawResultsDocument {
   results?: RawResultRecord[];
 }
 
-function loadResultsFile(date: string, filename: string): RawResultRecord[] {
-  const doc = safeReadJson<RawResultsDocument>(artifactPath(ARTIFACT_DIRS.results, date, filename));
+async function loadResultsFile(date: string, filename: string): Promise<RawResultRecord[]> {
+  const doc = await safeReadJson<RawResultsDocument>(artifactPath(ARTIFACT_DIRS.results, date, filename));
   return doc?.results ?? [];
 }
 
 /** { mlb_player_id -> actual DK points }, merged across pitchers and
  * hitters. A player absent from this map has no actual result yet --
  * callers must render that as "NOT LOADED"/blank, never 0. */
-export function loadActualDkPointsByPlayerId(date: string): Map<string, number> {
+export async function loadActualDkPointsByPlayerId(date: string): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   for (const filename of ["pitcher_results.json", "hitter_results.json"]) {
-    for (const record of loadResultsFile(date, filename)) {
+    for (const record of await loadResultsFile(date, filename)) {
       if (record.player_id && typeof record.dfs_points === "number") {
         map.set(record.player_id, record.dfs_points);
       }
@@ -48,9 +48,13 @@ export interface ActualResultsAvailability {
   hitterResultsExist: boolean;
 }
 
-export function getActualResultsAvailability(date: string): ActualResultsAvailability {
+export async function getActualResultsAvailability(date: string): Promise<ActualResultsAvailability> {
+  const [pitcherResults, hitterResults] = await Promise.all([
+    loadResultsFile(date, "pitcher_results.json"),
+    loadResultsFile(date, "hitter_results.json"),
+  ]);
   return {
-    pitcherResultsExist: loadResultsFile(date, "pitcher_results.json").length > 0,
-    hitterResultsExist: loadResultsFile(date, "hitter_results.json").length > 0,
+    pitcherResultsExist: pitcherResults.length > 0,
+    hitterResultsExist: hitterResults.length > 0,
   };
 }

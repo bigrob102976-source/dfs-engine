@@ -27,7 +27,7 @@ export default async function OwnershipPage(props: PageProps<"/dashboard/ownersh
 
   const date = getTodayChicagoDate();
   const slateCtx = await resolveSlateContext(date, slateId);
-  const snapshot = loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null).data;
+  const snapshot = (await loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null)).data;
   const slateDescription = slateCtx.selected ? ` (${formatSlateLabel(slateCtx.selected)})` : "";
 
   return (

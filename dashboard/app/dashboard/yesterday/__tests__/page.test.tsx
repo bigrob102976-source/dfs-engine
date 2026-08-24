@@ -4,17 +4,21 @@ import path from "node:path";
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "@/lib/storage/getStorage";
+
 let originalRoot: string | undefined;
 let tmpDir: string | undefined;
 
 beforeEach(() => {
   originalRoot = process.env.MLB_DFS_ROOT;
   process.env.MLB_DFS_ROOT = "C:\\nonexistent-dfs-root-for-yesterday-page-test";
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   if (originalRoot === undefined) delete process.env.MLB_DFS_ROOT;
   else process.env.MLB_DFS_ROOT = originalRoot;
+  __resetStorageForTests();
   if (tmpDir) {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     tmpDir = undefined;
@@ -30,7 +34,7 @@ function writeJson(relPath: string, data: unknown) {
 describe("YesterdayPage (no evaluated slate -- historical/read-only)", () => {
   it("shows a plain unavailable message with no developer command and no generate button", async () => {
     const YesterdayPage = (await import("../page")).default;
-    render(<YesterdayPage />);
+    render(await YesterdayPage());
 
     expect(screen.getByText("Historical data unavailable for this slate.")).toBeInTheDocument();
     expect(screen.queryByText(/python /)).not.toBeInTheDocument();
@@ -47,6 +51,7 @@ describe("YesterdayPage (Milestone: Projection Source Performance table)", () =>
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-yesterday-page-comparison-"));
     process.env.MLB_DFS_ROOT = tmpDir;
+    __resetStorageForTests();
   });
 
   it("renders the per-source breakdown table from a real comparison snapshot", async () => {
@@ -69,7 +74,7 @@ describe("YesterdayPage (Milestone: Projection Source Performance table)", () =>
     });
 
     const YesterdayPage = (await import("../page")).default;
-    render(<YesterdayPage />);
+    render(await YesterdayPage());
 
     expect(screen.getByText("Projection Source Performance")).toBeInTheDocument();
     const table = screen.getByText("Projection Source Performance").closest("div")!.parentElement!;
@@ -92,7 +97,7 @@ describe("YesterdayPage (Milestone: Projection Source Performance table)", () =>
     });
 
     const YesterdayPage = (await import("../page")).default;
-    render(<YesterdayPage />);
+    render(await YesterdayPage());
 
     expect(screen.queryByText("Projection Source Performance")).not.toBeInTheDocument();
   });

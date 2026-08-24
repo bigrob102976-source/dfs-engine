@@ -101,7 +101,7 @@ describe("buildChangeReport", () => {
   it("returns an explanatory empty report when there is no previous completed run", async () => {
     const { buildChangeReport } = await import("../changeReport");
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed" });
-    const report = buildChangeReport(null, current);
+    const report = await buildChangeReport(null, current);
     expect(report.previousRunId).toBeNull();
     expect(report.notes[0]).toMatch(/no prior completed refresh/i);
   });
@@ -110,7 +110,7 @@ describe("buildChangeReport", () => {
     const { buildChangeReport } = await import("../changeReport");
     const previous = stubRun({ runId: "run-1", slateDate: "2026-08-11", status: "completed" });
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed" });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
     expect(report.previousRunId).toBeNull();
     expect(report.notes[0]).toMatch(/not today/i);
   });
@@ -134,7 +134,7 @@ describe("buildChangeReport", () => {
     const { buildChangeReport } = await import("../changeReport");
     const previous = stubRun({ runId: "run-1", slateDate: "2026-08-12", status: "completed", battersPath: prevPath });
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed", battersPath: currPath });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
 
     expect(report.previousRunId).toBe("run-1");
     expect(report.scratches).toEqual(["Scratched Hitter"]);
@@ -160,7 +160,7 @@ describe("buildChangeReport", () => {
     const current = stubRun({
       runId: "run-2", slateDate: "2026-08-12", status: "completed", poolPath: currPath, selectedSlateId: "dkcsv-turbo",
     });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
 
     expect(report.previousRunId).toBeNull();
     expect(report.salaryChangedCount).toBeNull();
@@ -186,7 +186,7 @@ describe("buildChangeReport", () => {
     const { buildChangeReport } = await import("../changeReport");
     const previous = stubRun({ runId: "run-1", slateDate: "2026-08-12", status: "completed", poolPath: prevPath });
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed", poolPath: currPath });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
 
     expect(report.salaryChangedCount).toBe(1);
     expect(report.projectionChangedCount).toBe(1);
@@ -201,7 +201,7 @@ describe("buildChangeReport", () => {
     const { buildChangeReport } = await import("../changeReport");
     const previous = stubRun({ runId: "run-1", slateDate: "2026-08-12", status: "completed", ownershipPath: prevPath });
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed", ownershipPath: currPath });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
 
     expect(report.ownershipChangedCount).toBe(1);
   });
@@ -225,7 +225,7 @@ describe("buildChangeReport", () => {
     const { buildChangeReport } = await import("../changeReport");
     const previous = stubRun({ runId: "run-1", slateDate: "2026-08-12", status: "completed", projectionLineupsPath: prevPath });
     const current = stubRun({ runId: "run-2", slateDate: "2026-08-12", status: "completed", projectionLineupsPath: currPath });
-    const report = buildChangeReport(previous, current);
+    const report = await buildChangeReport(previous, current);
 
     const byName = Object.fromEntries(report.exposureChanges.map((c) => [c.name, c]));
     expect(byName["Player B"]).toEqual({ name: "Player B", beforePercent: 50, afterPercent: 100 });

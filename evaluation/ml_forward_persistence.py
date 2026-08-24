@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
+from research.artifact_storage import raise_if_exists
 from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
@@ -33,11 +34,9 @@ def save_ml_forward_results_document(document: dict, output_root: Path = DEFAULT
     timestamp = timestamp_tag(document["generated_at"])
     path = _slate_folder(slate_date, slate_id, output_root) / f"{_FILENAME_PREFIX}_{timestamp}.json"
 
-    if path.exists():
-        raise FileExistsError(
-            f"Refusing to overwrite existing immutable Big Money ML forward-results document: {path}. "
-            f"(Two collection runs requested the same second -- this should be astronomically rare.)"
-        )
+    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
+    # identical comment for why this replaced a local path.exists() check).
+    raise_if_exists(path)
 
     save_json(path, document)
     return path

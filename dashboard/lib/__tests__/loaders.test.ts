@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 
 function writeJson(relPath: string, data: unknown) {
@@ -14,10 +16,17 @@ function writeJson(relPath: string, data: unknown) {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-loaders-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  // getStorage() is a lazy singleton (mirrors lib/db/executor.ts::getExecutor())
+  // cached at module scope -- without this reset, a getArtifactRoot()
+  // resolved from an EARLIER test's MLB_DFS_ROOT value would stay
+  // cached and this test would silently read/write against a directory
+  // that no longer exists.
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -29,7 +38,7 @@ describe("loadLatestDKPlayerPool (Milestone 26 slate-aware resolution)", () => {
     writeJson(`dfs_input/${DATE}/dk_player_pool_0000000002.json`, { selected_slate_id: "turbo", player_count: 2, players: [] });
 
     const { loadLatestDKPlayerPool } = await import("../loaders");
-    const result = loadLatestDKPlayerPool(DATE);
+    const result = await loadLatestDKPlayerPool(DATE);
     expect(result.data?.selected_slate_id).toBe("turbo"); // most recently written file, regardless of slate
   });
 
@@ -39,10 +48,10 @@ describe("loadLatestDKPlayerPool (Milestone 26 slate-aware resolution)", () => {
     writeJson(`dfs_input/${DATE}/dk_player_pool_0000000003.json`, { selected_slate_id: "main", player_count: 3, players: [] });
 
     const { loadLatestDKPlayerPool } = await import("../loaders");
-    const mainResult = loadLatestDKPlayerPool(DATE, "main");
+    const mainResult = await loadLatestDKPlayerPool(DATE, "main");
     expect(mainResult.data?.player_count).toBe(3); // the newer of the two Main pools, not Turbo's
 
-    const turboResult = loadLatestDKPlayerPool(DATE, "turbo");
+    const turboResult = await loadLatestDKPlayerPool(DATE, "turbo");
     expect(turboResult.data?.player_count).toBe(2);
   });
 
@@ -50,7 +59,7 @@ describe("loadLatestDKPlayerPool (Milestone 26 slate-aware resolution)", () => {
     writeJson(`dfs_input/${DATE}/dk_player_pool_0000000001.json`, { selected_slate_id: "main", player_count: 1, players: [] });
 
     const { loadLatestDKPlayerPool } = await import("../loaders");
-    const result = loadLatestDKPlayerPool(DATE, "night");
+    const result = await loadLatestDKPlayerPool(DATE, "night");
     expect(result.data).toBeNull();
   });
 });
@@ -63,17 +72,17 @@ describe("loadLatestDkMatchReport (Milestone 26 slate-aware resolution)", () => 
     writeJson(`dfs_input/${DATE}/dk_match_report_0000000002.json`, { dk_games_total: 3, slate_marker: "turbo-report" });
 
     const { loadLatestDkMatchReport } = await import("../loaders");
-    const mainReport = loadLatestDkMatchReport(DATE, "main");
+    const mainReport = await loadLatestDkMatchReport(DATE, "main");
     expect(mainReport.data?.slate_marker).toBe("main-report");
     expect(mainReport.data?.dk_games_total).toBe(9);
 
-    const turboReport = loadLatestDkMatchReport(DATE, "turbo");
+    const turboReport = await loadLatestDkMatchReport(DATE, "turbo");
     expect(turboReport.data?.slate_marker).toBe("turbo-report");
   });
 
   it("returns null data when the requested slate has no matching pool at all", async () => {
     const { loadLatestDkMatchReport } = await import("../loaders");
-    const result = loadLatestDkMatchReport(DATE, "night");
+    const result = await loadLatestDkMatchReport(DATE, "night");
     expect(result.data).toBeNull();
   });
 });

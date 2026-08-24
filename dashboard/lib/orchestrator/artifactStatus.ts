@@ -20,24 +20,32 @@ export type ArtifactReadiness = Record<PipelineStepId, boolean>;
  * displays, so both agree on what "ready" means. A pool only counts as
  * ready if it can actually fill a legal roster (roster_feasibility_pass),
  * not merely if the file exists -- an infeasible pool isn't useful data. */
-export function getArtifactStatus(date: string): ArtifactReadiness {
-  const pool = poolFingerprint(date);
-  const poolDoc = pool.path ? safeReadJson<DKPlayerPool>(pool.path) : null;
+export async function getArtifactStatus(date: string): Promise<ArtifactReadiness> {
+  const [pool, research, pitchers, batters, dfsSalariesReady, ownership, optimizer] = await Promise.all([
+    poolFingerprint(date),
+    researchSlateFingerprint(date),
+    pitcherSnapshotFingerprint(date),
+    batterSnapshotFingerprint(date),
+    isProviderSlateReady(date),
+    ownershipFingerprint(date),
+    lineupSetFingerprint(date),
+  ]);
+  const poolDoc = pool.path ? await safeReadJson<DKPlayerPool>(pool.path) : null;
 
   return {
-    research: researchSlateFingerprint(date).path !== null,
-    pitchers: pitcherSnapshotFingerprint(date).path !== null,
-    batters: batterSnapshotFingerprint(date).path !== null,
-    dfsSalaries: isProviderSlateReady(date),
+    research: research.path !== null,
+    pitchers: pitchers.path !== null,
+    batters: batters.path !== null,
+    dfsSalaries: dfsSalariesReady,
     playerPool: pool.path !== null && Boolean(poolDoc?.roster_feasibility_pass),
-    ownership: ownershipFingerprint(date).path !== null,
-    optimizer: lineupSetFingerprint(date).path !== null,
+    ownership: ownership.path !== null,
+    optimizer: optimizer.path !== null,
   };
 }
 
-function isProviderSlateReady(date: string): boolean {
-  const fp = providerSlateFingerprint(date);
+async function isProviderSlateReady(date: string): Promise<boolean> {
+  const fp = await providerSlateFingerprint(date);
   if (!fp.path) return false;
-  const doc = safeReadJson<Record<string, unknown>>(fp.path);
+  const doc = await safeReadJson<Record<string, unknown>>(fp.path);
   return doc?.status === "ready";
 }

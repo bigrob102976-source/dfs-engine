@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ProjectionSourceComparisonDocument } from "../projectionSourceComparison";
 
+import { __resetStorageForTests } from "../storage/getStorage";
+
 let tmpDir: string;
 const DATE = "2026-08-13";
 
@@ -33,24 +35,26 @@ function comparisonDoc(overrides: Partial<ProjectionSourceComparisonDocument> = 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-projection-source-comparison-"));
   process.env.MLB_DFS_ROOT = tmpDir;
+  __resetStorageForTests();
 });
 
 afterEach(() => {
   delete process.env.MLB_DFS_ROOT;
+  __resetStorageForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("loadLatestProjectionSourceComparison", () => {
   it("returns null when no snapshot exists", async () => {
     const { loadLatestProjectionSourceComparison } = await import("../projectionSourceComparison");
-    expect(loadLatestProjectionSourceComparison(DATE)).toBeNull();
+    expect(await loadLatestProjectionSourceComparison(DATE)).toBeNull();
   });
 
   it("returns the latest snapshot by filename timestamp", async () => {
     writeJson(`evaluations/${DATE}/projection_source_comparison_20260813T190000.json`, comparisonDoc({ generated_at: `${DATE}T19:00:00+00:00` }));
     writeJson(`evaluations/${DATE}/projection_source_comparison_20260813T200000.json`, comparisonDoc({ generated_at: `${DATE}T20:00:00+00:00` }));
     const { loadLatestProjectionSourceComparison } = await import("../projectionSourceComparison");
-    const latest = loadLatestProjectionSourceComparison(DATE);
+    const latest = await loadLatestProjectionSourceComparison(DATE);
     expect(latest?.generated_at).toBe(`${DATE}T20:00:00+00:00`);
   });
 
@@ -58,7 +62,7 @@ describe("loadLatestProjectionSourceComparison", () => {
     writeJson(`evaluations/${DATE}/pitcher_evaluation_20260813T180000.json`, { slate_date: DATE });
     writeJson(`evaluations/${DATE}/projection_source_comparison_20260813T190000.json`, comparisonDoc());
     const { loadLatestProjectionSourceComparison } = await import("../projectionSourceComparison");
-    const latest = loadLatestProjectionSourceComparison(DATE);
+    const latest = await loadLatestProjectionSourceComparison(DATE);
     expect(latest?.sources_present).toEqual(["independent", "external", "ai"]);
   });
 });
