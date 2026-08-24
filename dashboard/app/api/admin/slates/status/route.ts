@@ -45,6 +45,7 @@ interface IdentityCounts {
 export const dynamic = "force-dynamic";
 
 const SLATE_AUDIT_ACTIONS = new Set([
+  "slate_discover_started",
   "slate_process_started", "slate_process_completed", "slate_process_failed",
   "slate_refresh_started", "slate_refresh_completed", "slate_refresh_failed",
   "slate_published", "slate_unpublished", "slate_archived",

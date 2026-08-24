@@ -97,12 +97,24 @@ export async function enqueueJob(params: EnqueueJobParams): Promise<EnqueueJobRe
  * Two genuinely different implementations, because "atomic" means
  * different things on the two backends:
  *
- *   - SQLite: node:sqlite is a single connection, and every call into it
- *     from this Node process is synchronous -- this process can never
- *     race ITSELF. The SELECT-next-id-then-UPDATE-with-a-WHERE-guard
- *     shape is safe here (and the WHERE status='QUEUED' guard, checked
- *     via the UPDATE's affected-row count, is a second line of defense
- *     even so).
+ *   - SQLite: node:sqlite's underlying calls are synchronous, but this
+ *     function's own `await db.get(...)` / `await db.run(...)` boundary
+ *     is NOT -- two concurrent claimNextQueuedJob() calls from the SAME
+ *     Node process (e.g. app/api/admin/slates/discover/route.ts firing
+ *     one runOneQueuedJob() per newly-discovered slate, none of them
+ *     awaited relative to each other) can both `await db.get(...)` and
+ *     see the SAME "next" QUEUED id before either one's `await
+ *     db.run(...)` has flipped its status -- a real, previously-latent
+ *     race this milestone's bulk discovery feature was the first caller
+ *     to actually trigger (proven by
+ *     app/api/admin/slates/__tests__/discover.test.ts). The retry loop
+ *     below is SQLite's answer to Postgres's `FOR UPDATE SKIP LOCKED`:
+ *     a lost race (the UPDATE's WHERE status='QUEUED' guard affected 0
+ *     rows) just means some OTHER concurrent call already claimed that
+ *     specific row, so retrying re-SELECTs whatever is now the
+ *     next-oldest QUEUED job instead of giving up -- each successful
+ *     claim strictly shrinks the QUEUED set, so every concurrent caller
+ *     eventually claims a distinct row (or correctly finds none left).
  *   - PostgreSQL: a real multi-worker deployment has multiple, genuinely
  *     concurrent connections. A SELECT-then-UPDATE here would let two
  *     workers both select the same "next" job before either updates it.
@@ -127,16 +139,21 @@ export async function claimNextQueuedJob(workerId: string): Promise<JobRow | nul
     return row ? rowToJob(row) : null;
   }
 
-  const next = await db.get<{ id: string }>("SELECT id FROM jobs WHERE status = 'QUEUED' ORDER BY created_at ASC LIMIT 1");
-  if (!next) return null;
+  const MAX_CLAIM_ATTEMPTS = 10;
+  for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
+    const next = await db.get<{ id: string }>("SELECT id FROM jobs WHERE status = 'QUEUED' ORDER BY created_at ASC LIMIT 1");
+    if (!next) return null;
 
-  const result = await db.run(
-    "UPDATE jobs SET status = 'RUNNING', started_at = ?, updated_at = ?, worker_id = ?, attempt_count = attempt_count + 1 WHERE id = ? AND status = 'QUEUED'",
-    [now, now, workerId, next.id],
-  );
-  if (result.changes === 0) return null; // lost the race (or, for SQLite, an impossible case defended anyway)
-
-  return getJob(next.id);
+    const result = await db.run(
+      "UPDATE jobs SET status = 'RUNNING', started_at = ?, updated_at = ?, worker_id = ?, attempt_count = attempt_count + 1 WHERE id = ? AND status = 'QUEUED'",
+      [now, now, workerId, next.id],
+    );
+    if (result.changes > 0) return getJob(next.id);
+    // Lost the race for this specific row -- another concurrent claimer
+    // in this same process claimed it between our SELECT and UPDATE.
+    // Retry against whatever is now the next-oldest QUEUED job.
+  }
+  return null;
 }
 
 export async function updateJobProgress(jobId: string, progress: number, currentStep: string | null): Promise<void> {

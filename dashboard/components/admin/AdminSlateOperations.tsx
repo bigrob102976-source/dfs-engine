@@ -102,6 +102,16 @@ interface StatusResponse {
   }>;
 }
 
+interface DiscoverResponse {
+  providerName: string | null;
+  providerType: "mock" | "real" | null;
+  isMock: boolean;
+  providerStatus: string;
+  providerReason: string | null;
+  slatesDiscovered: Array<{ slateId: string; slateName: string | null; gameCount: number | null; playerCount: number | null }>;
+  jobs: Array<{ slateId: string; slateName: string | null; jobId: string | null; action: string }>;
+}
+
 const STATUS_TONE: Record<string, string> = {
   DRAFT: "bg-text-faint/15 text-text-faint",
   PROCESSING: "bg-accent/15 text-accent",
@@ -133,6 +143,8 @@ export function AdminSlateOperations({ date }: { date: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverResult, setDiscoverResult] = useState<DiscoverResponse | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -164,6 +176,37 @@ export function AdminSlateOperations({ date }: { date: string }) {
     return () => clearInterval(interval);
   }, [hasActiveJob, refresh]);
 
+  // Milestone 33.2.1 hotfix: the ONE-CLICK bulk counterpart to the
+  // per-slate Process/Refresh buttons below -- queries the configured DK
+  // provider (permanently the DraftKings Unofficial provider; never a
+  // CSV requirement) for every real Classic slate on `date`, then starts
+  // the SAME existing pipeline (runSlatePipeline via the job queue) for
+  // each one discovered. Never fabricates slates when the provider isn't
+  // connected -- providerStatus/providerReason below always reflect
+  // exactly what the provider returned.
+  const discoverTodaysSlates = useCallback(async () => {
+    setDiscovering(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/slates/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.error ?? "Failed to discover today's slates.");
+        return;
+      }
+      setDiscoverResult(body as DiscoverResponse);
+      await refresh();
+    } catch {
+      setError("Failed to discover today's slates -- is the dashboard server running?");
+    } finally {
+      setDiscovering(false);
+    }
+  }, [date, refresh]);
+
   async function runAction(slateId: string, slateName: string | null, action: "process" | "refresh" | "publish" | "unpublish" | "archive") {
     setBusy(`${slateId}:${action}`);
     setError(null);
@@ -189,10 +232,41 @@ export function AdminSlateOperations({ date }: { date: string }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">Slates</h2>
-        <SecondaryButton type="button" onClick={() => setShowUpload((v) => !v)}>
-          {showUpload ? "Hide Upload" : "Upload DK Salary CSV"}
-        </SecondaryButton>
+        <div className="flex gap-2">
+          <PrimaryButton type="button" disabled={discovering || busy !== null} onClick={discoverTodaysSlates}>
+            {discovering ? "Discovering..." : "Refresh Today's Slates"}
+          </PrimaryButton>
+          <SecondaryButton type="button" onClick={() => setShowUpload((v) => !v)}>
+            {showUpload ? "Hide Upload" : "Upload DK Salary CSV"}
+          </SecondaryButton>
+        </div>
       </div>
+
+      <div className="text-[11px] text-text-faint">
+        DK Provider: <span className="font-medium text-text">{data?.providerName ?? "unknown"}</span>
+        {data?.isMock && <span className="ml-1 font-semibold text-yellow">MOCK</span>}
+      </div>
+
+      {discoverResult && (
+        <div
+          className={`rounded border px-3 py-2 text-xs ${
+            discoverResult.providerStatus === "ready" ? "border-green/30 bg-green/10 text-green" : "border-yellow/30 bg-yellow/10 text-yellow"
+          }`}
+        >
+          {discoverResult.providerStatus === "ready" ? (
+            <>
+              Discovered {discoverResult.slatesDiscovered.length} slate{discoverResult.slatesDiscovered.length === 1 ? "" : "s"} via{" "}
+              {discoverResult.providerName}
+              {discoverResult.slatesDiscovered.length > 0 && (
+                <>: {discoverResult.slatesDiscovered.map((s) => `${s.slateName ?? s.slateId} (${s.gameCount ?? "?"} games, ${s.playerCount ?? "?"} players)`).join(", ")}</>
+              )}
+              . {discoverResult.jobs.filter((j) => j.jobId).length} refresh job{discoverResult.jobs.filter((j) => j.jobId).length === 1 ? "" : "s"} started.
+            </>
+          ) : (
+            <>DK provider not ready ({discoverResult.providerStatus}): {discoverResult.providerReason ?? "no reason given"}.</>
+          )}
+        </div>
+      )}
 
       {showUpload && (
         <DraftKingsMultiCsvUpload
@@ -209,7 +283,10 @@ export function AdminSlateOperations({ date }: { date: string }) {
       {!data ? (
         <p className="text-xs text-text-faint">Loading slate status...</p>
       ) : data.slates.length === 0 ? (
-        <p className="text-xs text-text-faint">No slates discovered yet for {date} -- upload a DraftKings CSV above.</p>
+        <p className="text-xs text-text-faint">
+          No slates discovered yet for {date} -- click &quot;Refresh Today&apos;s Slates&quot; above to query the DK provider, or upload a
+          DraftKings CSV as a manual override.
+        </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {data.slates.map((s) => {

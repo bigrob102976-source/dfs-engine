@@ -17,7 +17,17 @@ import { getNativeProjectionByPlayerId } from "./nativeProjections";
 // classification logic itself (that stays exclusively in Python; this
 // only reads the already-computed source_provenance string the Python
 // pipeline wrote into the match report).
-const TRUSTED_PROVENANCE = new Set(["OFFICIAL_USER_UPLOAD", "AUTHORIZED_PROVIDER"]);
+//
+// Milestone 33.2.1 hotfix: this list had drifted out of sync with the
+// Python source of truth -- DRAFTKINGS_UNOFFICIAL_LIVE was added to
+// TRUSTED_FOR_PRODUCTION by Milestone 32.2B ("DraftKings Unofficial
+// Provider is the sole DK slate source going forward, no manual CSV
+// step in the production pipeline" -- see that constant's own Python
+// docstring) but never propagated here, so every slate built from the
+// permanent DK data source was silently blocked from ever reaching
+// READY/Publish -- confirmed live via this fix's own test
+// (discover.test.ts) and via a real /admin/slates session today.
+const TRUSTED_PROVENANCE = new Set(["OFFICIAL_USER_UPLOAD", "AUTHORIZED_PROVIDER", "DRAFTKINGS_UNOFFICIAL_LIVE"]);
 
 export interface ReadinessCheck {
   key: string;
