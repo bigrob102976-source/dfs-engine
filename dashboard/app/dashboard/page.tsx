@@ -233,7 +233,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         gameCount={environmentReport?.games.length ?? 0}
         providerName={typeof providerSlate?.provider_name === "string" ? (providerSlate.provider_name as string) : null}
         isMock={Boolean(providerSlate?.is_mock)}
-        selectedSlateId={typeof providerSlate?.selected_slate_id === "string" ? (providerSlate.selected_slate_id as string) : null}
+        selectedSlateId={selectedSlateId}
         lastUpdated={lastUpdated}
         viewingSlateLabel={slateCtx.selected ? formatSlateLabel(slateCtx.selected) : null}
       />
@@ -277,7 +277,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
           />
         </div>
         <div className="min-w-0">
-          <QuickActionsPanel />
+          <QuickActionsPanel selectedSlateId={selectedSlateId} />
         </div>
       </div>
 

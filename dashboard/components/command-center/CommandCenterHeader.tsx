@@ -31,14 +31,28 @@ export function CommandCenterHeader({
   gameCount: number;
   providerName: string | null;
   isMock: boolean;
+  /** Optimizer correctness hotfix: this is now the GLOBAL slate
+   * selector's current choice (lib/slateContext.ts::resolveSlateContext's
+   * `selected?.slateId`) -- the exact same slate every other section of
+   * this page (pool/ownership/match report/BlueCollar/etc.) is already
+   * scoped to. Previously sourced from a DIFFERENT, staler concept
+   * (the last raw provider fetch's own `selected_slate_id`, which does
+   * not track the global selector at all), and never threaded onto the
+   * "Slate" link below -- so clicking through to the Optimizer silently
+   * lost whatever slate a member had actually selected here, landing on
+   * the Optimizer's own independent (localStorage-persisted) slate
+   * instead. Passed through as `?slate=` on the Optimizer link below,
+   * mirroring app/dashboard/stacks/page.tsx's identical "Use This
+   * Stack" handoff -- OptimizerWorkspace.tsx already reads and honors
+   * that exact param. */
   selectedSlateId: string | null;
   lastUpdated: string | null;
   /** Milestone 26: the label of the slate the global selector currently
-   * has active (null = Full Day / All Games) -- distinct from
-   * `selectedSlateId`, which reflects whichever slate the last one-click
-   * refresh resolved date-scoped artifacts against. */
+   * has active (null = Full Day / All Games) -- the same slate as
+   * `selectedSlateId`, just formatted for display. */
   viewingSlateLabel?: string | null;
 }) {
+  const optimizerHref = selectedSlateId ? `/dashboard/optimizer?slate=${encodeURIComponent(selectedSlateId)}` : "/dashboard/optimizer";
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-4 rounded-[var(--radius-card)] border border-border bg-bg-panel/80 p-5 shadow-[var(--shadow-card)] backdrop-blur">
       <div>
@@ -52,7 +66,7 @@ export function CommandCenterHeader({
 
       <div className="flex flex-wrap items-center gap-4">
         <Link
-          href="/dashboard/optimizer"
+          href={optimizerHref}
           className="flex flex-col items-end gap-0.5 rounded-[var(--radius-control)] border border-border bg-bg-panel-raised px-3 py-1.5 text-xs text-text-muted transition-colors duration-150 hover:border-accent hover:text-text"
         >
           <span className="text-[10px] uppercase tracking-wide text-text-faint">Slate</span>

@@ -163,6 +163,40 @@ def _coverage_diagnostics(coverage: dict) -> list:
     return reasons
 
 
+def _validate_only_errors(coverage: dict, solve_errors: list) -> list:
+    """Hotfix: `--validate-only`'s final error list used to be
+    `_coverage_diagnostics(coverage) + solve_errors` unconditionally --
+    meaning ANY strict-source exclusion or missing-projection skip
+    (`coverage["excluded_missing_source"] > 0` /
+    `coverage["skipped_missing_projection"] > 0`), even a single player
+    out of hundreds, refused to build at all, regardless of whether the
+    REMAINING players (already correctly excluded by
+    _build_optimizer_players) were more than enough to satisfy the
+    roster. Confirmed live against a real DRAFTKINGS_UNOFFICIAL_LIVE
+    slate: Big Money ML excluded 20 of 122 eligible players for missing
+    ML coverage, leaving 102 -- objectively plenty -- yet the build was
+    refused solely because the excluded count was nonzero.
+
+    `solve_errors` (leverage-mode config errors + pre_solve_diagnostics()
+    -- the REAL, authoritative roster/salary/stack feasibility check
+    against the ALREADY-shrunken player list) is the only thing that
+    should ever refuse a build. The coverage-shrinkage explanation from
+    _coverage_diagnostics() is prepended ONLY when solve_errors is
+    already non-empty, i.e. only when the shrunken pool actually turned
+    out to be infeasible -- giving a combined, honest message ("N
+    players excluded for missing source coverage, leaving 0 catchers
+    available") instead of either a silent block or a confusing
+    solver-only message with no explanation of why the pool shrank.
+    When the shrunken pool is still feasible, this returns [] and the
+    build proceeds -- the exact counts remain visible either way via
+    `coverage` itself (excluded_missing_source / skipped_missing_projection
+    / usable_for_build), which the dashboard's Projection Source dropdown
+    already surfaces regardless of whether `errors` is empty."""
+    if not solve_errors:
+        return []
+    return _coverage_diagnostics(coverage) + solve_errors
+
+
 def _load_ownership(ownership_path: str):
     with Path(ownership_path).open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -331,7 +365,8 @@ def main() -> None:
 
     if args.validate_only:
         coverage = _coverage_summary(pool_doc, players, skipped, excluded_missing_source, args.projection_source, args.strict_projection_source)
-        errors = _coverage_diagnostics(coverage) + list(leverage_errors) + pre_solve_diagnostics(players, settings)
+        solve_errors = list(leverage_errors) + pre_solve_diagnostics(players, settings)
+        errors = _validate_only_errors(coverage, solve_errors)
         print(json.dumps({"errors": errors, "coverage": coverage}))
         return
 
