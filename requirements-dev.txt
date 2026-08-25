@@ -1,0 +1,7 @@
+# Big Money DFS -- dev/test-only Python dependencies, additive on top of
+# requirements.txt (never a replacement for it -- the full application
+# import surface is exercised by the test suite too).
+#
+# Install: pip install -r requirements.txt -r requirements-dev.txt
+
+pytest==9.1.1

@@ -1,0 +1,97 @@
+# Big Money DFS -- Docker build-context protection (Milestone 33.3).
+#
+# Everything here is either (a) never needed inside the image, (b) local
+# developer/runtime state that would make a build non-reproducible if it
+# leaked in, or (c) something that must NEVER reach a build context that
+# could end up baked into an image layer. Mirrors .gitignore's own
+# reasoning closely (see that file's comments for the "why" behind each
+# generated-artifact directory) but is independently maintained -- a
+# .dockerignore is NOT derived from .gitignore, so an entry has to be
+# listed here explicitly even if .gitignore already covers it.
+
+# Version control itself -- never needed inside an image, and .git/
+# history is exactly the kind of thing that must never leak into a
+# build context/layer.
+.git/
+.gitignore
+
+# Node
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/coverage/
+dashboard/.runstate/
+dashboard/*.tsbuildinfo
+dashboard/next-env.d.ts
+dashboard/npm-debug.log*
+
+# Local membership/admin SQLite database -- local dev runtime state,
+# never a build input. Production always uses DATABASE_URL (Postgres).
+dashboard/data/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Env files -- credentials. NEVER let these reach a build context.
+.env
+.env.*
+dashboard/.env
+dashboard/.env.*
+
+# Generated pipeline artifacts (see .gitignore for the full per-directory
+# rationale -- every one of these is reproducible from source, never
+# baked into an image; production reads/writes them through object
+# storage, not the local filesystem -- see research/artifact_storage.py).
+/research_output/
+/predictions/
+/ownership_predictions/
+/dfs_input/
+/lineups/
+/evaluations/
+/ownership_evaluations/
+/actual_ownership/
+/results/
+/external_projection_snapshots/
+/adjusted_projection_snapshots/
+/game_environment_snapshots/
+/ai_projection_snapshots/
+/native_projection_snapshots/
+/fantasypros_snapshots/
+/bluecollar_projection_snapshots/
+/player_identity_snapshots/
+/player_identity_crosswalk/
+/ml_projection_snapshots/
+/ml_forward_results/
+/runtime_settings/
+
+# Historical training warehouse + trained model artifacts -- Milestone
+# 33.2 Part 7/8's explicit decision: the historical warehouse never runs
+# in production at all, and model artifacts are fetched from object
+# storage and cached locally on first use (historical_models/pitcher_v1/
+# persistence.py::load_model), never baked into the image. Excluding
+# both here is a deliberate, load-bearing choice, not an oversight --
+# baking data/models/ in would silently reintroduce the exact
+# local-disk-only assumption Milestone 33.2 removed.
+/data/cache/
+/data/fantasydata/
+/data/draftkings_unofficial/
+/data/historical/
+/data/models/
+
+# OS / editor
+.DS_Store
+*.pem
+.vscode/
+.idea/
+
+# Docs and non-runtime project files -- harmless to exclude, keeps the
+# build context (and therefore build time / image layer cache
+# invalidation) smaller.
+*.md
+!DEPLOYMENT.md

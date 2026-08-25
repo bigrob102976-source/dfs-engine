@@ -28,6 +28,149 @@ separate WORKER only matters once WEB needs to scale horizontally or the
 pipeline's runtime becomes long enough that tying it to an HTTP request's
 process is undesirable.
 
+## Runtime & build reproducibility (Milestone 33.3)
+
+Goal: a fresh Linux host/container can build and run this codebase
+identically to local dev, with every version pinned rather than
+whatever happened to be installed on a developer's machine. **Not
+deployed anywhere as part of this milestone** — see "What 'DO NOT
+DEPLOY' means here" below.
+
+### Python
+
+- **Version**: `.python-version` pins `3.13.7` — this is not an
+  arbitrary "latest" choice: `data/models/mlb/{hitter,pitcher}/v1/metadata.json`
+  already records that the trained models were built with exactly
+  Python 3.13.7 / scikit-learn 1.9.0 / pandas 3.0.5 / numpy 2.5.2.
+  scikit-learn's own pickle/joblib compatibility is not guaranteed
+  across version changes, so matching exactly (not "3.13-compatible")
+  is the safe choice.
+- **Dependency manifest**: `requirements.txt` (production) +
+  `requirements-dev.txt` (adds `pytest` only). Neither existed before
+  this milestone — the project previously ran off whatever was already
+  installed on a developer's machine, with no manifest at all. Every
+  package listed was confirmed, by auditing every real `import`
+  statement across the actual application code (not this machine's
+  broader installed-package set), to be genuinely used — several
+  packages that happened to be installed locally (`requests`,
+  `beautifulsoup4`, `lxml`, `pybaseball`, `matplotlib`, `PyGithub`,
+  `PyJWT`, `PyNaCl`, `cryptography`) are confirmed **unused** by this
+  codebase (it uses stdlib `urllib.request` for HTTP, not `requests`)
+  and are deliberately excluded to keep the production dependency
+  surface minimal.
+- **Versions are pinned exactly (`==`)**, not `>=`/range — see
+  `requirements.txt`'s own docstring. Not pip-compile/poetry-locked
+  (no transitive-dependency hashes) — a real next step (see "Recommended
+  M33.4 scope" in this milestone's final report), not done here.
+- **PyArrow**: confirmed a genuine **production** dependency, not just
+  offline-training — `player_identity/historical_backfill.py`'s
+  `pd.read_parquet()` is called from `player_identity/refresh.py`, which
+  runs on every live slate Process/Refresh, even though the historical
+  warehouse itself stays out of normal production runtime (Part 8
+  below).
+- **Historical warehouse in production**: **not required, and must not
+  run there.** `historical_mlb/` (warehouse building) and
+  `historical_models/*/train.py` (model training) are offline-only,
+  never invoked by any live request/pipeline path — confirmed by the
+  same audit above (no production code path imports them). The trained
+  MODEL ARTIFACTS they produce ARE needed in production (see below);
+  the multi-gigabyte warehouse data that produced them is not.
+- **Clean-environment validation performed**: a fresh virtualenv
+  (`python -m venv`, no access to this machine's other installed
+  packages) with `pip install -r requirements.txt` only, then
+  `python scripts/smoke_test_runtime.py` — every check passed (package
+  imports, real model load + inference, a real OR-Tools CP-SAT solve,
+  storage abstraction resolution). See that script's own docstring; it
+  never touches a real network and is safe to re-run anywhere, including
+  as a container startup/readiness gate.
+
+### Node
+
+- **Version**: `.nvmrc` pins `24.19.0`; `dashboard/package.json`'s
+  `engines.node` requires `>=23.6.0`. That floor is not arbitrary either:
+  `scripts/run-job-worker.ts` and `scripts/migrate-postgres-schema.ts`
+  are plain `.ts` files run directly via `node scripts/....ts` (no
+  ts-node/tsx dependency) — this only works because Node's own native
+  TypeScript type-stripping is unflagged (on by default) starting at
+  Node 23.6. `node:sqlite` (local dev's database) separately needs only
+  22.5+, so the stricter of the two real requirements is what's pinned.
+  Confirmed live: `node scripts/migrate-postgres-schema.ts` runs cleanly
+  with zero flags on Node 24.19.0.
+- **Dependency manifest**: `dashboard/package-lock.json` already existed
+  and is already git-tracked (since Milestone 30) — `npm ci` is already
+  fully reproducible; nothing new needed here.
+
+### Linux / container compatibility audit
+
+- **`child_process.spawn`** (`lib/orchestrator/pythonRunner.ts`, the
+  ONLY subprocess-spawning call site in the app): already
+  platform-neutral before this milestone — `shell: false` (no shell
+  syntax interpretation on either platform), the Python executable
+  resolves via `MLB_DFS_PYTHON` env override or a bare `"python"` on
+  PATH (no hardcoded Windows path), `windowsHide: true` is a
+  Windows-only option that Linux simply ignores. No code change needed;
+  confirmed correct by static audit, not assumed.
+- **No other Windows-specific assumptions found**: audited every
+  `child_process`/`spawn`/`exec` call site in `dashboard/` (there is
+  exactly one — pythonRunner.ts above) and grepped for hardcoded
+  backslash paths, `.exe` extensions, and Windows-only commands in
+  application code (as opposed to this session's own throwaway
+  diagnostic scripts, which are not part of the app and were deleted).
+  None found.
+- **`node:sqlite`**: a Node built-in (compiled into Node itself), not a
+  native npm addon requiring separate platform-specific compilation —
+  no Linux-specific concern.
+
+### Docker / container strategy
+
+- **`Dockerfile`** (repo root, multi-stage): ONE image serves both WEB
+  and WORKER (same codebase, different start command — see below), not
+  two separate images. Two runtimes are required in the same final
+  image: Node (Next.js) and Python (spawned as a subprocess by the
+  running Node process, a genuine runtime dependency, not just a build
+  tool). The exact pinned Python (`python:3.13-slim`) is copied into a
+  `node:24-slim` base via a multi-stage `COPY --from=` (Debian's own apt
+  repos do not reliably offer this exact CPython minor version).
+- **`.dockerignore`** (repo root): excludes `.git/`, all generated
+  pipeline artifact directories (mirrors `.gitignore`'s own reasoning),
+  the local SQLite dev database, `node_modules`/`.next` (rebuilt inside
+  the image, never copied in stale), and — deliberately — the historical
+  warehouse and `data/models/` (model artifacts are fetched from object
+  storage and cached locally on first use, Milestone 33.2 Part 7; baking
+  them into the image would silently reintroduce the exact
+  local-disk-only assumption that milestone removed), and all `.env*`
+  files.
+- **NOT built or pushed.** Docker was not available in the environment
+  this milestone was developed in (confirmed: `docker` is not on PATH).
+  Every path/command the Dockerfile relies on was instead validated via
+  the equivalent plain shell commands this environment CAN run (the
+  clean-venv Python validation above; `npm ci`/`npm run build` already
+  exercised routinely by this project's own CI-equivalent checks). The
+  Dockerfile itself has **not** been through a real `docker build` and
+  should be treated as reviewed-but-unverified until one is run.
+
+### Model artifact packaging
+
+Unchanged from Milestone 33.2's decision, re-confirmed here: object
+storage is the source of truth, fetched and cached to local disk once
+per process on first use (`historical_models/pitcher_v1/persistence.py::load_model`,
+reused by `hitter_v1` and `big_money_ml`). Never baked into the Docker
+image or git-committed (`data/models/` stays `.gitignore`d and
+`.dockerignore`d) — training happens offline, deploying a new model
+version means uploading it to the bucket (see the Object Storage
+section's "Production seeding inventory" table), not rebuilding the
+image.
+
+### Explicit start commands
+
+| Command | Purpose |
+|---|---|
+| `npm run start` (from `dashboard/`) | **WEB** — the Next.js server. Requires `npm run build` to have already run. |
+| `node scripts/run-job-worker.ts` (from `dashboard/`) | **WORKER** — standalone job-queue poll loop. Optional; see Service topology above for when it's actually needed. |
+| `DATABASE_URL=postgres://... node scripts/migrate-postgres-schema.ts` (from `dashboard/`) | **Migration** — applies pending Postgres schema migrations. Never automatic; see `lib/db/executor.ts`'s own docstring. |
+| `python scripts/smoke_test_runtime.py` (from the repo root) | **Startup/readiness validation** — confirms the Python runtime itself is sound before serving real traffic; safe to run as a container health-check/init step. |
+| `GET /api/health` | **Startup/readiness validation** — the Node-side counterpart (Milestone 33.2.2): publicly reachable, no auth required, reports sanitized database/storage health, `503` when a dependency is unhealthy. |
+
 ## Environment variables
 
 Names only — **never commit or share actual values**. Nothing in this
@@ -375,3 +518,13 @@ development; **no project-wide `requirements.txt` exists in this repository**
 (confirmed absent before this milestone too), so this is not otherwise
 tracked in a manifest — a gap that predates this milestone, noted here rather
 than silently worked around by inventing one outside this milestone's scope.
+
+### Milestone 33.3 — the "no requirements.txt" gap noted above is closed
+
+`requirements.txt` / `requirements-dev.txt` now exist at the repo root (see
+"Runtime & build reproducibility" above for the full audit and pinning
+rationale). `.python-version` and `.nvmrc` pin the exact interpreter/runtime
+versions this was validated against. A `Dockerfile` and `.dockerignore` exist
+at the repo root but have not been through a real `docker build` (Docker was
+not available in the development environment) — treat as reviewed, not
+verified, until one is run.

@@ -1,0 +1,54 @@
+# Big Money DFS -- production Python dependencies.
+#
+# Milestone 33.3: this file did not exist before this milestone (the
+# project ran entirely off whatever happened to be installed on a
+# developer's machine). Every package listed here was confirmed, by
+# actually auditing every `import`/`from` statement across the real
+# application code (not tests, not this machine's other installed
+# packages), to be genuinely imported by production code paths --
+# scripts/*.py, and every top-level package the dashboard's
+# lib/orchestrator/pythonRunner.ts spawns as a subprocess.
+#
+# Versions are pinned EXACTLY (==), not >=/^ ranges, for the same reason
+# the trained model artifacts themselves are version-sensitive:
+# scikit-learn/joblib pickle compatibility is NOT guaranteed across even
+# minor version changes, and data/models/mlb/{hitter,pitcher}/v1/metadata.json
+# already records the exact library_versions those specific models were
+# trained with (python 3.13.7, sklearn 1.9.0, pandas 3.0.5, numpy 2.5.2)
+# -- matched exactly below, not approximately. A future model retrain
+# that intentionally moves to newer library versions should update this
+# file and the model metadata together, not independently.
+#
+# Install: pip install -r requirements.txt
+# Dev/test additions: pip install -r requirements.txt -r requirements-dev.txt
+#
+# NOT pip-compile/poetry-locked (no transitive-dependency hashes) -- see
+# DEPLOYMENT.md's "Python dependencies" section for why that is an
+# honest, deliberate scope boundary for this milestone, not an oversight.
+
+# -- Object storage (Milestone 33.2: research/artifact_storage.py::S3ArtifactStorage) --
+boto3==1.43.74
+
+# -- Data / ML runtime --
+# numpy/pandas/scipy: dataframe and numeric operations throughout
+# research/, historical_models/, big_money_ml/, evaluation/.
+numpy==2.5.2
+pandas==3.0.5
+scipy==1.18.0
+# scikit-learn: import name is `sklearn` -- historical_models/*/model.py
+# (training) and .../persistence.py::load_model (live inference, cached
+# via object storage per Milestone 33.2 Part 7).
+scikit-learn==1.9.0
+# joblib: model.joblib (de)serialization -- historical_models/*/persistence.py.
+joblib==1.5.3
+# pyarrow: pandas' parquet engine. Genuinely a PRODUCTION (not just
+# offline-training) dependency -- player_identity/historical_backfill.py's
+# pd.read_parquet() is called from player_identity/refresh.py, which runs
+# on every live slate Process/Refresh (lib/slatePipeline.ts's "Refreshing
+# MLB player identity" step), even though the historical warehouse data
+# itself stays out of normal production runtime (Milestone 33.2 Part 8).
+pyarrow==25.0.1
+
+# -- Lineup optimizer solver --
+# ortools: CP-SAT solver, optimizer/solver.py.
+ortools==9.15.6755
