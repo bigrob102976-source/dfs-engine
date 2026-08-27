@@ -63,6 +63,25 @@ FROM ${PYTHON_IMAGE} AS python-runtime
 
 FROM ${NODE_IMAGE} AS base
 COPY --from=python-runtime /usr/local /usr/local
+
+# Milestone 33.5, second real Railway build failure: the COPY above only
+# brings in /usr/local, which is where Python's own files (interpreter,
+# stdlib, compiled extension modules like _ssl.cpython-313-*.so) live --
+# but the OpenSSL shared libraries those extensions dynamically link
+# against (libssl.so.3 / libcrypto.so.3) live under /usr/lib/<triplet>/
+# in the python-runtime image, an ordinary Debian package path outside
+# /usr/local, so they were never copied. node:24-bookworm-slim never
+# installs libssl3 itself (Node statically bundles its own OpenSSL), so
+# the copied _ssl module failed to load its dependency and `pip install`
+# failed outright ("ssl module is unavailable", every HTTPS fetch to
+# PyPI refused). Fix: install the missing OS packages via apt directly
+# in this Debian bookworm base -- ca-certificates provides the trust
+# store pip's TLS verification also needs -- rather than trying to copy
+# more of python-runtime's filesystem across.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN ln -sf /usr/local/bin/python3 /usr/local/bin/python \
     && python --version \
     && pip --version

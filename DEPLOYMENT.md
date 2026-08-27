@@ -415,7 +415,13 @@ DEPLOY' means here" below.
   build caught the untagged `-slim` variants drifting to different
   Debian releases, which put the copied Python's shared libraries out of
   glibc sync with the Node base and broke every `python`/`pip`
-  invocation at runtime.
+  invocation at runtime. A second real Railway build failure after that
+  fix: `COPY --from=python-runtime /usr/local /usr/local` only copies
+  Python's own files, not the `libssl3`/`ca-certificates` OS packages
+  its `_ssl` extension module dynamically links against (those live
+  outside `/usr/local`) — `node:24-bookworm-slim` never installs them
+  itself, so `pip install` failed with "ssl module is unavailable" until
+  both were installed via `apt-get` directly in the `base` stage.
 - **`.dockerignore`** (repo root): excludes `.git/`, all generated
   pipeline artifact directories (mirrors `.gitignore`'s own reasoning),
   the local SQLite dev database, `node_modules`/`.next` (rebuilt inside
