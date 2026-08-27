@@ -407,9 +407,15 @@ DEPLOY' means here" below.
   two separate images. Two runtimes are required in the same final
   image: Node (Next.js) and Python (spawned as a subprocess by the
   running Node process, a genuine runtime dependency, not just a build
-  tool). The exact pinned Python (`python:3.13-slim`) is copied into a
-  `node:24-slim` base via a multi-stage `COPY --from=` (Debian's own apt
-  repos do not reliably offer this exact CPython minor version).
+  tool). The exact pinned Python (`python:3.13-slim-bookworm`) is copied
+  into a `node:24-bookworm-slim` base via a multi-stage `COPY --from=`
+  (Debian's own apt repos do not reliably offer this exact CPython minor
+  version). Both base images are pinned to the same explicit Debian
+  codename (`bookworm`) deliberately — Milestone 33.5's real Railway
+  build caught the untagged `-slim` variants drifting to different
+  Debian releases, which put the copied Python's shared libraries out of
+  glibc sync with the Node base and broke every `python`/`pip`
+  invocation at runtime.
 - **`.dockerignore`** (repo root): excludes `.git/`, all generated
   pipeline artifact directories (mirrors `.gitignore`'s own reasoning),
   the local SQLite dev database, `node_modules`/`.next` (rebuilt inside

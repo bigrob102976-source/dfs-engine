@@ -14,18 +14,26 @@
 # -- Python is a genuine runtime dependency of the running Node process,
 # not just a build tool.
 #
-# NOT BUILT OR PUSHED as part of this milestone -- see this milestone's
-# own "DO NOT deploy" instruction. This file has not been validated with
-# a real `docker build` (Docker was not available in the environment this
-# was written in); every path/command in it was instead verified to work
-# via the equivalent plain shell commands this same environment CAN run
-# (see DEPLOYMENT.md's "Clean-environment validation" section for exactly
-# what was and wasn't confirmed).
+# Docker remains unavailable in the environment this file is edited in,
+# so changes here still cannot be `docker build`-validated locally --
+# every path/command in it is instead verified to work via the
+# equivalent plain shell commands this environment CAN run (see
+# DEPLOYMENT.md's "Clean-environment validation" section for exactly
+# what was and wasn't confirmed that way). As of Milestone 33.5 this
+# image IS built for real by Railway on every push -- the base-image
+# pinning fix a few lines down exists because that real build failed
+# and is now the authoritative validation this file gets.
 
 # syntax=docker/dockerfile:1
 
-ARG NODE_IMAGE=node:24-slim
-ARG PYTHON_IMAGE=python:3.13-slim
+# Both pinned to the same explicit Debian codename (bookworm) -- see the
+# "python-runtime"/"base" stages below for why that match is required,
+# not optional. Do not switch either back to an untagged "slim" (which
+# floats to Docker Hub's current default Debian release independently
+# for each image) without re-verifying both still resolve to the same
+# release.
+ARG NODE_IMAGE=node:24-bookworm-slim
+ARG PYTHON_IMAGE=python:3.13-slim-bookworm
 
 # ---------------------------------------------------------------------
 # Base: Node (matches .nvmrc) with a pinned Python (matches
@@ -35,6 +43,21 @@ ARG PYTHON_IMAGE=python:3.13-slim
 # unpickling). Debian's own apt repos do not reliably offer this exact
 # CPython minor version, so the interpreter is copied in from the
 # official Python image instead of apt-installed.
+#
+# Milestone 33.5 real Railway build failure + fix: the untagged "slim"
+# variants of the node and python base images each float independently
+# to whatever Debian release Docker Hub currently publishes as their
+# default -- they are NOT guaranteed to be the same release. When they
+# drift apart (python:3.13-slim resolving to a newer Debian than
+# node:24-slim), the Python interpreter/shared libraries copied below
+# are linked against a newer glibc than the Node base image provides,
+# and every `python`/`pip` invocation fails at runtime
+# (`/usr/local/bin/python3: version 'GLIBC_2.xx' not found`). This is
+# NOT a "copy some /usr/local into a base image" problem in general --
+# it only breaks when the two base images are different Debian
+# releases. The fix is pinning BOTH images to the exact same Debian
+# codename explicitly, so the copied Python is always built against the
+# identical glibc already present in the target base.
 # ---------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS python-runtime
 
