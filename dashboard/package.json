@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "db:migrate:postgres": "node scripts/migrate-postgres-schema.ts"
+    "worker": "tsx scripts/run-job-worker.ts",
+    "db:migrate:postgres": "tsx scripts/migrate-postgres-schema.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1113.0",
@@ -19,7 +20,8 @@
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "stripe": "^22.5.0"
+    "stripe": "^22.5.0",
+    "tsx": "4.23.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

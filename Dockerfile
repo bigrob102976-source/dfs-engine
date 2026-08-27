@@ -2,8 +2,8 @@
 #
 # ONE image serves BOTH the WEB and WORKER services described in
 # DEPLOYMENT.md's service topology -- they are the same codebase started
-# two different ways (`npm run start` vs `node scripts/run-job-worker.ts`,
-# see that file for why a separate WORKER is optional at all). Building
+# two different ways (`npm run start` vs `npm run worker`, see that file
+# for why a separate WORKER is optional at all). Building
 # two images would mean two copies of the same dependency-install and
 # Next.js build steps for no real benefit.
 #
@@ -94,9 +94,10 @@ ENV NODE_ENV=production
 EXPOSE 3000
 
 # WEB is the default command. WORKER runs the SAME image with a
-# different command -- see DEPLOYMENT.md's "WEB start command" / "WORKER
-# start command" for the exact invocations (including why a plain
-# `node scripts/run-job-worker.ts` needs no ts-node/tsx at all -- Node's
-# own native TypeScript type-stripping, unflagged since Node 23.6, is
-# the entire mechanism).
+# different command (`npm run worker`) -- see DEPLOYMENT.md's "Node"
+# section for why that runs via `tsx` rather than plain `node`
+# (Milestone 33.4: this codebase's normal extensionless internal-import
+# style, resolved fine by Next.js's bundler, is NOT resolved by Node's
+# own native ESM loader -- confirmed live, a real startup crash before
+# this was fixed).
 CMD ["npm", "run", "start"]

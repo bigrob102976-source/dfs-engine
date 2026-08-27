@@ -20,13 +20,180 @@ A hosted deployment needs four services plus DNS/HTTPS, which the host manages:
 | **DNS / HTTPS** | Domain + TLS termination | host-managed, not this codebase's concern |
 
 WEB and WORKER are the same codebase (`dashboard/`) started two different ways
-— `npm run start` for WEB, `node scripts/run-job-worker.ts` for WORKER. Locally
+— `npm run start` for WEB, `npm run worker` for WORKER. Locally
 and in a genuinely single-instance early deployment, WEB alone is sufficient:
 the admin Process/Refresh routes run the job inline
 (`lib/jobs/worker.ts::runOneQueuedJob`) without a separate WORKER process. A
 separate WORKER only matters once WEB needs to scale horizontally or the
 pipeline's runtime becomes long enough that tying it to an HTTP request's
 process is undesirable.
+
+## Production deployment validation (Milestone 33.4)
+
+Final local pre-deployment audit before creating any real hosting
+infrastructure. **Nothing was deployed, purchased, or provisioned as
+part of this milestone.**
+
+### WEB / WORKER / POSTGRES / OBJECT STORAGE division of responsibility
+
+| Service | Owns | Source |
+|---|---|---|
+| **WEB** | Next.js dashboard: auth/sessions, memberships/entitlements/Stripe, admin UI, optimizer UI, projection pages, all API routes. Spawns Python as a subprocess for slate Process/Refresh when no separate WORKER is running. | `dashboard/app/`, `dashboard/lib/` |
+| **WORKER** | Standalone poll loop claiming the SAME `jobs` table WEB's inline execution also uses -- slate refresh pipeline, research collection, player identity, Native/AI/ML/BlueCollar projections, ownership, weather, Vegas, all via the identical `lib/slatePipeline.ts::runSlatePipeline()` WEB uses inline. No optimizer-build job type exists yet (optimizer builds are synchronous, member-request-triggered, not queued). | `dashboard/scripts/run-job-worker.ts` |
+| **POSTGRES** | `users`, `sessions`, `password_reset_tokens`, `subscriptions`, `entitlements`/`user_entitlements`, `feature_flags`, `jobs`, `worker_heartbeats`, `slate_status`, `slate_publish_history`, `admin_audit_log`, Stripe webhook event log. | `dashboard/lib/db/migrations-postgres/` |
+| **OBJECT STORAGE** | Every artifact-storage-routed Python writer (research packages, pitcher/batter board snapshots, DK pool/match-report snapshots, player identity crosswalk, ownership, Native/AI/ML/BlueCollar/FantasyPros projections, game environment, lineup sets) plus model artifacts (fetched + cached locally on first use, never the source of truth). | `research/artifact_storage.py` (Python writers), `dashboard/lib/storage/StorageBackend.ts` (Node readers) |
+
+### Remaining local-disk (C:\ / any single machine) dependencies
+
+Audited every `process.env`/local-path reference across the app. Three
+found, all either already-accepted single-instance escape hatches or a
+genuinely pre-existing, honestly-documented limitation -- none newly
+introduced by this milestone:
+
+1. **`BIGMONEY_DB_PATH` / SQLite** — dev-only; production fails closed
+   without `DATABASE_URL` (see "Production startup safety" below). Not a
+   real concern.
+2. **Model artifact local cache** (`historical_models/pitcher_v1/persistence.py::load_model`)
+   — by design (Milestone 33.2 Part 7): each process caches the model
+   file to ITS OWN local disk after the first fetch from object storage.
+   This is intentional, not a gap -- object storage remains the source
+   of truth, and every process (WEB or WORKER, however many instances)
+   independently self-heals from it on a cold start.
+3. **`/api/refresh`'s run-state IS genuinely per-process** —
+   `lib/orchestrator/runner.ts` (a pre-Milestone-29 "one-click refresh"
+   mechanism, distinct from and older than the job-queue-backed
+   `/api/admin/slates/{process,refresh,discover}` routes this project's
+   more recent milestones use) keeps its `activeRun`/`lastCompletedRun`
+   state **in-memory, with a local-disk copy purely for crash-visibility
+   debugging** — its own top-of-file comment says exactly this. It is
+   **not** a dead/legacy code path: `components/TopNavigation.tsx` and
+   `components/MissingDataState.tsx` both still call it, and it is
+   admin-gated but reachable from general UI chrome, not confined to
+   `/admin/slates`. On a single WEB instance this is completely correct
+   (matches its own documented design). **On more than one WEB instance,
+   a status poll landing on a different instance than the one that
+   started the run would see stale/empty state** — a real, confirmed
+   architectural gap, not a hypothetical one. Out of scope to fix here
+   per this milestone's explicit "do not redesign working MLB features"
+   boundary; the existing, newer job-queue mechanism (`lib/jobs/queue.ts`,
+   already Postgres-backed and already correctly shared across
+   instances) is the natural target for a future migration. **Practical
+   implication: WEB must stay single-instance until that migration
+   happens** — see "Recommended M33.5 scope" in this milestone's final
+   report.
+
+### Production environment variable inventory
+
+Names and configuration status only — **no real values printed, ever**.
+Confirmed live: `dashboard/.env.local` is `.gitignore`d (`dashboard/.gitignore`'s
+`.env*` pattern) and was never committed (`git log` on it is empty).
+
+| Variable | Class | Notes |
+|---|---|---|
+| `DATABASE_URL` | **REQUIRED**, **SECRET** | Fails closed without it in production (`ALLOW_SQLITE_IN_PRODUCTION` is the loud, explicit override). |
+| `OBJECT_STORAGE_REGION` / `_BUCKET` / `_ACCESS_KEY` / `_SECRET_KEY` | **REQUIRED**, **SECRET** | Fails closed without all four (`ALLOW_LOCAL_STORAGE_IN_PRODUCTION` is the override). Same 4 names on both Node and Python sides. |
+| `OBJECT_STORAGE_ENDPOINT` | OPTIONAL | Omit for real AWS S3; required for R2/other S3-compatible providers. |
+| `DFS_SALARY_PROVIDER=draftkings_unofficial` + `DK_UNOFFICIAL_ENABLED=true` | **REQUIRED** | DraftKings Unofficial is the permanent live DK slate source (Milestone 33.2.1) — without BOTH set, zero slates are ever discovered. Not secret (no value beyond a fixed string), but required. |
+| `BLUECOLLAR_API_KEY` | OPTIONAL, **SECRET** | Degrades to "not configured" gracefully if absent (BlueCollar is an optional, admin-gated projection source). |
+| `FANTASYPROS_API_KEY` | OPTIONAL, **SECRET** | Same graceful-degradation pattern. |
+| `SPORTSGAMEODDS_API_KEY` / `THE_ODDS_API_KEY` | OPTIONAL, **SECRET** | Vegas odds provider(s); degrades to "not connected" if absent. |
+| `FANTASYDATA_API_KEY` | **DEVELOPMENT ONLY**, **SECRET** | `fantasydata_audit/` is an isolated, one-off audit client — confirmed NOT wired into any production pipeline (Native/AI/FantasyPros/Vegas/Ownership/Optimizer). Do not configure in production. |
+| `GAME_ENVIRONMENT_PROVIDER` / `GAME_ENVIRONMENT_UMPIRE_PROVIDER` / `EXTERNAL_PROJECTION_PROVIDER` | OPTIONAL | Provider-selection overrides; sensible defaults apply when unset. |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | OPTIONAL for this deployment phase, **SECRET** | Required once billing goes live; test-mode-only enforcement (`isLiveSecretKey()`) stays active regardless. |
+| `STRIPE_WEEKLY_PRICE_ID` / `STRIPE_MONTHLY_PRICE_ID` | OPTIONAL for this deployment phase | Same as above. |
+| `ADMIN_BOOTSTRAP_EMAIL` | OPTIONAL | Has a hardcoded fallback; set explicitly for a real deployment rather than relying on the default. |
+| `PRIVATE_BETA` | OPTIONAL | Member-product access gate; unset means open to every authenticated user. |
+| `ALLOW_SQLITE_IN_PRODUCTION` / `ALLOW_LOCAL_STORAGE_IN_PRODUCTION` | OPTIONAL escape hatches | Must stay **unset** in a real multi-instance production deployment — see "Production startup safety". |
+| `WORKER_ID` | OPTIONAL | Defaults to `worker-<pid>`. |
+| `JOB_WORKER_POLL_INTERVAL_MS` | OPTIONAL | Defaults to 5000. |
+| `MLB_DFS_PYTHON` | OPTIONAL | Defaults to bare `python` on PATH. |
+| `MLB_DFS_ROOT` | OPTIONAL | Defaults to the parent of `dashboard/`; a Docker image built from this repo's own layout never needs to set this. |
+| `MLB_DFS_RUNSTATE_DIR` | OPTIONAL, DEVELOPMENT-LEANING | Local-disk debug-visibility copy for `/api/refresh`'s run state — see the "remaining local-disk dependencies" note above. |
+| `TEST_DATABASE_URL` | **DEVELOPMENT/TEST ONLY** | Gates the real-Postgres integration test suite; never set in production. |
+| `DFS_PROVIDER_API_KEY` | **DEVELOPMENT/TEST ONLY**, **SECRET** | Generic override key for an explicit non-default `DFS_SALARY_PROVIDER`; unused by the permanent `draftkings_unofficial` provider. |
+| `NODE_ENV` | **REQUIRED** (platform-set) | Drives every fail-closed check in this document; a real hosting platform sets this automatically. |
+
+No `NEXT_PUBLIC_*` variable exists anywhere in the codebase — confirmed
+by grep — so no storage/database credential can reach the browser bundle
+even by naming mistake.
+
+### Production startup safety
+
+All confirmed by direct code audit of the exact fail-closed logic (Milestone 30/33.1/33.2's `resolveDbBackend()`/`resolveStorageBackend()`), re-verified live via the existing, passing test suites (`lib/db/__tests__/backend.test.ts`, `lib/storage/__tests__/backend.test.ts`):
+
+- **Cannot silently use SQLite in production**: `resolveDbBackend()` throws `ProductionDatabaseNotConfiguredError` when `NODE_ENV=production` and `DATABASE_URL` is unset, unless `ALLOW_SQLITE_IN_PRODUCTION=true` is explicitly set. The error message names the exact variables to set — no credential value.
+- **Cannot silently use local artifact storage in production**: identical pattern, `resolveStorageBackend()` (Node) / `resolve_artifact_storage()` (Python), `ProductionStorageNotConfiguredError` / `ProductionStorageNotConfiguredError`, `ALLOW_LOCAL_STORAGE_IN_PRODUCTION` override.
+- **A malformed `DATABASE_URL` cannot fall back to SQLite**: `resolveDbBackend()`'s only check is "is `DATABASE_URL` a non-empty string" — there is no format-validation step that could reject a malformed value and fall through to a different branch. Once any non-empty string is present, the Postgres path is chosen unconditionally; a malformed value fails loudly downstream (a real `pg` connection/query error, surfaced through `/api/health` as `database: unhealthy` and a `503`), never a silent SQLite substitution. (Not additionally live-tested against a fresh process this milestone, to avoid disrupting the already-running dev server instance being used for the rest of this validation — the code-path guarantee itself has no conditional branch that could produce a different result.)
+- **Broken object storage cannot fall back to local disk**: same reasoning — `resolveStorageBackend()`/`resolve_artifact_storage()` pick object storage unconditionally once configured; a broken bucket/credential fails loudly (a real S3 error), surfaced through `/api/health` as `storage: unhealthy`.
+- **WEB and WORKER use the same Postgres database and the same object-storage namespace by construction**: both read the identical `DATABASE_URL` / `OBJECT_STORAGE_*` variable names from their process environment — there is no separate, WORKER-specific connection configuration anywhere in the codebase to drift out of sync.
+- **No credential ever appears in an error message**: confirmed by reading every thrown-error string in `resolveDbBackend()`/`resolveStorageBackend()`/`resolve_artifact_storage()`/`getDatabaseReadiness()`/`getObjectStorageReadiness()` — every one names only variable NAMES, backend kinds, or generic connection-failure text, never a value.
+
+### Worker validation
+
+Existing test coverage (all currently passing) already exercises every
+required behavior — re-run as part of this milestone's verification,
+not newly written, since it already covers this exhaustively:
+
+- **Claims jobs**: `lib/jobs/__tests__/queue.test.ts`, `jobQueueConcurrency.test.ts` (+ a real-Postgres-gated `jobQueueConcurrency.postgres.test.ts`, `TEST_DATABASE_URL`-gated).
+- **Executes the slate pipeline / persists through shared storage / updates job status**: `lib/jobs/__tests__/worker.test.ts` ("claims a job, runs its registered handler, and marks it SUCCEEDED"), exercising the exact `runSlatePipeline()` path both WEB-inline and WORKER-standalone execution share.
+- **Survives a failed job without crashing permanently**: `worker.test.ts`'s "marks the job FAILED (not retryable by default) when the handler throws" and "does not throw synchronously even when the handler rejects" — a thrown/rejected handler is caught, recorded, and the poll loop keeps running.
+- **Standalone startup itself**: previously **unverified** — see "Node" under Runtime & build reproducibility above for the real `ERR_MODULE_NOT_FOUND` startup bug this milestone found and fixed. Live-confirmed post-fix: `npm run worker` starts and begins polling.
+- No repeated live paid-API calls were made for this validation — job-queue tests use the project's existing fixture/mock pattern (`__setPythonRunnerForTests`), matching every other test in this codebase.
+
+### Ephemeral-storage audit
+
+| Data | Source of truth | Notes |
+|---|---|---|
+| Users, sessions, password resets | **POSTGRES** | |
+| Subscriptions, entitlements, feature flags | **POSTGRES** | |
+| Slate status, publish history, jobs, worker heartbeats, admin audit log | **POSTGRES** | |
+| Research packages, pitcher/batter board snapshots | **OBJECT STORAGE** | Python-written via `research/artifact_storage.py`. |
+| DK player pool / match report snapshots | **OBJECT STORAGE** | |
+| Player identity crosswalk | **OBJECT STORAGE** | Immutable versioned snapshots (Milestone 33.2 Part 9). |
+| Native / AI / Big Money ML projection snapshots | **OBJECT STORAGE** | |
+| BlueCollar / FantasyPros projection snapshots | **OBJECT STORAGE** | |
+| Weather / Vegas (game environment) snapshots | **OBJECT STORAGE** | |
+| Ownership snapshots | **OBJECT STORAGE** | |
+| Optimizer lineup-set results | **OBJECT STORAGE** | |
+| Big Money Pitcher/Hitter Model V1 artifacts | **OBJECT STORAGE** (source of truth) + per-process local cache | Never the image; see "Model artifact packaging". Confirmed fetchable from a cold cache — Part 7 below. |
+| Historical training warehouse | **N/A — intentionally never in production** | Offline-only; confirmed by import audit that no production code path touches it. |
+| `/api/refresh`'s in-flight run status | **EPHEMERAL** (by original design, single-instance-only) | See "Remaining local-disk dependencies" above — the one confirmed gap, not a blocker for a single WEB instance, a real constraint once WEB scales horizontally. |
+
+**No POSTGRES/OBJECT-STORAGE-classified item was found EPHEMERAL. The one EPHEMERAL item found (`/api/refresh` run status) is a pre-existing, by-design, single-process mechanism, not silently-broken state — flagged honestly rather than mis-classified as safe.**
+
+### Deployment configuration (portable, vendor-neutral)
+
+```
+PUBLIC INTERNET
+      |
+      v
+WEB SERVICE (npm run start)
+      |
+      +------ POSTGRESQL (DATABASE_URL -- any standard Postgres)
+      |
+      +------ OBJECT STORAGE (OBJECT_STORAGE_* -- any S3-compatible endpoint)
+      |
+      v
+JOB QUEUE (the `jobs` Postgres table)
+      |
+      v
+WORKER SERVICE (npm run worker)
+      |
+      +------ POSTGRESQL (same DATABASE_URL)
+      |
+      +------ OBJECT STORAGE (same OBJECT_STORAGE_* namespace)
+      |
+      +------ External APIs (DraftKings Unofficial, SportsGameOdds, FantasyPros, BlueCollar, MLB Stats)
+```
+
+No hosting vendor is hardcoded anywhere in the codebase — `DATABASE_URL`
+is a standard Postgres connection string (works against any managed
+Postgres), `OBJECT_STORAGE_*` targets any S3-compatible endpoint via a
+configurable `OBJECT_STORAGE_ENDPOINT` (Cloudflare R2, AWS S3, Backblaze
+B2, MinIO, ...), and both WEB/WORKER are plain Node processes runnable
+on Railway, Vercel (WEB only — Vercel does not run long-lived background
+processes, so WORKER would need a different host if used), a plain VM,
+or the Docker image this milestone added.
 
 ## Runtime & build reproducibility (Milestone 33.3)
 
@@ -87,15 +254,36 @@ DEPLOY' means here" below.
 ### Node
 
 - **Version**: `.nvmrc` pins `24.19.0`; `dashboard/package.json`'s
-  `engines.node` requires `>=23.6.0`. That floor is not arbitrary either:
-  `scripts/run-job-worker.ts` and `scripts/migrate-postgres-schema.ts`
-  are plain `.ts` files run directly via `node scripts/....ts` (no
-  ts-node/tsx dependency) — this only works because Node's own native
-  TypeScript type-stripping is unflagged (on by default) starting at
-  Node 23.6. `node:sqlite` (local dev's database) separately needs only
-  22.5+, so the stricter of the two real requirements is what's pinned.
-  Confirmed live: `node scripts/migrate-postgres-schema.ts` runs cleanly
-  with zero flags on Node 24.19.0.
+  `engines.node` requires `>=23.6.0`. `node:sqlite` (local dev's
+  database) needs 22.5+; the stricter floor here is for Node's own
+  native TypeScript type-stripping, unflagged (on by default) starting
+  at Node 23.6, used by the `tsx` runtime below.
+- **`scripts/run-job-worker.ts` and `scripts/migrate-postgres-schema.ts`
+  run via `tsx`** (`npm run worker`, `npm run db:migrate:postgres`), not
+  plain `node`. Milestone 33.4 finding: `scripts/run-job-worker.ts`
+  itself uses explicit `.ts` import extensions, but transitively imports
+  `lib/slatePipeline` (and, through it, most of `lib/`) using this
+  codebase's normal EXTENSIONLESS import style — the style every
+  internal import in this project already uses, since Next.js's own
+  bundler resolves it fine. Node's *native* ESM loader does not resolve
+  extensionless specifiers, so a real `node scripts/run-job-worker.ts`
+  invocation crashed immediately with `ERR_MODULE_NOT_FOUND` on
+  `lib/slatePipeline` — confirmed live, a genuine production blocker,
+  not a hypothetical one. `scripts/migrate-postgres-schema.ts` happened
+  to exit before reaching an extensionless import in local testing (no
+  `DATABASE_URL` set → early return) — this masked the exact same
+  latent problem in that script, which was not actually verified in
+  Milestone 33.3 despite that milestone's report saying it was
+  confirmed clean. `tsx` (esbuild-based) resolves extensionless
+  TypeScript imports exactly like Next.js does, so this fixes both
+  scripts with a one-line invocation change each and zero source-file
+  changes across the ~100+ files either script transitively imports.
+  Pinned as an exact production dependency (`tsx==4.23.12` in
+  `package.json`, not just a dev tool) since the WORKER and migration
+  commands need it at runtime, not just in development. Confirmed live:
+  both `npm run worker` (starts and begins polling, no crash) and
+  `npm run db:migrate:postgres` (same expected safety message as
+  before, now with zero warnings) work correctly.
 - **Dependency manifest**: `dashboard/package-lock.json` already existed
   and is already git-tracked (since Milestone 30) — `npm ci` is already
   fully reproducible; nothing new needed here.
@@ -166,8 +354,8 @@ image.
 | Command | Purpose |
 |---|---|
 | `npm run start` (from `dashboard/`) | **WEB** — the Next.js server. Requires `npm run build` to have already run. |
-| `node scripts/run-job-worker.ts` (from `dashboard/`) | **WORKER** — standalone job-queue poll loop. Optional; see Service topology above for when it's actually needed. |
-| `DATABASE_URL=postgres://... node scripts/migrate-postgres-schema.ts` (from `dashboard/`) | **Migration** — applies pending Postgres schema migrations. Never automatic; see `lib/db/executor.ts`'s own docstring. |
+| `npm run worker` (from `dashboard/`) | **WORKER** — standalone job-queue poll loop. Optional; see Service topology above for when it's actually needed. Runs via `tsx`, not plain `node` — see "Node" above for why. |
+| `DATABASE_URL=postgres://... npm run db:migrate:postgres` (from `dashboard/`) | **Migration** — applies pending Postgres schema migrations. Never automatic; see `lib/db/executor.ts`'s own docstring. |
 | `python scripts/smoke_test_runtime.py` (from the repo root) | **Startup/readiness validation** — confirms the Python runtime itself is sound before serving real traffic; safe to run as a container health-check/init step. |
 | `GET /api/health` | **Startup/readiness validation** — the Node-side counterpart (Milestone 33.2.2): publicly reachable, no auth required, reports sanitized database/storage health, `503` when a dependency is unhealthy. |
 
@@ -231,8 +419,9 @@ real environment instead.
   non-empty target table, and never prints a password hash, session/
   verification/reset token hash, or Stripe customer id (redacted in every
   report).
-- **Production migration command** (Milestone 33.1):
-  `DATABASE_URL=postgres://... node scripts/migrate-postgres-schema.ts` —
+- **Production migration command** (Milestone 33.1, invocation corrected
+  in 33.4 — see "Node" under "Runtime & build reproducibility" for why):
+  `DATABASE_URL=postgres://... npm run db:migrate:postgres` —
   applies every not-yet-applied `dashboard/lib/db/migrations-postgres/*.sql`
   file, schema only, never touches data. Safe to run repeatedly (already
   -applied migrations are skipped). This is the one command to run before
@@ -528,3 +717,15 @@ versions this was validated against. A `Dockerfile` and `.dockerignore` exist
 at the repo root but have not been through a real `docker build` (Docker was
 not available in the development environment) — treat as reviewed, not
 verified, until one is run.
+
+### Milestone 33.4 — `tsx` added as a pinned production dependency
+
+`dashboard/package.json`: `tsx@4.23.12` (exact-pinned, `dependencies` not
+`devDependencies` — needed at production runtime, not just in development).
+Fixes a real, live-confirmed startup crash in `scripts/run-job-worker.ts`
+(and a previously-unverified latent copy of the same bug in
+`scripts/migrate-postgres-schema.ts`) — see "Node" under "Runtime & build
+reproducibility" above for the full root-cause explanation. Docker was
+still not available in this milestone's development environment either
+(re-checked) — same "reviewed, not build-verified" status as the
+Dockerfile above.
