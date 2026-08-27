@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { getAiProjectionByPlayerId } from "../aiProjections";
+import { toArtifactKey } from "../artifactRoot";
 import { getBlueCollarProjectionByPlayerId } from "../blueCollarProjections";
 import { safeReadJson } from "../discovery";
 import { getProjectionComparisonByPlayerId } from "../externalProjections";
@@ -11,6 +12,7 @@ import { getBigMoneyMlProvenance, getMlProjectionByPlayerId } from "../mlProject
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
+import { getStorage } from "../storage/getStorage";
 import type { LineupSet } from "../types";
 import { parseLastJsonLine } from "./jsonLine";
 import { getCachedPoolPath } from "./poolCache";
@@ -292,13 +294,24 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
 
   const doc = await safeReadJson<LineupSet>(after.path);
   const csvPath = after.path.replace(/\.json$/, ".csv");
+  // Milestone 33.5 production hotfix: this used to be a raw
+  // fs.existsSync(csvPath) check. That's a local-filesystem-only test --
+  // under production object storage the optimizer CLI's CSV output
+  // lives in the bucket, never on the WEB/WORKER container's local disk,
+  // so the old check always resolved to `false` there and silently
+  // dropped a CSV export that genuinely existed. getStorage().exists()
+  // is the same abstraction discovery.ts already routes every other
+  // artifact read through (LocalStorageBackend in dev, S3-backed in
+  // production) -- this is the one call site in this file that hadn't
+  // been migrated yet.
+  const csvExists = await getStorage().exists(toArtifactKey(csvPath));
 
   return {
     ok: true,
     errors: [],
     coverage: pre.coverage,
     lineupSetPath: after.path,
-    csvPath: fs.existsSync(csvPath) ? csvPath : null,
+    csvPath: csvExists ? csvPath : null,
     lineupsRequested: doc?.lineups_requested ?? request.lineups,
     lineupsGenerated: doc?.lineups_generated ?? 0,
     stoppedReason: doc?.stopped_reason ?? null,

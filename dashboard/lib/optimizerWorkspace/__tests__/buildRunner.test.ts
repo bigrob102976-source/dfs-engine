@@ -324,6 +324,55 @@ describe("buildLineups", () => {
     expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
+  it("Milestone 33.5 production hotfix: resolves csvPath through the StorageBackend abstraction, not a raw local fs.existsSync check", async () => {
+    // Simulates production object storage: the CSV genuinely "exists"
+    // (per the injected StorageBackend) even though nothing was ever
+    // written to local disk at that path. A raw fs.existsSync(csvPath)
+    // check -- the real bug this test guards against -- would always
+    // see this as "missing" and silently drop a CSV export that
+    // actually exists in the bucket.
+    const calls: Array<{ script: string; args: string[] }> = [];
+    await seedCachedPool(calls);
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(
+      makeFakeRunner(
+        {
+          "scripts/optimize_dk_lineups.py": (args) => {
+            if (args.includes("--validate-only")) return ok(JSON.stringify({ errors: [] }));
+            const ts = nextTs();
+            // Deliberately NOT written to local disk -- only the JSON
+            // lineup set is (buildLineups still needs to read that back
+            // via safeReadJson, which is already storage-abstracted).
+            writeJson(`lineups/${DATE}/dk_lineups_${ts}.json`, {
+              lineups_requested: 1,
+              lineups_generated: 1,
+              stopped_reason: null,
+              lineups: [{ index: 1, assignments: [], salary: 9000, projection: 20, ceiling: 30 }],
+            });
+            return ok();
+          },
+        },
+        calls,
+      ),
+    );
+
+    const { LocalStorageBackend } = await import("../../storage/StorageBackend");
+    const { __setStorageForTests } = await import("../../storage/getStorage");
+    const realBackend = new LocalStorageBackend(tmpDir);
+    __setStorageForTests({
+      readJson: (p) => realBackend.readJson(p),
+      exists: async () => true, // the production-object-storage answer, never consulting local disk
+      listFiles: (dir, prefix, ext) => realBackend.listFiles(dir, prefix, ext),
+      latestFile: (dir, prefix, ext) => realBackend.latestFile(dir, prefix, ext),
+      listSubdirectories: (dir) => realBackend.listSubdirectories(dir),
+    });
+
+    const { buildLineups } = await import("../buildRunner");
+    const result = await buildLineups(baseRequest({ lineups: 1 }));
+    expect(result.ok).toBe(true);
+    expect(result.csvPath).toMatch(/dk_lineups_.*\.csv$/);
+  });
+
   it("fails cleanly when no pool has been loaded", async () => {
     const { buildLineups } = await import("../buildRunner");
     const result = await buildLineups(baseRequest());
