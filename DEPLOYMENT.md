@@ -28,6 +28,97 @@ separate WORKER only matters once WEB needs to scale horizontally or the
 pipeline's runtime becomes long enough that tying it to an HTTP request's
 process is undesirable.
 
+## Railway deployment (Milestone 33.5)
+
+First real hosted deployment. Topology: one Railway project, three
+services (WEB, WORKER, PostgreSQL), plus Cloudflare R2 for object
+storage. No Redis, no Kubernetes — the existing job queue is
+Postgres-backed (`dashboard/lib/jobs/queue.ts`) and doesn't need one.
+
+### Why no Railway-specific config file was added
+
+The existing root `Dockerfile` already builds one image that serves
+both WEB and WORKER via different start commands (see "Service
+topology" above and the Dockerfile's own comments). Railway auto-detects
+a root-level `Dockerfile` with no config file required. WEB and WORKER
+are configured as **two separate Railway services**, both pointing at
+this same GitHub repo/Dockerfile, differing only in one dashboard
+setting each (Custom Start Command). A `railway.json` would only be
+needed if the two services required different build steps — they
+don't — so per this milestone's "make only necessary changes"
+instruction, none was added.
+
+### Exact per-service Railway settings
+
+| Setting | WEB service | WORKER service |
+|---|---|---|
+| Source | this GitHub repo | this GitHub repo (same repo, second service) |
+| Builder | Dockerfile (auto-detected, repo root) | Dockerfile (auto-detected, repo root) |
+| Custom Start Command | *(leave blank — image `CMD` default is `npm run start`)* | `npm run worker` |
+| Working directory the command runs from | `/app/dashboard` (set by the Dockerfile's final `WORKDIR`) | same |
+| Port | Railway injects `PORT`; `next start` already reads it automatically (Next.js CLI's `-p/--port` option is defined with `.env('PORT')`, default `3000`) — no code change needed | not applicable, WORKER serves no HTTP |
+| Health check path | `/api/health` (public, unauthenticated, returns sanitized JSON, `503` when a dependency is unhealthy — Milestone 33.2.2) | not applicable |
+| Restart policy | on-failure (Railway default) | on-failure (Railway default) |
+| Replicas | **1** — see "Single-instance WEB decision" below | **1** — initial beta, do not scale yet |
+
+### Single-instance WEB decision (accepted for this launch)
+
+`/api/refresh`'s in-process `activeRun`/`lastCompletedRun` state (the
+older, pre-job-queue pipeline mechanism, still live-wired into
+`TopNavigation.tsx`/`MissingDataState.tsx`) is per-Node-process, not
+shared across instances — documented as a known gap since Milestone
+33.4. **Accepted for the first launch under WEB replicas = 1.**
+
+**DO NOT SCALE WEB ABOVE 1 INSTANCE** until that run-state is migrated
+onto the shared Postgres-backed job/state architecture the newer
+`/api/admin/slates/{process,refresh,discover}` routes already use. This
+is not a blocker for a single-instance initial beta.
+
+### Environment variable placement (WEB / WORKER / BOTH / OPTIONAL)
+
+Verified by direct source audit this milestone — which process actually
+reads each variable — not assumed from the variable's name.
+
+| Variable | Placement | Why |
+|---|---|---|
+| `DATABASE_URL` | **BOTH** | Both connect to the same Postgres (`lib/db/backend.ts`) |
+| `OBJECT_STORAGE_ENDPOINT` / `_REGION` / `_BUCKET` / `_ACCESS_KEY` / `_SECRET_KEY` | **BOTH** | Both read/write the same bucket (Node `StorageBackend.ts` + Python `research/artifact_storage.py`) |
+| `DFS_SALARY_PROVIDER` / `DK_UNOFFICIAL_ENABLED` | **BOTH** | Read by the Python pipeline, which both WEB (`/api/refresh` via `pythonRunner.ts`) and WORKER (job handlers) spawn |
+| `BLUECOLLAR_API_KEY` / `BLUECOLLAR_API_BASE_URL` | **BOTH** | Same reason — Python-side (`external_projections/bluecollar_provider.py`), spawned by both processes |
+| `FANTASYPROS_API_KEY` | **BOTH** | Same reason — Python-side (`fantasypros/client.py`) |
+| `SPORTSGAMEODDS_API_KEY` / `THE_ODDS_API_KEY` | **BOTH** | Same reason — Python-side (`research/game_environment/`) |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_WEEKLY_PRICE_ID` / `STRIPE_MONTHLY_PRICE_ID` / `STRIPE_PUBLISHABLE_KEY` | **WEB ONLY** | Billing API routes + webhook only exist in the Next.js app; WORKER never touches billing. Confirmed no Stripe.js on the client (`STRIPE_PUBLISHABLE_KEY` is not required — Checkout/Portal are server-side redirect flows) |
+| `ADMIN_BOOTSTRAP_EMAIL` | **WEB ONLY** | Consumed only on first login |
+| `PRIVATE_BETA` | **WEB ONLY** | Gates member access at the WEB request layer |
+| `WORKER_ID` | **WORKER ONLY** | Identifies the standalone worker in `worker_heartbeats` (defaults to `worker-<pid>` if unset) |
+| `JOB_WORKER_POLL_INTERVAL_MS` | **WORKER ONLY** | Standalone worker poll interval |
+| `ALLOW_SQLITE_IN_PRODUCTION` / `ALLOW_LOCAL_STORAGE_IN_PRODUCTION` | **OPTIONAL** | Escape hatches — leave unset in a real deployment |
+| `NODE_ENV` | **BOTH** | Set by Railway automatically |
+| `GAME_ENVIRONMENT_PROVIDER` / `GAME_ENVIRONMENT_UMPIRE_PROVIDER` / `EXTERNAL_PROJECTION_PROVIDER` | **BOTH** (if used) | Same Python-subprocess reasoning as above |
+| `FANTASYDATA_API_KEY` | **NOT NEEDED** | Confirmed unused by any production pipeline — only `fantasydata_audit/`, a standalone dev tool |
+| `BIGMONEY_DB_PATH` / `TEST_DATABASE_URL` / `DFS_PROVIDER_API_KEY` | **NOT NEEDED IN PRODUCTION** | Dev/test only |
+
+No `APP_URL`/`PUBLIC_URL`/`SITE_URL` variable exists or is needed —
+confirmed by source audit: Stripe checkout/portal redirect URLs are
+built from the incoming request's own origin
+(`new URL(request.url).origin` in `app/api/billing/checkout/route.ts` and
+`.../portal/route.ts`), not a configured constant. No session-secret
+variable exists either — sessions are opaque, DB-backed tokens
+(`lib/db/sessions.ts`), not signed/JWT, so there is nothing to
+configure for "session security" beyond `DATABASE_URL` itself.
+
+### Provider-secret client-exposure audit (Milestone 33.5)
+
+Confirmed by direct search of a real production build's client
+JavaScript bundle (`dashboard/.next/static/**`) for the literal names
+`BLUECOLLAR_API_KEY`, `FANTASYPROS_API_KEY`, `SPORTSGAMEODDS_API_KEY`,
+`OBJECT_STORAGE_SECRET_KEY`, `STRIPE_SECRET_KEY`, `DATABASE_URL` — zero
+matches. Every file that reads any of these lives in `lib/`, `scripts/`,
+or Python `research/`/`config/`/`external_projections/`/`fantasypros/`
+— never a `"use client"` component — and no `NEXT_PUBLIC_*` variable
+exists anywhere in the codebase (grep-confirmed), which is the only
+mechanism Next.js has for inlining an env var into the client bundle.
+
 ## Production deployment validation (Milestone 33.4)
 
 Final local pre-deployment audit before creating any real hosting
