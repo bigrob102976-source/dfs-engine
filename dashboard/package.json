@@ -12,7 +12,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "worker": "tsx scripts/run-job-worker.ts",
-    "db:migrate:postgres": "tsx scripts/migrate-postgres-schema.ts"
+    "db:migrate:postgres": "tsx scripts/migrate-postgres-schema.ts",
+    "smoke-test:object-storage-read": "tsx scripts/smoke-test-object-storage-read.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1113.0",
