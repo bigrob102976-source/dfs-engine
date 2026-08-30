@@ -29,7 +29,7 @@ from research.quality_report import (
     batter_data_status,
     pitcher_data_status,
 )
-from research.artifact_storage import raise_if_exists
+from research.artifact_storage import ARTIFACT_ROOT, raise_if_exists, resolve_artifact_storage, to_artifact_key
 from research.storage import save_json
 
 DEFAULT_PREDICTIONS_ROOT = Path(__file__).resolve().parent.parent / "predictions"
@@ -247,11 +247,16 @@ def save_snapshot(snapshot: dict, output_root: Path = DEFAULT_PREDICTIONS_ROOT, 
 def list_snapshots(slate_date: str, output_root: Path = DEFAULT_PREDICTIONS_ROOT, filename_prefix: str = "pitcher_board") -> List[Path]:
     """All snapshot files for a date, oldest first (filenames sort
     chronologically since the timestamp is zero-padded and left-to-right
-    significant)."""
+    significant).
+
+    Mirrors research/game_environment/storage.py::list_environment_reports --
+    save_snapshot() writes exclusively through resolve_artifact_storage()
+    (object storage is the source of truth), so listing has to go
+    through the same abstraction rather than a local-disk-only glob."""
     folder = Path(output_root) / slate_date
-    if not folder.exists():
-        return []
-    return sorted(folder.glob(f"{filename_prefix}_*.json"))
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    keys = storage.list_files(to_artifact_key(folder), prefix=f"{filename_prefix}_", ext=".json")
+    return [ARTIFACT_ROOT / key for key in keys]
 
 
 def load_latest_snapshot(slate_date: str, output_root: Path = DEFAULT_PREDICTIONS_ROOT, filename_prefix: str = "pitcher_board") -> dict:
@@ -264,5 +269,14 @@ def load_latest_snapshot(slate_date: str, output_root: Path = DEFAULT_PREDICTION
 
 
 def load_snapshot(path: Path) -> dict:
-    with Path(path).open("r", encoding="utf-8") as f:
-        return json.load(f)
+    """Mirrors research/game_environment/storage.py::load_environment_report --
+    reads straight through resolve_artifact_storage() every call (no
+    local-disk caching, so no staleness risk), falling back to a direct
+    read only for a path that genuinely doesn't resolve through the
+    artifact store (e.g. a raw path passed directly in a test)."""
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    result = storage.read_json(to_artifact_key(Path(path)))
+    if result is None:
+        with Path(path).open("r", encoding="utf-8") as f:
+            return json.load(f)
+    return result
