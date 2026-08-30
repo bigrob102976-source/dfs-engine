@@ -72,6 +72,15 @@ function providerSlateFreshEnough(doc: Record<string, unknown> | null): boolean 
   return Date.now() - generatedAt <= PROVIDER_SLATE_FRESHNESS_MS;
 }
 
+/** Defense-in-depth alongside get_configured_provider()'s own cascade
+ * (which never returns mock data unless Mock Mode is explicitly on):
+ * an artifact reused from object storage without ever re-running the
+ * provider must still be verifiably real DraftKings Unofficial data,
+ * never something written under Mock Mode or a CSV import. */
+function isRealDraftKingsProvenance(doc: Record<string, unknown> | null): boolean {
+  return !!doc && doc.is_mock !== true && doc.source === "draftkings_unofficial_live";
+}
+
 /** Builds a SlateListResult from a provider-slate document -- shared by
  * listSlates() (list_dfs_slates.py's own doc shape) and its
  * fresh-artifact-reuse path (fetch_dfs_slate.py's doc shape, which
@@ -111,7 +120,8 @@ export async function listSlates(date: string): Promise<SlateListResult> {
   if (
     existingDoc &&
     (existingDoc.status === "ready" || existingDoc.status === "needs_selection") &&
-    providerSlateFreshEnough(existingDoc)
+    providerSlateFreshEnough(existingDoc) &&
+    isRealDraftKingsProvenance(existingDoc)
   ) {
     return slateListResultFromProviderDoc(existingDoc);
   }
@@ -333,7 +343,13 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   let providerAfter = providerBefore;
   let providerDoc: Record<string, unknown> | null = null;
 
-  if (existingDoc && existingDoc.status === "ready" && existingDoc.selected_slate_id === slateId && providerSlateFreshEnough(existingDoc)) {
+  if (
+    existingDoc &&
+    existingDoc.status === "ready" &&
+    existingDoc.selected_slate_id === slateId &&
+    providerSlateFreshEnough(existingDoc) &&
+    isRealDraftKingsProvenance(existingDoc)
+  ) {
     providerDoc = existingDoc;
   } else {
     const fetchResult = await runPythonScript("scripts/fetch_dfs_slate.py", ["--date", date, "--slate-id", slateId]);

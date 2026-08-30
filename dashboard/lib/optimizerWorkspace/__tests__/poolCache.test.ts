@@ -394,6 +394,27 @@ describe("loadPool", () => {
     expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
   });
 
+  it("does not reuse a fresh, correctly-scoped provider-slate document if it isn't real DraftKings data (defense-in-depth)", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date().toISOString(),
+      provider_name: "mock_dev_provider",
+      is_mock: true,
+      source: "mock_explicit",
+      selected_slate_id: "mock-main",
+      slates: [],
+      players: [],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    await loadPool(DATE, "mock-main");
+
+    expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
+  });
+
   it("throws a clear error when fetch_dfs_slate.py fails to produce a ready slate", async () => {
     const calls: Array<{ script: string; args: string[] }> = [];
     const handlers = {
