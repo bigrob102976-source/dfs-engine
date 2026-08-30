@@ -26,6 +26,7 @@ vi.mock("next/headers", () => ({
 
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
+const { __resetStorageForTests } = await import("@/lib/storage/getStorage");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
 const { publishSlateRecord, upsertSlateStatus } = await import("@/lib/db/slateStatus");
@@ -60,12 +61,20 @@ beforeEach(() => {
   __resetDbForTests();
   __resetExecutorForTests();
   cookieStore.clear();
+  // listSlates() now reads storage directly (reusing a fresh existing
+  // provider-slate artifact before ever invoking list_dfs_slates.py) --
+  // getStorage() is a lazy singleton that captures getArtifactRoot() the
+  // FIRST time it's called, so a test that changes MLB_DFS_ROOT after an
+  // earlier test already resolved it would otherwise read/write against
+  // the wrong root.
+  __resetStorageForTests();
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
   const { __resetPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
   __resetPythonRunnerForTests();
+  __resetStorageForTests();
 });
 
 describe("SlateManagerPage (member, read-only)", () => {

@@ -224,6 +224,54 @@ describe("listSlates", () => {
     const result = await listSlates(DATE);
     expect(result.status).toBe("unavailable");
   });
+
+  it("reuses a fresh already-fetched provider-slate document instead of calling list_dfs_slates.py again", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date().toISOString(),
+      provider_name: "draftkings_unofficial",
+      provider_type: "real",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "main",
+      slates: [{ slate_id: "main", slate_name: "Featured", game_count: 9, start_time: null }],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { listSlates } = await import("../poolCache");
+    const result = await listSlates(DATE);
+
+    expect(calls.map((c) => c.script)).toEqual([]);
+    expect(result.status).toBe("ready");
+    expect(result.providerName).toBe("draftkings_unofficial");
+    expect(result.isConnected).toBe(true);
+    expect(result.slates).toEqual([
+      { slateId: "main", slateName: "Featured", gameCount: 9, startTime: null, gameIds: [], playerCount: null },
+    ]);
+  });
+
+  it("calls list_dfs_slates.py live when the existing provider-slate document is stale", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old
+      provider_name: "draftkings_unofficial",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "main",
+      slates: [{ slate_id: "main", slate_name: "Featured", game_count: 9, start_time: null }],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { listSlates } = await import("../poolCache");
+    const result = await listSlates(DATE);
+
+    expect(calls.map((c) => c.script)).toEqual(["scripts/list_dfs_slates.py"]);
+    expect(result.providerName).toBe("mock_dev_provider");
+  });
 });
 
 describe("loadPool", () => {
@@ -279,6 +327,71 @@ describe("loadPool", () => {
     const callCountAfterFirst = calls.length;
     await loadPool(DATE, "mock-main", true);
     expect(calls.length).toBeGreaterThan(callCountAfterFirst);
+  });
+
+  it("reuses a fresh already-fetched provider-slate document for this exact slate instead of calling fetch_dfs_slate.py again", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date().toISOString(),
+      provider_name: "draftkings_unofficial",
+      provider_type: "real",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "mock-main",
+      slates: [{ slate_id: "mock-main", slate_name: "Mock Main (Dev)", game_count: 1, start_time: null }],
+      players: [],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+
+    expect(calls.map((c) => c.script)).toEqual(["scripts/build_dfs_pool_from_provider.py", "scripts/project_dk_ownership.py"]);
+    expect(pool.providerSource).toBe("draftkings_unofficial_live");
+  });
+
+  it("does not reuse a fresh provider-slate document fetched for a DIFFERENT slate", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date().toISOString(),
+      provider_name: "draftkings_unofficial",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "other-slate",
+      slates: [],
+      players: [],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    await loadPool(DATE, "mock-main");
+
+    expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
+  });
+
+  it("does not reuse a stale provider-slate document even for the same slate", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old
+      provider_name: "draftkings_unofficial",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "mock-main",
+      slates: [],
+      players: [],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    await loadPool(DATE, "mock-main");
+
+    expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
   });
 
   it("throws a clear error when fetch_dfs_slate.py fails to produce a ready slate", async () => {

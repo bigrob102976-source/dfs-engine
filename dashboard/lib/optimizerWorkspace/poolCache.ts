@@ -57,7 +57,65 @@ export function __resetPoolCacheForTests(): void {
   poolCache.clear();
 }
 
+// How recent an already-fetched provider-slate document has to be to
+// reuse instead of calling DraftKings live again. DK contest/salary data
+// doesn't change second-to-second, so a short reuse window avoids an
+// unnecessary live call (and the live call's own failure, e.g. an
+// egress IP restriction) on every cache-cold page view without serving
+// meaningfully stale data.
+const PROVIDER_SLATE_FRESHNESS_MS = 15 * 60 * 1000;
+
+function providerSlateFreshEnough(doc: Record<string, unknown> | null): boolean {
+  if (!doc) return false;
+  const generatedAt = typeof doc.generated_at_utc === "string" ? Date.parse(doc.generated_at_utc) : NaN;
+  if (Number.isNaN(generatedAt)) return false;
+  return Date.now() - generatedAt <= PROVIDER_SLATE_FRESHNESS_MS;
+}
+
+/** Builds a SlateListResult from a provider-slate document -- shared by
+ * listSlates() (list_dfs_slates.py's own doc shape) and its
+ * fresh-artifact-reuse path (fetch_dfs_slate.py's doc shape, which
+ * lacks is_connected/slates_available but carries the same discovered
+ * `slates` array, since selecting one slate never discards the others). */
+function slateListResultFromProviderDoc(doc: Record<string, unknown>): SlateListResult {
+  const slates: SlateOption[] = (Array.isArray(doc.slates) ? (doc.slates as Record<string, unknown>[]) : []).map((s) => ({
+    slateId: String(s.slate_id),
+    slateName: (s.slate_name as string | null) ?? null,
+    gameCount: (s.game_count as number | null) ?? null,
+    startTime: (s.start_time as string | null) ?? null,
+    gameIds: Array.isArray(s.game_ids) ? (s.game_ids as string[]) : [],
+    playerCount: (s.player_count as number | null) ?? null,
+  }));
+  const status = (doc.status as SlateListResult["status"]) ?? "unavailable";
+  const providerName = (doc.provider_name as string | null) ?? null;
+  return {
+    status,
+    reason: (doc.reason as string | null) ?? null,
+    providerName,
+    providerType: doc.provider_type === "mock" || doc.provider_type === "real" ? (doc.provider_type as "mock" | "real") : null,
+    isMock: Boolean(doc.is_mock),
+    isConnected: typeof doc.is_connected === "boolean" ? doc.is_connected : Boolean(providerName) && status === "ready",
+    source: asProviderSource(doc.source),
+    slates,
+    slatesAvailable: typeof doc.slates_available === "number" ? (doc.slates_available as number) : slates.length,
+  };
+}
+
 export async function listSlates(date: string): Promise<SlateListResult> {
+  // A "ready" or "needs_selection" provider-slate document already
+  // carries the full discovered `slates` array (selecting one slate
+  // never discards the others) -- reuse it when fresh enough instead of
+  // calling DraftKings live again.
+  const existing = await providerSlateFingerprint(date);
+  const existingDoc = await safeReadJson<Record<string, unknown>>(existing.path);
+  if (
+    existingDoc &&
+    (existingDoc.status === "ready" || existingDoc.status === "needs_selection") &&
+    providerSlateFreshEnough(existingDoc)
+  ) {
+    return slateListResultFromProviderDoc(existingDoc);
+  }
+
   const result = await runPythonScript("scripts/list_dfs_slates.py", ["--date", date]);
   const doc = parseLastJsonLine(result.stdout);
 
@@ -75,26 +133,7 @@ export async function listSlates(date: string): Promise<SlateListResult> {
     };
   }
 
-  const slates: SlateOption[] = (Array.isArray(doc.slates) ? (doc.slates as Record<string, unknown>[]) : []).map((s) => ({
-    slateId: String(s.slate_id),
-    slateName: (s.slate_name as string | null) ?? null,
-    gameCount: (s.game_count as number | null) ?? null,
-    startTime: (s.start_time as string | null) ?? null,
-    gameIds: Array.isArray(s.game_ids) ? (s.game_ids as string[]) : [],
-    playerCount: (s.player_count as number | null) ?? null,
-  }));
-
-  return {
-    status: (doc.status as SlateListResult["status"]) ?? "unavailable",
-    reason: (doc.reason as string | null) ?? null,
-    providerName: (doc.provider_name as string | null) ?? null,
-    providerType: doc.provider_type === "mock" || doc.provider_type === "real" ? (doc.provider_type as "mock" | "real") : null,
-    isMock: Boolean(doc.is_mock),
-    isConnected: Boolean(doc.is_connected),
-    source: asProviderSource(doc.source),
-    slates,
-    slatesAvailable: typeof doc.slates_available === "number" ? (doc.slates_available as number) : slates.length,
-  };
+  return slateListResultFromProviderDoc(doc);
 }
 
 function matchReportPathFor(poolPath: string): string {
@@ -285,14 +324,30 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   }
 
   const providerBefore = await providerSlateFingerprint(date);
-  const fetchResult = await runPythonScript("scripts/fetch_dfs_slate.py", ["--date", date, "--slate-id", slateId]);
-  const providerAfter = await providerSlateFingerprint(date);
-  if (fetchResult.exitCode !== 0 || !fingerprintChanged(providerBefore, providerAfter) || !providerAfter.path) {
-    throw new Error(`Failed to fetch DFS slate ${slateId}: ${tail(fetchResult.stdout + fetchResult.stderr, 1000)}`);
+  // Reuse an already-fetched, fresh-enough provider-slate document for
+  // THIS exact slate (selected_slate_id match -- a document fetched for
+  // a different slate on the same date carries no player data for this
+  // one) instead of calling DraftKings live again. forceRefresh always
+  // bypasses this, same as it always bypassed the pool cache above.
+  const existingDoc = !forceRefresh ? await safeReadJson<Record<string, unknown>>(providerBefore.path) : null;
+  let providerAfter = providerBefore;
+  let providerDoc: Record<string, unknown> | null = null;
+
+  if (existingDoc && existingDoc.status === "ready" && existingDoc.selected_slate_id === slateId && providerSlateFreshEnough(existingDoc)) {
+    providerDoc = existingDoc;
+  } else {
+    const fetchResult = await runPythonScript("scripts/fetch_dfs_slate.py", ["--date", date, "--slate-id", slateId]);
+    providerAfter = await providerSlateFingerprint(date);
+    if (fetchResult.exitCode !== 0 || !fingerprintChanged(providerBefore, providerAfter) || !providerAfter.path) {
+      throw new Error(`Failed to fetch DFS slate ${slateId}: ${tail(fetchResult.stdout + fetchResult.stderr, 1000)}`);
+    }
+    providerDoc = await safeReadJson<Record<string, unknown>>(providerAfter.path);
   }
-  const providerDoc = await safeReadJson<Record<string, unknown>>(providerAfter.path);
   if (providerDoc?.status !== "ready") {
     throw new Error(`Provider slate ${slateId} is not ready (status: ${providerDoc?.status}). ${providerDoc?.reason ?? ""}`);
+  }
+  if (!providerAfter.path) {
+    throw new Error(`Provider slate ${slateId} artifact path is unexpectedly missing.`);
   }
 
   const poolBefore = await poolFingerprint(date);
