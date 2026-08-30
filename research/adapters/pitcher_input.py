@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from models.pitcher import Availability, PitcherInput
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 
 
 class ResearchPackageNotFoundError(FileNotFoundError):
@@ -31,8 +32,21 @@ class ResearchPackageNotFoundError(FileNotFoundError):
 
 
 def _load_json_list(path: Path) -> list:
+    """Mirrors historical_models/pitcher_v1/persistence.py::load_model()'s
+    object-storage fallback: research.storage.save_package() (called by
+    research.engine.build_research_package) writes exclusively through
+    resolve_artifact_storage() -- research_output/ is gitignored and
+    dockerignored, so a fresh container never has a local copy at all.
+    Reading only local disk here made every fresh-container research
+    package unreadable immediately after being written -- check object
+    storage on a local miss, exactly like model artifacts already do."""
     if not path.exists():
-        raise ResearchPackageNotFoundError(f"Research package file not found: {path}")
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            raise ResearchPackageNotFoundError(f"Research package file not found: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 

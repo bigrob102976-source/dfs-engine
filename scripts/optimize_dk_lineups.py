@@ -36,12 +36,33 @@ from optimizer.lineup_generator import generate_lineups
 from optimizer.models import OptimizerPlayer, OptimizerSettings
 from optimizer.persistence import build_lineup_set_document, save_lineup_set_csv, save_lineup_set_json
 from optimizer.validator import validate_lineup_set
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 from research.prediction_snapshot import timestamp_tag
 
 
-def _load_pool(pool_path: str):
-    with Path(pool_path).open("r", encoding="utf-8") as f:
+def _load_persisted_json(path: Path, not_found_message: str):
+    """Mirrors research/adapters/pitcher_input.py's _load_json_list
+    object-storage fallback -- both the DFS pool
+    (build_dfs_pool_from_provider.py's save_pool()) and the ownership
+    snapshot (project_dk_ownership.py's save_ownership_document()) are
+    persisted artifacts written exclusively through
+    research.storage.save_json() (object storage is the source of
+    truth), so a fresh container/process has no local copy until this
+    pulls one down."""
+    if not path.exists():
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            raise FileNotFoundError(not_found_message)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_pool(pool_path: str):
+    path = Path(pool_path)
+    return _load_persisted_json(path, f"DFS pool artifact not found locally ({path}) or in object storage.")
 
 
 def _load_projection_overrides(path: str):
@@ -198,8 +219,8 @@ def _validate_only_errors(coverage: dict, solve_errors: list) -> list:
 
 
 def _load_ownership(ownership_path: str):
-    with Path(ownership_path).open("r", encoding="utf-8") as f:
-        return json.load(f)
+    path = Path(ownership_path)
+    return _load_persisted_json(path, f"Ownership snapshot not found locally ({path}) or in object storage.")
 
 
 def _merge_ownership(players, ownership_doc: dict):

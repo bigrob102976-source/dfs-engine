@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from models.batter import BatterInput
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 
 
 class ResearchPackageNotFoundError(FileNotFoundError):
@@ -31,8 +32,17 @@ class ResearchPackageNotFoundError(FileNotFoundError):
 
 
 def _load_json_list(path: Path) -> list:
+    """Mirrors research/adapters/pitcher_input.py's identical fallback --
+    see that module's copy of this function for the full rationale
+    (research_output/ is gitignored/dockerignored; the writer already
+    uses object storage as source of truth, so the reader must too)."""
     if not path.exists():
-        raise ResearchPackageNotFoundError(f"Research package file not found: {path}")
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            raise ResearchPackageNotFoundError(f"Research package file not found: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 

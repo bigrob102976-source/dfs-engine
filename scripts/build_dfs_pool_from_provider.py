@@ -23,14 +23,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dfs.pool_builder import UnsafeSourceProvenanceError, build_pool, print_pool_report, save_pool
 from dfs.providers.adapter import provider_players_to_dk_rows
 from dfs.providers.source_realism import PROVIDER_KIND_CSV, PROVIDER_KIND_DRAFTKINGS_UNOFFICIAL
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 
 
 def _find_latest_provider_slate(date: str, dfs_input_root: str) -> Path:
+    """Mirrors research/adapters/pitcher_input.py's _load_json_list
+    fallback: fetch_dfs_slate.py writes this document exclusively through
+    research.storage.save_json() (object storage is the source of truth),
+    so "the latest one for this date" has to be discoverable there too --
+    a fresh container has no local dfs_input/ copy at all until this
+    script pulls one down."""
     folder = Path(dfs_input_root) / date
-    if not folder.exists():
-        return None
-    matches = sorted(folder.glob("provider_slate_*.json"))
-    return matches[-1] if matches else None
+    local_matches = sorted(folder.glob("provider_slate_*.json")) if folder.exists() else []
+    if local_matches:
+        return local_matches[-1]
+
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    remote_keys = storage.list_files(to_artifact_key(folder), prefix="provider_slate_", ext=".json")
+    return (ARTIFACT_ROOT / remote_keys[-1]) if remote_keys else None
+
+
+def _load_provider_slate(path: Path):
+    """Mirrors research/adapters/pitcher_input.py's _load_json_list
+    object-storage fallback -- see that module's copy for the full
+    rationale. Returns None (never raises) when the artifact truly
+    doesn't exist on either backend, so main() can print its own
+    actionable error."""
+    if not path.exists():
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def main() -> None:
@@ -49,13 +76,11 @@ def main() -> None:
     print("=" * 70)
 
     slate_path = Path(args.provider_slate) if args.provider_slate else _find_latest_provider_slate(args.date, args.dfs_input_root)
-    if slate_path is None or not slate_path.exists():
-        print(f"\nERROR: No provider slate artifact found for {args.date} under {args.dfs_input_root}/. "
-              f"Run scripts/fetch_dfs_slate.py --date {args.date} first.")
+    slate_doc = _load_provider_slate(slate_path) if slate_path is not None else None
+    if slate_doc is None:
+        print(f"\nERROR: No provider slate artifact found for {args.date} under {args.dfs_input_root}/ "
+              f"(checked local disk and object storage). Run scripts/fetch_dfs_slate.py --date {args.date} first.")
         sys.exit(1)
-
-    with slate_path.open("r", encoding="utf-8") as f:
-        slate_doc = json.load(f)
 
     print(f"\nProvider slate: {slate_path}")
     print(f"Provider: {slate_doc.get('provider_name')}")

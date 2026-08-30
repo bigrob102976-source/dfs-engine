@@ -25,13 +25,28 @@ from ownership.model import build_ownership_projections
 from ownership.models import OwnershipInputPlayer
 from ownership.persistence import build_ownership_document, save_ownership_document
 from ownership.validator import validate_ownership_projections
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 from research.prediction_snapshot import timestamp_tag
 
 TOP_N = 10
 
 
 def _load_pool(pool_path: str) -> dict:
-    with Path(pool_path).open("r", encoding="utf-8") as f:
+    """Mirrors research/adapters/pitcher_input.py's _load_json_list
+    object-storage fallback -- build_dfs_pool_from_provider.py's
+    save_pool() writes this document exclusively through
+    research.storage.save_json() (object storage is the source of
+    truth), so a fresh container/process has no local copy until this
+    pulls one down."""
+    path = Path(pool_path)
+    if not path.exists():
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            raise FileNotFoundError(f"DFS pool artifact not found locally ({path}) or in object storage.")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
