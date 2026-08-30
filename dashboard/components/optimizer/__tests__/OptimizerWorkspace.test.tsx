@@ -270,7 +270,7 @@ describe("OptimizerWorkspace", () => {
     expect(screen.queryByText("Leadoff Hitter")).not.toBeInTheDocument();
   });
 
-  it("shows the dropdown (without auto-selecting) when the provider exposes multiple slates", async () => {
+  it("shows the dropdown and auto-selects the largest (Main/Featured) slate when the provider exposes multiple slates", async () => {
     installFetchMock({
       "/api/optimizer/slates": () =>
         jsonResponse({
@@ -293,8 +293,10 @@ describe("OptimizerWorkspace", () => {
     await waitFor(() => expect(screen.getByText("Select a slate")).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByText(/Main -- 7:05 PM -- 9 games/)).toBeInTheDocument();
     expect(screen.getByText(/Turbo -- 8:10 PM -- 4 games/)).toBeInTheDocument();
-    // Nothing auto-selected -- no pool fetch should have happened yet.
-    expect(screen.queryByText("Leadoff Hitter")).not.toBeInTheDocument();
+    // The bigger slate (Main, 9 games) is auto-selected and its pool
+    // loads automatically -- a real user shouldn't have to manually pick
+    // among several real DraftKings slates just to see data.
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
   });
 
   it("shows validation errors from /api/optimizer/validate and disables Build", async () => {

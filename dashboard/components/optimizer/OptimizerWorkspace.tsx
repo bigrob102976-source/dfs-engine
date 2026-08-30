@@ -307,9 +307,17 @@ export function OptimizerWorkspace({
           // rather than silently clearing the selection.
           if (current && !list.some((s) => s.slateId === current)) {
             setSlateUnavailableMessage("Previously selected slate is no longer available for this date. Please select another live slate below.");
-            return null;
+            current = null;
           }
-          return current;
+          if (current) return current;
+          if (list.length === 0) return null;
+          // Nothing selected yet and DraftKings published more than one
+          // real Classic slate (Featured, Turbo, Afternoon, ...) -- auto-
+          // pick the Main/Featured one (always the largest by game count)
+          // instead of leaving the picker empty, so a first visit loads
+          // real data automatically rather than waiting on a manual pick.
+          const featured = list.reduce((best, s) => ((s.gameCount ?? 0) > (best.gameCount ?? 0) ? s : best), list[0]);
+          return featured.slateId;
         });
       })
       .catch(() => {
