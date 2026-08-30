@@ -32,8 +32,23 @@ def save_json(output_dir: Path, filename: str, payload: Any) -> Path:
 
 
 def load_json(output_dir: Path, filename: str) -> Optional[Any]:
+    """Mirrors load_model()'s object-storage fallback below: metadata.json/
+    feature_list.json must be resolvable from a fresh container the same
+    way model.joblib already is (object storage is the source of truth,
+    local disk is only a per-process cache) -- data/models/ is gitignored
+    and dockerignored, so a container with no prior local cache has
+    nothing here until this checks object storage on a miss, exactly like
+    load_model already does for the model file itself."""
+    output_dir = Path(output_dir)
     path = output_dir / filename
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not path.exists():
+        storage = resolve_artifact_storage(ARTIFACT_ROOT)
+        data = storage.read_bytes(to_artifact_key(path))
+        if data is None:
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def save_model(output_dir: Path, pipeline) -> Path:
