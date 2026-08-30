@@ -7,6 +7,7 @@ import { createEmailVerificationToken } from "@/lib/db/tokens";
 import { recordUsageEvent } from "@/lib/db/usageEvents";
 import { createUser, findUserByEmail } from "@/lib/db/users";
 import { getEmailAdapter } from "@/lib/email";
+import { getPublicOrigin } from "@/lib/publicOrigin";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
   });
 
   const { rawToken } = await createEmailVerificationToken(user.id);
-  const origin = new URL(request.url).origin;
+  const origin = getPublicOrigin(request);
   const verificationLink = `${origin}/verify-email?token=${rawToken}`;
   const { devLink } = await getEmailAdapter().sendVerificationEmail({ to: user.email, link: verificationLink });
 

@@ -4,6 +4,7 @@ import { isValidEmail, normalizeEmail } from "@/lib/auth/validators";
 import { createPasswordResetToken } from "@/lib/db/tokens";
 import { findUserByEmail } from "@/lib/db/users";
 import { getEmailAdapter } from "@/lib/email";
+import { getPublicOrigin } from "@/lib/publicOrigin";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
   }
 
   const { rawToken } = await createPasswordResetToken(user.id);
-  const origin = new URL(request.url).origin;
+  const origin = getPublicOrigin(request);
   const resetLink = `${origin}/reset-password?token=${rawToken}`;
   const { devLink } = await getEmailAdapter().sendPasswordResetEmail({ to: user.email, link: resetLink });
 
