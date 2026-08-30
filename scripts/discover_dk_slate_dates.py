@@ -11,13 +11,17 @@ makes internally, and buckets/ranks the resulting lightweight DkSlate
 list. No new DraftKings endpoints are touched beyond what M31.2 already
 uses; no extra network calls are added per candidate date.
 
-Only does real work when the DK unofficial provider is BOTH explicitly
-selected (DFS_SALARY_PROVIDER=draftkings_unofficial) AND enabled
-(DK_UNOFFICIAL_ENABLED=true) -- the same two-gate check the provider
-itself enforces (dfs/providers/draftkings_unofficial_provider.py). For
-any other provider configuration this prints status "not_applicable"
-immediately, with zero network calls: this script has no meaning for
-CSV/mock providers, which have no comparable "available dates" concept.
+Milestone M1: DraftKings Unofficial is the permanent DEFAULT provider,
+so this does real work whenever dfs/providers/config.py's own cascade
+would resolve to it -- mirrored here rather than imported to avoid a
+real network probe just to answer "is it active": no explicit
+DFS_SALARY_PROVIDER override naming a DIFFERENT provider, Mock Mode not
+explicitly enabled (it wins before DraftKings Unofficial is even
+attempted, same as the real cascade), and its own DK_UNOFFICIAL_ENABLED
+kill switch not set to an explicit "off" value. For any other provider
+configuration this prints status "not_applicable" immediately, with
+zero network calls: this script has no meaning for CSV/mock providers,
+which have no comparable "available dates" concept.
 
 Always prints exactly one line of JSON to stdout and exits 0, even on
 provider failure -- callers branch on the "status" field, matching
@@ -36,6 +40,7 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from config.runtime_settings import is_mock_mode_enabled
 from dfs.providers.draftkings_unofficial_provider import is_enabled as dk_unofficial_enabled
 from draftkings_unofficial import collector
 from draftkings_unofficial.models import DkSlate
@@ -50,8 +55,18 @@ _EXCLUDE_KEYWORDS = ("showdown", "captain", "single game", "tiers", "snake", "ar
 
 
 def _is_dk_unofficial_active() -> bool:
+    """Mirrors dfs/providers/config.py::get_configured_provider()'s own
+    cascade decision (Milestone M1) without making a network call:
+    DraftKings Unofficial is active unless an explicit
+    DFS_SALARY_PROVIDER override names a different provider, Mock Mode
+    is explicitly enabled (checked first, same as the real cascade), or
+    its own DK_UNOFFICIAL_ENABLED kill switch is off."""
     provider_name = (os.environ.get("DFS_SALARY_PROVIDER") or "").strip().lower()
-    return provider_name == "draftkings_unofficial" and dk_unofficial_enabled()
+    if provider_name and provider_name != "draftkings_unofficial":
+        return False
+    if is_mock_mode_enabled():
+        return False
+    return dk_unofficial_enabled()
 
 
 def _classic_candidate(slate: DkSlate, salary_cap_game_type_ids: set) -> bool:

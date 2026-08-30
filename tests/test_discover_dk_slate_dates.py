@@ -33,7 +33,24 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("DK_UNOFFICIAL_ENABLED", raising=False)
 
 
-def test_not_applicable_when_provider_not_selected(monkeypatch, capsys):
+def test_active_by_default_with_no_provider_override(monkeypatch, capsys):
+    """Milestone M1: DraftKings Unofficial is the permanent default --
+    with no DFS_SALARY_PROVIDER set at all (the normal production state)
+    and Mock Mode off, this script does real discovery work, not
+    "not_applicable"."""
+    universe = collector.SportUniverseResult(status=collector.STATUS_NO_ACTIVE_SLATE, sport_code="MLB")
+    calls = []
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: (calls.append(sport_code), universe)[1])
+    import sys
+    monkeypatch.setattr(sys, "argv", ["discover_dk_slate_dates.py", "--sport", "MLB"])
+    discover_script.main()
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "no_active_slate"
+    assert calls == ["MLB"]  # real discovery was actually attempted
+
+
+def test_not_applicable_when_a_different_provider_is_explicitly_selected(monkeypatch, capsys):
+    monkeypatch.setenv("DFS_SALARY_PROVIDER", "mock")
     calls = []
     monkeypatch.setattr(client, "get_contests", lambda sport_code: calls.append(sport_code))
     import sys
@@ -42,12 +59,25 @@ def test_not_applicable_when_provider_not_selected(monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out.strip())
     assert out["status"] == "not_applicable"
     assert out["dates"] == []
-    assert calls == []  # zero network calls when the provider isn't active
+    assert calls == []  # zero network calls when a different provider is active
 
 
-def test_not_applicable_when_selected_but_not_enabled(monkeypatch, capsys):
-    monkeypatch.setenv("DFS_SALARY_PROVIDER", "draftkings_unofficial")
-    # DK_UNOFFICIAL_ENABLED intentionally left unset -- the two-gate check.
+def test_not_applicable_when_mock_mode_is_explicitly_enabled(monkeypatch, capsys):
+    # Mirrors dfs/providers/config.py: Mock Mode wins before DraftKings
+    # Unofficial is even attempted.
+    monkeypatch.setattr(discover_script, "is_mock_mode_enabled", lambda: True)
+    calls = []
+    monkeypatch.setattr(client, "get_contests", lambda sport_code: calls.append(sport_code))
+    import sys
+    monkeypatch.setattr(sys, "argv", ["discover_dk_slate_dates.py"])
+    discover_script.main()
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "not_applicable"
+    assert calls == []
+
+
+def test_not_applicable_when_kill_switch_is_off(monkeypatch, capsys):
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "false")  # explicit operational kill switch
     calls = []
     monkeypatch.setattr(client, "get_contests", lambda sport_code: calls.append(sport_code))
     import sys

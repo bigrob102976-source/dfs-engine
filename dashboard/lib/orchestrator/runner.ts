@@ -303,7 +303,14 @@ async function buildRunSummary(
   };
 }
 
-const PROVIDER_SOURCE_VALUES = new Set<ProviderSource>(["explicit", "real_dk_csv", "csv_import_pool", "mock_explicit", "unconfigured"]);
+const PROVIDER_SOURCE_VALUES = new Set<ProviderSource>([
+  "explicit",
+  "draftkings_unofficial_live",
+  "real_dk_csv",
+  "csv_import_pool",
+  "mock_explicit",
+  "unconfigured",
+]);
 function isProviderSource(value: unknown): value is ProviderSource {
   return typeof value === "string" && PROVIDER_SOURCE_VALUES.has(value as ProviderSource);
 }

@@ -1,28 +1,34 @@
-"""Milestone 31.2 -- the DEVELOPMENT-ONLY DFSSalaryProvider backed by
+"""Milestone M1 -- the PERMANENT DEFAULT DFSSalaryProvider backed by
 draftkings_unofficial/ (DraftKings' unofficial, undocumented public
 JSON endpoints).
 
 IMPORTANT -- this intentionally departs from dfs/providers/base.py's
-"never depend on undocumented/private DraftKings endpoints" rule,
-which was written for the PRODUCTION provider cascade
-(dfs/providers/config.py::get_configured_provider, which never
-activates this provider automatically). Milestone 31.2 explicitly asks
-for a separate, clearly-labeled, OPT-IN-ONLY development data source to
-unblock building Big Money DFS before a licensed provider is in place.
-Two independent gates keep it from ever activating by accident:
+general "never depend on undocumented/private DraftKings endpoints"
+rule. Originally (Milestone 31.2) this was a separate, clearly-labeled,
+OPT-IN-ONLY development data source; Milestone 32.2B then declared it
+the sole DK slate source going forward (see
+dfs/providers/source_provenance.py's DRAFTKINGS_UNOFFICIAL_LIVE), and
+Milestone M1 finished that transition in the actual provider-selection
+code:
 
-  1. It is NEVER registered in dfs/providers/config.py's automatic
-     priority cascade -- reachable ONLY via the existing explicit
-     DFS_SALARY_PROVIDER=draftkings_unofficial override.
-  2. Even when explicitly named, get_slate() refuses to run at all
-     unless DK_UNOFFICIAL_ENABLED=true is also set -- see is_enabled().
+  1. It IS registered in dfs/providers/config.py's automatic priority
+     cascade -- get_configured_provider() tries it by default, with no
+     DFS_SALARY_PROVIDER override required for normal production use.
+     It remains additionally reachable via an explicit
+     DFS_SALARY_PROVIDER=draftkings_unofficial override too, for parity
+     with every other provider.
+  2. DK_UNOFFICIAL_ENABLED is no longer an opt-IN gate -- it is now an
+     explicit operational kill switch (e.g. temporarily disabling live
+     DraftKings-endpoint calls for legal/ToS/rate-limit reasons). Unset,
+     or set to anything other than an explicit "off" value, the
+     provider is enabled. See is_enabled().
 
-Its data is always classified UNOFFICIAL_DEVELOPMENT_SOURCE (see
-dfs/providers/source_provenance.py), which is NOT in
-TRUSTED_FOR_PRODUCTION -- dfs/pool_builder.py::build_pool() will refuse
-to build a production pool from it without dev_mode, exactly like
-DEVELOPMENT_MOCK. This provider is meant to be deleted outright once a
-licensed provider replaces it -- see draftkings_unofficial/README.md.
+Its data is classified UNOFFICIAL_DEVELOPMENT_SOURCE by default, upgraded
+to DRAFTKINGS_UNOFFICIAL_LIVE once structural validation passes (see
+dfs/providers/source_provenance.py) -- DRAFTKINGS_UNOFFICIAL_LIVE IS in
+TRUSTED_FOR_PRODUCTION, so dfs/pool_builder.py::build_pool() will build a
+production pool from it without requiring dev_mode, exactly as a licensed
+provider would be treated.
 """
 
 import os
@@ -39,7 +45,14 @@ from draftkings_unofficial.structural_validation import validate_classic_draftgr
 
 
 def is_enabled() -> bool:
-    return os.environ.get("DK_UNOFFICIAL_ENABLED", "").strip().lower() in ("1", "true", "yes")
+    """DraftKings Unofficial is enabled by default (Milestone M1 -- it
+    is the permanent default DraftKings slate source; no env var is
+    required for normal production use). DK_UNOFFICIAL_ENABLED remains
+    available purely as an explicit operational kill switch: set it to
+    "false", "0", or "no" to disable it. Leaving it unset, or setting it
+    to any other value, keeps the provider enabled."""
+    value = os.environ.get("DK_UNOFFICIAL_ENABLED", "").strip().lower()
+    return value not in ("false", "0", "no")
 
 
 class DraftKingsUnofficialProvider(DFSSalaryProvider):
@@ -51,8 +64,9 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
     ) -> ProviderSlateResult:
         if not is_enabled():
             raise ProviderUnavailableError(
-                "DraftKingsUnofficialProvider is disabled -- set DK_UNOFFICIAL_ENABLED=true to use this "
-                "development-only data source (see draftkings_unofficial/README.md)."
+                "DraftKingsUnofficialProvider is disabled via DK_UNOFFICIAL_ENABLED (operational kill "
+                "switch) -- unset it, or set it to a value other than false/0/no, to re-enable the "
+                "permanent default DraftKings slate source."
             )
 
         universe = collector.collect_sport_universe(sport.upper())

@@ -221,7 +221,30 @@ describe("OptimizerWorkspace", () => {
         }),
     });
     render(<OptimizerWorkspace />);
-    await waitFor(() => expect(screen.getByText(/unrecognized value/i)).toBeInTheDocument(), { timeout: 5000 });
+    // Milestone M1: "not_connected" has no static override anymore -- the
+    // real reason from Python (dfs/providers/config.py) is shown directly.
+    await waitFor(() => expect(screen.getByText(/not a recognized provider/i)).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Build Lineups")).toBeDisabled();
+  });
+
+  it("shows the real DraftKings Unofficial failure reason (never a stale generic message) when the permanent default provider is unavailable", async () => {
+    installFetchMock({
+      "/api/optimizer/slates": () =>
+        jsonResponse({
+          date: "2026-08-12",
+          status: "not_connected",
+          reason: "No live DraftKings salary provider configured. DraftKings Unofficial: DraftKings unofficial: NO ACTIVE SLATE for sport='MLB'.",
+          providerName: null,
+          providerType: null,
+          isMock: false,
+          isConnected: false,
+          source: "unconfigured",
+          slates: [],
+          slatesAvailable: 0,
+        }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText(/NO ACTIVE SLATE/i)).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByText("Build Lineups")).toBeDisabled();
   });
 

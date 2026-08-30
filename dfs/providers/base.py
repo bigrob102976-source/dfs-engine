@@ -1,9 +1,8 @@
 """The one interface every DFS salary provider must implement.
 
 IMPORTANT DATA-SOURCE RULE (Milestone 13): a provider implementation
-must NEVER scrape DraftKings HTML, automate a DraftKings login, or
-depend on undocumented/private DraftKings endpoints. A provider is
-either:
+must NEVER scrape DraftKings HTML or automate a DraftKings login. A
+provider is one of:
 
   1. A documented, credentialed third-party DFS-data API (none is
      configured in this environment -- see dfs/providers/config.py's
@@ -11,7 +10,13 @@ either:
   2. The clearly-labeled MockProvider (dfs/providers/mock_provider.py),
      used only to exercise the pipeline end-to-end when no real
      provider is configured. Its data is never presented as real
-     DraftKings salaries -- see that module's docstring.
+     DraftKings salaries -- see that module's docstring, or
+  3. DraftKingsUnofficialProvider (dfs/providers/
+     draftkings_unofficial_provider.py) -- Milestone M1's sole
+     deliberate exception to "never depend on undocumented/private
+     DraftKings endpoints": it IS the permanent default DraftKings
+     slate source (see that module's own docstring for the full
+     rationale and safeguards).
 
 All provider requests execute server-side only (invoked from a Python
 script run by the Node/Next.js orchestrator as a subprocess) -- no

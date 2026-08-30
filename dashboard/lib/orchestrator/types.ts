@@ -7,12 +7,23 @@
 
 export type PipelineStepId = "research" | "pitchers" | "batters" | "dfsSalaries" | "playerPool" | "ownership" | "optimizer";
 
-/** Milestone 19: how the DFS salary provider for a run was resolved --
+/** Milestone M1: how the DFS salary provider for a run was resolved --
  * mirrors dfs/providers/config.py::get_configured_provider()'s `source`
  * return value exactly (see that module's docstring for the full
- * priority cascade). "explicit" | "automatic_fallback" (pre-M19) no
- * longer exists as an automatic outcome -- mock is never used silently. */
-export type ProviderSource = "explicit" | "real_dk_csv" | "csv_import_pool" | "mock_explicit" | "unconfigured";
+ * cascade). "draftkings_unofficial_live" is the normal/default outcome
+ * now (the permanent DraftKings source resolved automatically, with no
+ * override needed); "real_dk_csv"/"csv_import_pool" (pre-M1 automatic
+ * outcomes) are kept only because historical run records may still
+ * contain them -- CSV is no longer reachable automatically, only via an
+ * explicit DFS_SALARY_PROVIDER override (source "explicit"). Mock is
+ * never used silently either way. */
+export type ProviderSource =
+  | "explicit"
+  | "draftkings_unofficial_live"
+  | "real_dk_csv"
+  | "csv_import_pool"
+  | "mock_explicit"
+  | "unconfigured";
 
 export type StepStatus = "waiting" | "running" | "ready" | "failed" | "needs_input" | "skipped";
 

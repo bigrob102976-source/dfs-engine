@@ -1,9 +1,10 @@
-"""Tests for the DK_UNOFFICIAL_ENABLED-gated DraftKingsUnofficialProvider
--- the safety-critical piece: this provider must NEVER make a network
-call (not even to check if it's enabled) when the flag is off, must
-never be reachable via the automatic production cascade, and must be
-reachable via the explicit DFS_SALARY_PROVIDER override only when
-BOTH gates are satisfied."""
+"""Tests for DraftKingsUnofficialProvider -- Milestone M1: this is the
+permanent DEFAULT DraftKings slate source, reachable automatically via
+the production cascade with no override required. DK_UNOFFICIAL_ENABLED
+is now an explicit operational kill switch (not an opt-in gate): the
+safety-critical piece is that setting it to an explicit "off" value
+disables the provider without making any network call, while leaving it
+unset (the normal state) does not disable anything."""
 
 import pytest
 
@@ -40,12 +41,15 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
 
 
-def test_is_enabled_false_by_default():
+def test_is_enabled_true_by_default():
     from dfs.providers.draftkings_unofficial_provider import is_enabled
-    assert is_enabled() is False
+    assert is_enabled() is True
 
 
 def test_is_enabled_true_variants(monkeypatch):
+    # Kept enabled by any value that isn't an explicit "off" -- these are
+    # all no-ops relative to the (now-enabled) default, but must not
+    # accidentally disable the provider.
     from dfs.providers.draftkings_unofficial_provider import is_enabled
     for value in ("true", "True", "TRUE", "1", "yes"):
         monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", value)
@@ -53,10 +57,16 @@ def test_is_enabled_true_variants(monkeypatch):
 
 
 def test_is_enabled_false_variants(monkeypatch):
+    # The explicit operational kill switch -- only these values disable it.
     from dfs.providers.draftkings_unofficial_provider import is_enabled
-    for value in ("false", "0", "no", ""):
+    for value in ("false", "False", "FALSE", "0", "no", "No"):
         monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", value)
         assert is_enabled() is False
+
+
+def test_is_enabled_true_when_unset_or_empty():
+    from dfs.providers.draftkings_unofficial_provider import is_enabled
+    assert is_enabled() is True  # DK_UNOFFICIAL_ENABLED unset (_clean_env fixture)
 
 
 def test_disabled_provider_raises_without_any_network_call(monkeypatch):
@@ -66,20 +76,29 @@ def test_disabled_provider_raises_without_any_network_call(monkeypatch):
         raise AssertionError("collector.collect_sport_universe must not be called when disabled")
     monkeypatch.setattr(collector, "collect_sport_universe", fail_if_called)
 
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "false")  # explicit kill switch
     provider = DraftKingsUnofficialProvider()
     with pytest.raises(ProviderUnavailableError, match="disabled"):
         provider.get_slate("2026-08-20", sport="MLB")
 
 
-def test_enabled_provider_not_in_automatic_cascade(monkeypatch):
-    # The automatic (no DFS_SALARY_PROVIDER set) cascade must never pick
-    # this provider even when the flag is on -- confirmed by asserting
-    # get_configured_provider() never returns source="draftkings_unofficial".
-    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+def test_enabled_provider_is_the_automatic_cascade_default(monkeypatch):
+    # Milestone M1: with no DFS_SALARY_PROVIDER override and Mock Mode
+    # off, the automatic cascade must resolve to DraftKings Unofficial
+    # by default -- no env var required.
+    import dfs.providers.config as config_module
     from dfs.providers.config import get_configured_provider
 
+    monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: False)
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
+
     provider, reason, source = get_configured_provider("2026-08-20")
-    assert source != "draftkings_unofficial"
+    assert provider is not None
+    assert provider.name == "draftkings_unofficial"
+    assert source == "draftkings_unofficial_live"
+    assert reason is None
 
 
 def test_registered_for_explicit_override(monkeypatch):
@@ -87,15 +106,36 @@ def test_registered_for_explicit_override(monkeypatch):
     assert "draftkings_unofficial" in PROVIDER_FACTORIES
 
 
-def test_explicit_override_without_flag_still_refuses(monkeypatch):
+def test_explicit_override_still_respects_kill_switch(monkeypatch):
+    # Even via the explicit DFS_SALARY_PROVIDER override, the operational
+    # kill switch must still be honored -- it's a safety valve, not
+    # bypassable by naming the provider directly.
     monkeypatch.setenv("DFS_SALARY_PROVIDER", "draftkings_unofficial")
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "false")
     from dfs.providers.config import get_configured_provider
 
     provider, reason, source = get_configured_provider("2026-08-20")
     assert source == "explicit"
     assert provider is not None
-    with pytest.raises(ProviderUnavailableError):
+    with pytest.raises(ProviderUnavailableError, match="disabled"):
         provider.get_slate("2026-08-20", sport="MLB")
+
+
+def test_explicit_override_works_without_any_flag(monkeypatch):
+    # Milestone M1: explicitly naming the provider must work out of the
+    # box, with no DK_UNOFFICIAL_ENABLED needed (default is enabled).
+    monkeypatch.setenv("DFS_SALARY_PROVIDER", "draftkings_unofficial")
+    from dfs.providers.config import get_configured_provider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
+
+    provider, reason, source = get_configured_provider("2026-08-20")
+    assert source == "explicit"
+    assert provider is not None
+    result = provider.get_slate("2026-08-20", sport="MLB")
+    assert len(result.slates) == 1
 
 
 def _slate(dg_id=10, game_type_id=2):
@@ -222,23 +262,53 @@ def test_universe_error_status_raises_provider_unavailable(monkeypatch):
         provider.get_slate("2026-08-20", sport="MLB")
 
 
-def test_existing_providers_unaffected_by_this_providers_existence(monkeypatch):
-    # Fallback behavior: registering draftkings_unofficial must not
-    # change what the automatic cascade does when nothing is configured.
+def test_config_surfaces_real_failure_without_csv_or_mock_fallback(monkeypatch):
+    """Milestone M1: when the REAL DraftKingsUnofficialProvider fails
+    (e.g. contest discovery is down), the automatic cascade must surface
+    that failure directly. CSV providers must never even be attempted
+    (they're no longer part of the automatic path at all), and mock is
+    never used as a fallback triggered by this failure."""
     from dfs.providers.config import get_configured_provider, NO_PROVIDER_CONFIGURED_MESSAGE
     import dfs.providers.config as config_module
 
     monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: False)
 
-    class AlwaysUnavailable:
-        def get_slate(self, *a, **k):
-            from dfs.providers.base import ProviderUnavailableError
-            raise ProviderUnavailableError("no csv")
+    csv_calls = []
 
-    monkeypatch.setattr(config_module, "DraftKingsCsvProvider", lambda: AlwaysUnavailable())
-    monkeypatch.setattr(config_module, "CsvImportPoolProvider", lambda: AlwaysUnavailable())
+    class _NeverCalledCsv:
+        def get_slate(self, *a, **k):
+            csv_calls.append(1)
+            raise ProviderUnavailableError("should never be reached")
+
+    monkeypatch.setattr(config_module, "DraftKingsCsvProvider", _NeverCalledCsv)
+    monkeypatch.setattr(config_module, "CsvImportPoolProvider", _NeverCalledCsv)
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_UNAVAILABLE, sport_code="MLB", error="down")
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
 
     provider, reason, source = get_configured_provider("2026-08-20")
     assert provider is None
-    assert reason == NO_PROVIDER_CONFIGURED_MESSAGE
+    assert NO_PROVIDER_CONFIGURED_MESSAGE in reason
+    assert "down" in reason
     assert source == "unconfigured"
+    assert csv_calls == []  # CSV providers must never even be attempted
+
+
+def test_config_mock_mode_wins_over_draftkings_unofficial_without_touching_it(monkeypatch):
+    """Mock Mode is checked before DraftKings Unofficial is even
+    attempted -- its outcome must never depend on whether DraftKings
+    Unofficial would have succeeded (that would make mock a fallback
+    triggered by a live-provider failure, which Milestone M1 forbids)."""
+    from dfs.providers.config import get_configured_provider
+    import dfs.providers.config as config_module
+
+    monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: True)
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("DraftKings Unofficial must not be attempted when Mock Mode is on")
+    monkeypatch.setattr(collector, "collect_sport_universe", fail_if_called)
+
+    provider, reason, source = get_configured_provider("2026-08-20")
+    assert provider is not None
+    assert provider.name == "mock_dev_provider"
+    assert source == "mock_explicit"

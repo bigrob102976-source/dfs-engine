@@ -90,13 +90,17 @@ def test_mock_provider_implements_interface():
 
 
 # ----------------------------------------------------------------------------
-# Config -- Milestone 19's automatic, date-aware priority cascade:
-# real uploaded DraftKings CSV -> CSV-imported projection pool -> mock
-# (only if explicitly enabled) -> unconfigured. Fake provider classes are
-# monkeypatched onto the config module's own imported names so these
-# tests exercise ordering/gating logic only, never real file I/O -- see
-# tests/test_draftkings_csv_provider.py and
-# tests/test_csv_import_pool_provider.py for each real provider's own
+# Config -- Milestone M1's automatic, date-aware cascade: DraftKings
+# Unofficial (the permanent default) -> mock (only if explicitly enabled,
+# and checked BEFORE DraftKings Unofficial is even attempted -- never a
+# fallback triggered by its failure) -> unconfigured. CSV providers are no
+# longer part of the automatic cascade at all; they remain reachable only
+# via an explicit DFS_SALARY_PROVIDER override (see the explicit-override
+# tests further down). Fake provider classes are monkeypatched onto the
+# config module's own imported names so these tests exercise ordering/
+# gating logic only, never real network/file I/O -- see
+# tests/test_dk_unofficial_provider.py, tests/test_draftkings_csv_provider.py,
+# and tests/test_csv_import_pool_provider.py for each real provider's own
 # behavior.
 # ----------------------------------------------------------------------------
 
@@ -106,7 +110,7 @@ def _fake_provider_class(provider_name, available):
         name = provider_name
         requires_api_key = False
 
-        def get_slate(self, date, sport="MLB", site="draftkings"):
+        def get_slate(self, date, sport="MLB", site="draftkings", research_games=None):
             if not available:
                 raise ProviderUnavailableError(f"{provider_name} has nothing for {date}.")
             return ProviderSlateResult(slates=[], players_by_slate={}, source=provider_name, retrieved_at="now")
@@ -114,55 +118,90 @@ def _fake_provider_class(provider_name, available):
     return _Fake
 
 
-def _patch_cascade(monkeypatch, dk_csv_available, csv_pool_available, mock_mode_enabled):
-    monkeypatch.setattr(config_module, "DraftKingsCsvProvider", _fake_provider_class("draftkings_csv", dk_csv_available))
-    monkeypatch.setattr(config_module, "CsvImportPoolProvider", _fake_provider_class("csv_import_pool", csv_pool_available))
+def _patch_cascade(monkeypatch, dk_unofficial_available, mock_mode_enabled):
+    monkeypatch.setattr(
+        config_module, "DraftKingsUnofficialProvider", _fake_provider_class("draftkings_unofficial", dk_unofficial_available)
+    )
     monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: mock_mode_enabled)
     monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
 
 
-def test_config_prefers_real_dk_csv_when_available(monkeypatch):
-    _patch_cascade(monkeypatch, dk_csv_available=True, csv_pool_available=True, mock_mode_enabled=True)
+def test_config_defaults_to_draftkings_unofficial_when_available(monkeypatch):
+    """Milestone M1: the permanent default provider resolves automatically
+    -- no DFS_SALARY_PROVIDER override, no other opt-in required."""
+    _patch_cascade(monkeypatch, dk_unofficial_available=True, mock_mode_enabled=False)
     provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
-    assert provider.name == "draftkings_csv"
+    assert provider.name == "draftkings_unofficial"
     assert reason is None
-    assert source == "real_dk_csv"
-
-
-def test_config_falls_back_to_csv_import_pool_when_no_real_dk_csv(monkeypatch):
-    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=True, mock_mode_enabled=True)
-    provider, reason, source = get_configured_provider(TEST_DATE)
-    assert provider is not None
-    assert provider.name == "csv_import_pool"
-    assert source == "csv_import_pool"
+    assert source == "draftkings_unofficial_live"
 
 
 def test_config_falls_back_to_mock_only_when_explicitly_enabled(monkeypatch):
-    """Milestone 19: mock is never used silently -- it requires Mock
-    Mode to be explicitly turned on (config/runtime_settings.py)."""
-    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=True)
+    """Milestone 19 (preserved under M1): mock is never used silently --
+    it requires Mock Mode to be explicitly turned on
+    (config/runtime_settings.py). Checked before DraftKings Unofficial is
+    even attempted, so this is independent of whether DraftKings
+    Unofficial would have succeeded -- not a fallback on its failure."""
+    _patch_cascade(monkeypatch, dk_unofficial_available=True, mock_mode_enabled=True)
     provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is not None
     assert provider.name == "mock_dev_provider"
     assert source == "mock_explicit"
 
 
-def test_config_reports_unconfigured_when_nothing_is_available_and_mock_mode_is_off(monkeypatch):
-    """The headline Milestone 19 requirement: no real provider and Mock
-    Mode off must NEVER silently fall back to mock data."""
-    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=False)
+def test_config_reports_unconfigured_when_draftkings_unofficial_fails_and_mock_mode_is_off(monkeypatch):
+    """Milestone M1's headline requirement: when the permanent default
+    provider fails and Mock Mode is off, surface that failure plainly --
+    NEVER silently fall back to CSV or mock data."""
+    _patch_cascade(monkeypatch, dk_unofficial_available=False, mock_mode_enabled=False)
     provider, reason, source = get_configured_provider(TEST_DATE)
     assert provider is None
-    assert reason == NO_PROVIDER_CONFIGURED_MESSAGE
-    assert reason == "No live DraftKings salary provider configured."
+    assert reason is not None
+    assert NO_PROVIDER_CONFIGURED_MESSAGE in reason
+    assert "draftkings_unofficial has nothing for" in reason
     assert source == "unconfigured"
 
 
-def test_config_never_raises_when_nothing_is_available(monkeypatch):
-    _patch_cascade(monkeypatch, dk_csv_available=False, csv_pool_available=False, mock_mode_enabled=False)
+def test_config_never_raises_when_draftkings_unofficial_fails(monkeypatch):
+    _patch_cascade(monkeypatch, dk_unofficial_available=False, mock_mode_enabled=False)
     # Must not raise -- "unconfigured" is a normal, reportable state.
     get_configured_provider(TEST_DATE)
+
+
+def test_config_does_not_use_csv_providers_automatically(monkeypatch):
+    """Milestone M1: CSV is no longer part of the automatic cascade at
+    all -- even if a real DraftKings CSV or CSV-import-pool snapshot is
+    sitting there ready to use, the automatic path must never pick it up
+    silently instead of (or as a fallback from) DraftKings Unofficial."""
+    dk_csv_calls = []
+    csv_pool_calls = []
+
+    def _tracking_fake(name, calls):
+        class _Fake(DFSSalaryProvider):
+            provider_name = name
+            requires_api_key = False
+
+            def get_slate(self, date, sport="MLB", site="draftkings", research_games=None):
+                calls.append(date)
+                return ProviderSlateResult(slates=[], players_by_slate={}, source=name, retrieved_at="now")
+
+        _Fake.name = name
+        return _Fake
+
+    monkeypatch.setattr(config_module, "DraftKingsCsvProvider", _tracking_fake("draftkings_csv", dk_csv_calls))
+    monkeypatch.setattr(config_module, "CsvImportPoolProvider", _tracking_fake("csv_import_pool", csv_pool_calls))
+    monkeypatch.setattr(
+        config_module, "DraftKingsUnofficialProvider", _fake_provider_class("draftkings_unofficial", available=True)
+    )
+    monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: False)
+    monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
+
+    provider, reason, source = get_configured_provider(TEST_DATE)
+    assert provider.name == "draftkings_unofficial"
+    assert source == "draftkings_unofficial_live"
+    assert dk_csv_calls == []
+    assert csv_pool_calls == []
 
 
 def test_config_resolves_explicit_mock_provider(monkeypatch):

@@ -10,8 +10,10 @@ readable summary the dashboard's API route parses.
 Every live call this script makes is explicit and admin-triggered
 (the dashboard only calls this when an admin opens/refreshes the
 explorer page) -- never on a schedule, never for every member page
-load. Gated by DK_UNOFFICIAL_ENABLED like the provider itself, so the
-explorer can't be used to route around the same opt-in gate."""
+load. Gated by the same is_enabled() kill switch as the provider
+itself (Milestone M1: enabled by default; DK_UNOFFICIAL_ENABLED=false/
+0/no disables both), so the explorer can't be used to route around an
+operator's decision to disable live DraftKings-endpoint calls."""
 
 import argparse
 import json
@@ -32,7 +34,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if not is_enabled():
-        print(json.dumps({"status": "not_enabled", "detail": "Set DK_UNOFFICIAL_ENABLED=true to use the DraftKings Development Data Explorer."}))
+        print(json.dumps({
+            "status": "not_enabled",
+            "detail": "DraftKings Unofficial is disabled via DK_UNOFFICIAL_ENABLED (operational kill switch).",
+        }))
         return
 
     sports_result = collector.collect_sports()

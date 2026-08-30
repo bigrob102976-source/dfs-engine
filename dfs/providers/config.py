@@ -1,29 +1,36 @@
 """Resolves which DFS salary provider to use for a given slate date.
 
-Milestone 19: normal operation must use REAL DraftKings data whenever
-it's available, and must never silently substitute mock data. Since
-dfs/providers/base.py forbids a live/scraped DraftKings connection
-(see that module's docstring), resolution is an automatic, date-aware
-priority cascade rather than a single environment-variable selection:
+Milestone M1: DraftKings Unofficial (draftkings_unofficial/,
+dfs/providers/draftkings_unofficial_provider.py) is the PERMANENT
+default DraftKings slate source for automatic production use -- no
+manual CSV upload and no provider-selection override are required for
+normal operation. Resolution is a short, date-aware cascade:
 
-  1. DraftKingsCsvProvider -- at least one real DraftKings salary CSV
-     has been uploaded for `date` (dfs/providers/draftkings_csv_storage.py,
-     via the dashboard's "Upload DraftKings CSV" flow).
-  2. CsvImportPoolProvider -- a CSV-imported projection snapshot
-     (Milestone 18, external_projections/csv_import/) with real salaries
-     exists for `date`, even though it isn't DraftKings' own file.
-  3. MockProvider -- ONLY if Mock Mode has been explicitly enabled
-     (config/runtime_settings.py; OFF by default). Never used silently.
+  1. DFS_SALARY_PROVIDER, if set -- an explicit power-user/CI override
+     that always wins, e.g. forcing "mock", "draftkings_csv", or
+     "csv_import_pool" for local development, historical CSV import, or
+     testing. Not required for normal production use.
+  2. Mock Mode, if explicitly enabled (config/runtime_settings.py; OFF
+     by default, flipped only via the dashboard). This is checked BEFORE
+     DraftKings Unofficial is even attempted, and its outcome never
+     depends on whether DraftKings Unofficial would have succeeded --
+     it is a standing, human-flipped dev/test override, structurally
+     identical in spirit to DFS_SALARY_PROVIDER above, never an
+     automatic fallback triggered by a live-provider failure.
+  3. DraftKingsUnofficialProvider -- the real, live default. If this
+     fails for any reason (its own DK_UNOFFICIAL_ENABLED kill switch,
+     no active slate, endpoint failure, structural validation failure,
+     etc.), that failure is surfaced directly as "unconfigured" with the
+     real reason. There is NO automatic fallback to a DraftKings CSV or
+     to Mock Mode -- CSV import remains available ONLY via the explicit
+     DFS_SALARY_PROVIDER override above, for legitimate manual/
+     historical/import/test use, never as a silent substitute for a
+     live-provider failure.
 
-If none of the three apply, returns
+If none of the above apply, returns
 (None, "No live DraftKings salary provider configured.", "unconfigured")
--- callers show this message verbatim and offer "Import CSV" /
-"Enable Mock Mode", never a silent mock substitution.
-
-DFS_SALARY_PROVIDER remains available as an explicit power-user/CI
-override (e.g. forcing "mock" without touching the dashboard's Mock
-Mode toggle, or forcing one specific provider by name) -- when set, it
-skips the cascade entirely:
+-- callers show this message (or DraftKings Unofficial's own real
+failure reason) verbatim, never a silent CSV or mock substitution.
 
     DFS_SALARY_PROVIDER=<provider name>     e.g. "mock", "draftkings_csv"
     DFS_PROVIDER_API_KEY=<key>              only required by providers that need one
@@ -33,7 +40,7 @@ import os
 from typing import Callable, Dict, Optional, Tuple
 
 from config.runtime_settings import is_mock_mode_enabled
-from dfs.providers.base import DFSSalaryProvider, ProviderUnavailableError
+from dfs.providers.base import DFSSalaryProvider, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.csv_import_pool_provider import CsvImportPoolProvider
 from dfs.providers.draftkings_csv_provider import DraftKingsCsvProvider
 from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
@@ -43,12 +50,10 @@ PROVIDER_FACTORIES: Dict[str, Callable[[], DFSSalaryProvider]] = {
     "mock": MockProvider,
     "draftkings_csv": DraftKingsCsvProvider,
     "csv_import_pool": CsvImportPoolProvider,
-    # Milestone 31.2: registered ONLY for the explicit
-    # DFS_SALARY_PROVIDER=draftkings_unofficial override below --
-    # deliberately NEVER added to the automatic cascade in
-    # get_configured_provider() beneath. It also refuses to run at all
-    # unless DK_UNOFFICIAL_ENABLED=true (see that provider's own
-    # is_enabled() check) -- two independent, explicit opt-ins.
+    # Milestone M1: this is the permanent DEFAULT provider (see the
+    # automatic cascade below) -- also registered here so it remains
+    # explicitly selectable via DFS_SALARY_PROVIDER, for parity with
+    # every other provider and for CI/testing convenience.
     "draftkings_unofficial": DraftKingsUnofficialProvider,
 }
 
@@ -61,13 +66,14 @@ def get_configured_provider(date: str) -> Tuple[Optional[DFSSalaryProvider], Opt
     `source` is one of:
       - "explicit": DFS_SALARY_PROVIDER named the result (successfully
         or not) -- always wins over the automatic cascade below.
-      - "real_dk_csv": a real, user-uploaded DraftKings CSV was found
-        for `date`.
-      - "csv_import_pool": no real DK CSV, but a usable CSV-imported
-        projection snapshot was found for `date`.
-      - "mock_explicit": neither real source was available AND Mock
-        Mode is explicitly enabled.
-      - "unconfigured": nothing is available -- `provider` is None.
+      - "mock_explicit": no explicit override, but Mock Mode is
+        explicitly enabled -- checked before DraftKings Unofficial is
+        even attempted (see module docstring for why).
+      - "draftkings_unofficial_live": the permanent default provider
+        successfully resolved a real slate for `date`.
+      - "unconfigured": DraftKings Unofficial failed, was disabled, or
+        had nothing for `date`, and Mock Mode is off -- `provider` is
+        None and `reason` carries the real failure detail.
     """
     name = (os.environ.get("DFS_SALARY_PROVIDER") or "").strip().lower()
     if name:
@@ -79,21 +85,19 @@ def get_configured_provider(date: str) -> Tuple[Optional[DFSSalaryProvider], Opt
             return None, f"Provider {name!r} requires DFS_PROVIDER_API_KEY, which is not set.", "explicit"
         return provider, None, "explicit"
 
-    dk_csv = DraftKingsCsvProvider()
-    try:
-        dk_csv.get_slate(date)
-        return dk_csv, None, "real_dk_csv"
-    except ProviderUnavailableError:
-        pass
-
-    csv_pool = CsvImportPoolProvider()
-    try:
-        csv_pool.get_slate(date)
-        return csv_pool, None, "csv_import_pool"
-    except ProviderUnavailableError:
-        pass
-
     if is_mock_mode_enabled():
         return MockProvider(), None, "mock_explicit"
 
-    return None, NO_PROVIDER_CONFIGURED_MESSAGE, "unconfigured"
+    dk_unofficial = DraftKingsUnofficialProvider()
+    try:
+        # Milestone M1: this is a real live-endpoint call, not a cheap
+        # local file check like the CSV providers this replaced -- but
+        # draftkings_unofficial/cache.py's in-process TTL cache (30-3600s
+        # per category) makes it safe: this probe and the caller's own
+        # subsequent get_slate() call for the same date/sport/site land
+        # within the same process and well inside those TTLs, so this
+        # never doubles real network traffic to DraftKings.
+        dk_unofficial.get_slate(date)
+        return dk_unofficial, None, "draftkings_unofficial_live"
+    except (ProviderUnavailableError, ProviderNoSlateError) as exc:
+        return None, f"{NO_PROVIDER_CONFIGURED_MESSAGE} DraftKings Unofficial: {exc}", "unconfigured"
