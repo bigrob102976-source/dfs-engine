@@ -52,3 +52,14 @@ pyarrow==25.0.1
 # -- Lineup optimizer solver --
 # ortools: CP-SAT solver, optimizer/solver.py.
 ortools==9.15.6755
+
+# -- NFL M6A: nflverse historical statistical data ingestion --
+# nflreadpy: the nflverse project's official, currently-maintained Python
+# client (nfl_data_py, the older package, is deprecated in favor of this
+# one as of the NFL M6 audit's own research) -- historical_nfl/nflverse_client.py
+# is its only caller. Not part of the live DK slate/optimizer request path;
+# used by offline historical ingestion only.
+nflreadpy==0.1.5
+# polars: the DataFrame type nflreadpy returns and historical_nfl/*.py
+# operates on directly (not pandas -- nflreadpy is polars-native).
+polars==1.44.1

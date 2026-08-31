@@ -83,6 +83,13 @@ dashboard/next-env.d.ts
 # live sources, never source. See historical_mlb/.
 /data/historical/
 
+# NFL M6A: raw nflverse historical snapshots -- reproducible by
+# re-running historical_nfl/ingest.py against live nflverse data, never
+# source. Real single-week snapshots run tens of MB (play-by-play
+# especially); same "never commit reproducible fetched data" rule as
+# /data/historical/ above. See historical_nfl/.
+/historical/
+
 # Milestone 32.2: trained model artifacts (model.joblib, metrics,
 # feature importance, etc.) -- reproducible by re-running
 # `python -m historical_models.pitcher_v1.train` against the warehouse,
