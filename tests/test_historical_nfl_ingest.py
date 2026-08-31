@@ -94,3 +94,56 @@ def test_two_ingests_of_same_dataset_never_collide(monkeypatch, tmp_path):
     ingest.ingest_schedules(SEASON, output_root=tmp_path)  # a second, later immutable snapshot -- never an overwrite
     from historical_nfl.raw_persistence import list_raw_snapshots
     assert len(list_raw_snapshots("schedules", SEASON, output_root=tmp_path)) == 2
+
+
+def _patch_usage_fetchers(monkeypatch, fetched_at="2026-08-31T00:00:00+00:00"):
+    monkeypatch.setattr(nflverse_client, "fetch_snap_counts", lambda season, week=None: (
+        pl.DataFrame({
+            "season": [SEASON], "week": [WEEK], "game_id": ["2025_01_DAL_PHI"], "pfr_player_id": ["SmitJo00"],
+            "player": ["Jo Smith"], "team": ["PHI"], "position": ["WR"],
+            "offense_snaps": [50.0], "offense_pct": [0.8], "defense_snaps": [0.0], "defense_pct": [0.0],
+            "st_snaps": [5.0], "st_pct": [0.1],
+        }), fetched_at, "prov_snaps",
+    ))
+    monkeypatch.setattr(nflverse_client, "fetch_participation", lambda season, week=None: (
+        pl.DataFrame({
+            "season": [SEASON], "week": [WEEK], "nflverse_game_id": ["2025_01_DAL_PHI"], "play_id": [1.0],
+            "possession_team": ["PHI"], "offense_players": ["00-0000001;00-0000002"],
+            "defense_players": ["00-0000003"], "n_offense": [11], "n_defense": [11], "route": ["SLANT"],
+        }), fetched_at, "prov_participation",
+    ))
+
+
+def test_ingest_snap_counts_persists_and_reports_quality(monkeypatch, tmp_path):
+    _patch_usage_fetchers(monkeypatch)
+    result = ingest.ingest_snap_counts(SEASON, WEEK, output_root=tmp_path)
+    assert result.dataset_name == "snap_counts"
+    assert result.quality_report["passed"] is True
+
+
+def test_ingest_participation_persists_and_reports_quality(monkeypatch, tmp_path):
+    _patch_usage_fetchers(monkeypatch)
+    result = ingest.ingest_participation(SEASON, WEEK, output_root=tmp_path)
+    assert result.dataset_name == "participation"
+    assert result.quality_report["passed"] is True
+
+
+def test_ingest_usage_sources_runs_both_datasets(monkeypatch, tmp_path):
+    _patch_usage_fetchers(monkeypatch)
+    results = ingest.ingest_usage_sources(SEASON, WEEK, output_root=tmp_path)
+    assert set(results.keys()) == {"snap_counts", "participation"}
+    for r in results.values():
+        assert r.quality_report["passed"] is True
+
+
+def test_usage_ingest_never_touches_m6a_dataset_directories(monkeypatch, tmp_path):
+    """M6C must never overwrite M6A raw data -- confirmed by writing
+    both under the same tmp_path root and checking each dataset's own
+    directory only ever contains its own files."""
+    _patch_all_fetchers(monkeypatch)
+    _patch_usage_fetchers(monkeypatch)
+    ingest.ingest_schedules(SEASON, output_root=tmp_path)
+    ingest.ingest_snap_counts(SEASON, WEEK, output_root=tmp_path)
+    from historical_nfl.raw_persistence import list_raw_snapshots
+    assert len(list_raw_snapshots("schedules", SEASON, output_root=tmp_path)) == 1
+    assert len(list_raw_snapshots("snap_counts", SEASON, WEEK, output_root=tmp_path)) == 1

@@ -90,3 +90,48 @@ def test_fetch_play_by_play_filters_to_requested_week(monkeypatch):
     monkeypatch.setattr(nflreadpy, "load_pbp", lambda seasons: df)
     result_df, _, _ = nflverse_client.fetch_play_by_play(2025, week=1)
     assert result_df["game_id"].to_list() == ["g1"]
+
+
+def test_fetch_snap_counts_filters_to_requested_week(monkeypatch):
+    df = pl.DataFrame({"season": [2025, 2025], "week": [1, 2], "pfr_player_id": ["a", "b"]})
+    monkeypatch.setattr(nflreadpy, "load_snap_counts", lambda seasons: df)
+    result_df, _, _ = nflverse_client.fetch_snap_counts(2025, week=1)
+    assert result_df["pfr_player_id"].to_list() == ["a"]
+
+
+def test_fetch_participation_derives_season_and_week_from_game_id(monkeypatch):
+    """NFL M6C Phase 1 finding: load_participation()'s real schema has
+    NO season/week columns -- they must be parsed from nflverse_game_id."""
+    df = pl.DataFrame({"nflverse_game_id": ["2025_01_DAL_PHI", "2025_02_SEA_SF"], "play_id": [1.0, 2.0]})
+    monkeypatch.setattr(nflreadpy, "load_participation", lambda seasons: df)
+    result_df, _, provenance = nflverse_client.fetch_participation(2025, week=1)
+    assert result_df.height == 1
+    assert result_df["season"].to_list() == [2025]
+    assert result_df["week"].to_list() == [1]
+    assert "filtered week=1" in provenance
+
+
+def test_fetch_participation_without_week_keeps_all_rows_but_still_derives_columns(monkeypatch):
+    df = pl.DataFrame({"nflverse_game_id": ["2025_01_DAL_PHI", "2025_02_SEA_SF"], "play_id": [1.0, 2.0]})
+    monkeypatch.setattr(nflreadpy, "load_participation", lambda seasons: df)
+    result_df, _, _ = nflverse_client.fetch_participation(2025)
+    assert result_df.height == 2
+    assert sorted(result_df["week"].to_list()) == [1, 2]
+
+
+def test_fetch_ff_playerids_returns_dataframe(monkeypatch):
+    df = pl.DataFrame({"gsis_id": ["00-0001"], "pfr_id": ["SmitJo00"]})
+    monkeypatch.setattr(nflreadpy, "load_ff_playerids", lambda: df)
+    result_df, fetched_at, provenance = nflverse_client.fetch_ff_playerids()
+    assert result_df.height == 1
+    assert fetched_at
+    assert "load_ff_playerids" in provenance
+
+
+def test_fetch_ff_playerids_network_failure_raises_typed_error(monkeypatch):
+    def _boom():
+        raise ConnectionError("simulated failure")
+
+    monkeypatch.setattr(nflreadpy, "load_ff_playerids", _boom)
+    with pytest.raises(NflverseUnavailableError):
+        nflverse_client.fetch_ff_playerids()

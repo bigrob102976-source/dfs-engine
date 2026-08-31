@@ -33,6 +33,17 @@ PLAY_BY_PLAY_REQUIRED_COLUMNS = [
     "game_id", "play_id", "season", "week", "posteam", "defteam",
     "epa", "yardline_100", "down", "ydstogo",
 ]
+# NFL M6C: real columns confirmed live against nflreadpy 0.1.5 season 2025.
+SNAP_COUNTS_REQUIRED_COLUMNS = [
+    "season", "week", "game_id", "pfr_player_id", "player", "team", "position",
+    "offense_snaps", "offense_pct", "defense_snaps", "defense_pct", "st_snaps", "st_pct",
+]
+# season/week are DERIVED by historical_nfl/nflverse_client.py::fetch_participation
+# (parsed from nflverse_game_id) -- the real source schema has neither.
+PARTICIPATION_REQUIRED_COLUMNS = [
+    "season", "week", "nflverse_game_id", "play_id", "possession_team",
+    "offense_players", "defense_players", "n_offense", "n_defense", "route",
+]
 
 WEEKLY_PLAYER_STATS_NUMERIC_FIELDS = [
     "passing_yards", "passing_tds", "rushing_yards", "rushing_tds",
@@ -41,6 +52,7 @@ WEEKLY_PLAYER_STATS_NUMERIC_FIELDS = [
 ]
 TEAM_STATS_NUMERIC_FIELDS = ["passing_yards", "rushing_yards", "passing_tds", "rushing_tds"]
 PLAY_BY_PLAY_NUMERIC_FIELDS = ["epa", "yardline_100", "down", "ydstogo"]
+SNAP_COUNTS_NUMERIC_FIELDS = ["offense_snaps", "offense_pct", "defense_snaps", "defense_pct", "st_snaps", "st_pct"]
 
 
 @dataclass
@@ -173,4 +185,46 @@ def validate_play_by_play(df: pl.DataFrame, season: int, week: Optional[int]) ->
         invalid_numeric_count=0 if missing else _invalid_numeric_count(df, PLAY_BY_PLAY_NUMERIC_FIELDS),
         unique_players=None, unique_teams=None if missing else _unique_non_null(df, "posteam"),
         unique_games=None if missing else _unique_non_null(df, "game_id"),
+    )
+
+
+def validate_snap_counts(df: pl.DataFrame, season: int, week: Optional[int]) -> DatasetValidationResult:
+    missing = _missing_columns(df, SNAP_COUNTS_REQUIRED_COLUMNS)
+    if missing:
+        return DatasetValidationResult(
+            dataset_name="snap_counts", season=season, week=week, row_count=df.height,
+            missing_required_columns=missing, duplicate_key_count=0, missing_identity_count=0,
+            invalid_numeric_count=0, unique_players=None, unique_teams=None, unique_games=None,
+        )
+    has_id = df.filter(pl.col("pfr_player_id").is_not_null())
+    missing_identity_count = df.height - has_id.height
+    duplicate_key_count = _duplicate_count(has_id, ["season", "week", "game_id", "pfr_player_id"])
+    return DatasetValidationResult(
+        dataset_name="snap_counts", season=season, week=week, row_count=df.height,
+        missing_required_columns=[], duplicate_key_count=duplicate_key_count,
+        missing_identity_count=missing_identity_count,
+        invalid_numeric_count=_invalid_numeric_count(df, SNAP_COUNTS_NUMERIC_FIELDS),
+        unique_players=_unique_non_null(df, "pfr_player_id"), unique_teams=_unique_non_null(df, "team"),
+        unique_games=_unique_non_null(df, "game_id"),
+    )
+
+
+def validate_participation(df: pl.DataFrame, season: int, week: Optional[int]) -> DatasetValidationResult:
+    missing = _missing_columns(df, PARTICIPATION_REQUIRED_COLUMNS)
+    if missing:
+        return DatasetValidationResult(
+            dataset_name="participation", season=season, week=week, row_count=df.height,
+            missing_required_columns=missing, duplicate_key_count=0, missing_identity_count=0,
+            invalid_numeric_count=0, unique_players=None, unique_teams=None, unique_games=None,
+        )
+    duplicate_key_count = _duplicate_count(df, ["nflverse_game_id", "play_id"])
+    # "identity" here means a play with genuinely no offense_players list at
+    # all (e.g. a non-offensive-snap row) -- not a per-player identity concept.
+    missing_identity_count = df.filter((pl.col("offense_players").is_null()) | (pl.col("offense_players") == "")).height
+    return DatasetValidationResult(
+        dataset_name="participation", season=season, week=week, row_count=df.height,
+        missing_required_columns=[], duplicate_key_count=duplicate_key_count,
+        missing_identity_count=missing_identity_count, invalid_numeric_count=0,
+        unique_players=None, unique_teams=_unique_non_null(df, "possession_team"),
+        unique_games=_unique_non_null(df, "nflverse_game_id"),
     )

@@ -41,6 +41,8 @@ DATASET_ROSTERS = "rosters"
 DATASET_WEEKLY_PLAYER_STATS = "weekly_player_stats"
 DATASET_TEAM_STATS = "team_stats"
 DATASET_PLAY_BY_PLAY = "play_by_play"
+DATASET_SNAP_COUNTS = "snap_counts"
+DATASET_PARTICIPATION = "participation"
 
 SCHEMA_VERSION = "nflverse_raw_v1"
 

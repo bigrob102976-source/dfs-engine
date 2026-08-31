@@ -15,9 +15,11 @@ from typing import Optional
 
 from historical_nfl import nflverse_client, raw_validation
 from historical_nfl.raw_contract import (
+    DATASET_PARTICIPATION,
     DATASET_PLAY_BY_PLAY,
     DATASET_ROSTERS,
     DATASET_SCHEDULES,
+    DATASET_SNAP_COUNTS,
     DATASET_TEAM_STATS,
     DATASET_WEEKLY_PLAYER_STATS,
     SCHEMA_VERSION,
@@ -84,6 +86,18 @@ def ingest_play_by_play(season: int, week: int, output_root: Path = DEFAULT_RAW_
     return _persist(DATASET_PLAY_BY_PLAY, season, week, df, fetched_at, provenance, validation, output_root)
 
 
+def ingest_snap_counts(season: int, week: int, output_root: Path = DEFAULT_RAW_ROOT) -> IngestResult:
+    df, fetched_at, provenance = nflverse_client.fetch_snap_counts(season, week)
+    validation = raw_validation.validate_snap_counts(df, season, week)
+    return _persist(DATASET_SNAP_COUNTS, season, week, df, fetched_at, provenance, validation, output_root)
+
+
+def ingest_participation(season: int, week: int, output_root: Path = DEFAULT_RAW_ROOT) -> IngestResult:
+    df, fetched_at, provenance = nflverse_client.fetch_participation(season, week)
+    validation = raw_validation.validate_participation(df, season, week)
+    return _persist(DATASET_PARTICIPATION, season, week, df, fetched_at, provenance, validation, output_root)
+
+
 def ingest_week(season: int, week: int, output_root: Path = DEFAULT_RAW_ROOT) -> dict:
     """Ingests all five M6A datasets for one season/week -- schedules is
     season-grain (persisted once, reused conceptually across every week
@@ -95,4 +109,13 @@ def ingest_week(season: int, week: int, output_root: Path = DEFAULT_RAW_ROOT) ->
         "weekly_player_stats": ingest_weekly_player_stats(season, week, output_root=output_root),
         "team_stats": ingest_team_stats(season, week, output_root=output_root),
         "play_by_play": ingest_play_by_play(season, week, output_root=output_root),
+    }
+
+
+def ingest_usage_sources(season: int, week: int, output_root: Path = DEFAULT_RAW_ROOT) -> dict:
+    """NFL M6C -- the two new raw datasets this milestone adds, ingested
+    the same immutable way as ingest_week()'s five M6A datasets."""
+    return {
+        "snap_counts": ingest_snap_counts(season, week, output_root=output_root),
+        "participation": ingest_participation(season, week, output_root=output_root),
     }

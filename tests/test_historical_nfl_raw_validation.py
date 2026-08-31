@@ -7,9 +7,11 @@ import math
 import polars as pl
 
 from historical_nfl.raw_validation import (
+    validate_participation,
     validate_play_by_play,
     validate_rosters,
     validate_schedules,
+    validate_snap_counts,
     validate_team_stats,
     validate_weekly_player_stats,
 )
@@ -169,5 +171,81 @@ def test_play_by_play_negative_real_epa_not_flagged():
 def test_play_by_play_unique_games_and_teams():
     df = _pbp_df([{"game_id": "g1", "posteam": "PHI"}, {"game_id": "g2", "posteam": "SF"}])
     result = validate_play_by_play(df, 2025, 1)
+    assert result.unique_games == 2
+    assert result.unique_teams == 2
+
+
+def _snap_counts_df(rows):
+    return pl.DataFrame({
+        "season": [2025] * len(rows), "week": [1] * len(rows),
+        "game_id": [r.get("game_id", "g1") for r in rows], "pfr_player_id": [r.get("pfr_player_id") for r in rows],
+        "player": ["Player"] * len(rows), "team": [r.get("team", "PHI") for r in rows],
+        "position": ["WR"] * len(rows),
+        "offense_snaps": [r.get("offense_snaps", 50.0) for r in rows], "offense_pct": [r.get("offense_pct", 0.8) for r in rows],
+        "defense_snaps": [0.0] * len(rows), "defense_pct": [0.0] * len(rows),
+        "st_snaps": [5.0] * len(rows), "st_pct": [0.1] * len(rows),
+    }, schema_overrides={"offense_pct": pl.Float64})
+
+
+def test_snap_counts_missing_pfr_id_reported_as_missing_identity():
+    df = _snap_counts_df([{"pfr_player_id": None}, {"pfr_player_id": "SmitJo00"}])
+    result = validate_snap_counts(df, 2025, 1)
+    assert result.passed is True
+    assert result.missing_identity_count == 1
+    assert result.unique_players == 1
+
+
+def test_snap_counts_duplicate_key_reported():
+    df = _snap_counts_df([{"pfr_player_id": "SmitJo00"}, {"pfr_player_id": "SmitJo00"}])
+    result = validate_snap_counts(df, 2025, 1)
+    assert result.duplicate_key_count == 2
+
+
+def test_snap_counts_offense_pct_out_of_range_still_reported_as_invalid_numeric_when_nan():
+    df = _snap_counts_df([{"pfr_player_id": "SmitJo00", "offense_pct": float("nan")}])
+    result = validate_snap_counts(df, 2025, 1)
+    assert result.invalid_numeric_count == 1
+
+
+def test_snap_counts_missing_required_column_fails():
+    df = pl.DataFrame({"season": [2025], "week": [1]})
+    result = validate_snap_counts(df, 2025, 1)
+    assert result.passed is False
+
+
+def _participation_df(rows):
+    return pl.DataFrame({
+        "season": [2025] * len(rows), "week": [1] * len(rows),
+        "nflverse_game_id": [r.get("nflverse_game_id", "2025_01_DAL_PHI") for r in rows],
+        "play_id": [r.get("play_id", 1.0) for r in rows],
+        "possession_team": [r.get("possession_team", "PHI") for r in rows],
+        "offense_players": [r.get("offense_players", "00-0000001;00-0000002") for r in rows],
+        "defense_players": ["00-0000003"] * len(rows),
+        "n_offense": [11] * len(rows), "n_defense": [11] * len(rows),
+        "route": [r.get("route", "SLANT") for r in rows],
+    })
+
+
+def test_participation_duplicate_game_play_id_reported():
+    df = _participation_df([{"nflverse_game_id": "g1", "play_id": 1.0}, {"nflverse_game_id": "g1", "play_id": 1.0}])
+    result = validate_participation(df, 2025, 1)
+    assert result.duplicate_key_count == 2
+
+
+def test_participation_missing_offense_players_reported_as_missing_identity():
+    df = _participation_df([{"offense_players": ""}, {"offense_players": "00-0000001"}])
+    result = validate_participation(df, 2025, 1)
+    assert result.missing_identity_count == 1
+
+
+def test_participation_missing_required_column_fails():
+    df = pl.DataFrame({"season": [2025], "week": [1]})
+    result = validate_participation(df, 2025, 1)
+    assert result.passed is False
+
+
+def test_participation_unique_games_and_teams():
+    df = _participation_df([{"nflverse_game_id": "g1", "possession_team": "PHI"}, {"nflverse_game_id": "g2", "possession_team": "SF"}])
+    result = validate_participation(df, 2025, 1)
     assert result.unique_games == 2
     assert result.unique_teams == 2
