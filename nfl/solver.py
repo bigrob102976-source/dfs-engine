@@ -1,4 +1,5 @@
-"""NFL M3 -- DraftKings Classic NFL roster-feasibility solver.
+"""NFL M3/M4 -- DraftKings Classic NFL solver: roster-feasibility mode
+(M3) and projection mode (M4).
 
 A small, self-contained CP-SAT formulation reproducing only the generic
 slot-assignment CORE of optimizer/solver.py (one binary variable per
@@ -7,8 +8,7 @@ each player used in at most one slot, salary cap, uniqueness across
 previously-generated lineups) -- not the full MLB optimizer engine,
 which is tightly coupled to non-Optional projection/ceiling fields
 (optimizer/objective.py) and pitcher/hitter-specific constraints
-(optimizer/constraints.py) that don't apply here and that M3 explicitly
-doesn't need yet (no stacking, no ownership, no team-conflict rules).
+(optimizer/constraints.py) that don't apply here.
 
 Slot eligibility always checks a canonical player's own real
 `roster_slots` field (nfl/pool_builder.py, derived directly from
@@ -16,11 +16,17 @@ DraftKings' own roster_slot_id per player) -- never re-derived from
 base position. A player is eligible for the "FLEX" slot if and only if
 DraftKings' own data already marked them FLEX-eligible.
 
-M3's objective is a clearly labeled feasibility proof, not a fantasy
-recommendation: maximize deterministic salary utilization (no
-projection/ceiling exists anywhere in nfl/optimizer_models.py to
-optimize instead). Every generated NflLineup carries
-mode="roster_feasibility" explicitly.
+Two explicit modes, set via NflOptimizerSettings.mode:
+  - "roster_feasibility" (M3): maximize deterministic salary
+    utilization -- a legality proof, never a fantasy recommendation.
+  - "projection" (M4): maximize the sum of REAL Big Money Native
+    projections only. A player with projection is None is EXCLUDED
+    from the candidate pool entirely in this mode -- never silently
+    treated as a 0. If projected-player coverage can't fill every
+    roster slot, generate_lineups() raises NflProjectionCoverageError
+    BEFORE ever calling the solver, rather than returning an empty or
+    partial result. Projection mode never falls back to salary,
+    FantasyPros, BlueCollar, or any synthetic value.
 """
 
 from typing import Dict, List, Optional, Set, Tuple
@@ -41,21 +47,39 @@ SOLVER_MAX_TIME_SECONDS = 10.0
 SOLVER_NUM_SEARCH_WORKERS = 1
 SOLVER_RANDOM_SEED = 42
 
+# CP-SAT works on integers -- projection values are scaled up and
+# rounded so fractional points aren't lost (mirrors
+# optimizer/objective.py::OBJECTIVE_SCALE's identical rationale for MLB).
+PROJECTION_OBJECTIVE_SCALE = 1000
+
+VALID_MODES = frozenset({"roster_feasibility", "projection"})
+
 
 class NflOptimizerConfigError(ValueError):
-    """A lock/exclude setting is contradictory or unresolvable. Raised
-    BEFORE any solver call -- never silently dropped or ignored."""
+    """A lock/exclude setting is contradictory or unresolvable, or an
+    unknown mode was requested. Raised BEFORE any solver call -- never
+    silently dropped or ignored."""
+
+
+class NflProjectionCoverageError(RuntimeError):
+    """Raised in mode="projection" when real (non-None) Big Money
+    Native projections don't cover enough eligible players to fill
+    every roster slot. Raised BEFORE any solver call -- projection mode
+    never silently returns an empty result or falls back to salary
+    utilization when this happens."""
 
 
 def to_optimizer_players(players: List[NflPlayer]) -> List[NflOptimizerPlayer]:
-    """Reduces the canonical M2 NflPlayer pool to only what the
-    feasibility solver needs. No projection/ownership field is carried
-    over -- there's nothing to invent, and the solver never looks for one."""
+    """Reduces the canonical M2 NflPlayer pool to only what the solver
+    needs. `projection` is carried over exactly as-is (None stays None
+    -- never coerced to 0.0); see nfl/projection_merge.py for how a
+    real NflPlayer.projection gets populated from a NflProjectionRecord."""
     return [
         NflOptimizerPlayer(
             key=p.draftkings_player_id, name=p.name, team=p.team, opponent=p.opponent, game_id=p.game_id,
             position=p.position, roster_slots=list(p.roster_slots), salary=p.salary,
             is_team_entity=p.is_team_entity, draft_group_id=p.draft_group_id, slate_date=p.slate_date,
+            projection=p.projection,
         )
         for p in players
     ]
@@ -94,6 +118,10 @@ def solve_single_lineup(
     constraints."""
     previous_lineups = previous_lineups or []
     candidate_pool = [p for p in players if p.key not in forced_excludes]
+    if settings.mode == "projection":
+        # A player with no real projection is never a candidate in this
+        # mode -- excluded entirely, never treated as a 0.
+        candidate_pool = [p for p in candidate_pool if p.projection is not None]
     by_key = {p.key: p for p in candidate_pool}
     slot_instances = _expand_slot_instances()
 
@@ -132,11 +160,15 @@ def solve_single_lineup(
         if len(prev_vars) == len(prev_keys):
             model.Add(sum(prev_vars) <= len(prev_keys) - settings.min_unique)
 
-    # Feasibility objective ONLY: maximize deterministic salary
-    # utilization. There is no projection/ceiling field on
-    # NflOptimizerPlayer to optimize instead -- this never claims to
-    # produce a good fantasy lineup, only a legal one.
-    model.Maximize(sum(used[k] * by_key[k].salary for k in used))
+    if settings.mode == "projection":
+        # Real projections only -- candidate_pool was already filtered
+        # to projection is not None above, so every term here is real.
+        model.Maximize(sum(used[k] * round(by_key[k].projection * PROJECTION_OBJECTIVE_SCALE) for k in used))
+    else:
+        # Feasibility objective: maximize deterministic salary
+        # utilization. This never claims to produce a good fantasy
+        # lineup, only a legal one.
+        model.Maximize(sum(used[k] * by_key[k].salary for k in used))
 
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = SOLVER_NUM_SEARCH_WORKERS
@@ -156,13 +188,38 @@ def solve_single_lineup(
     return result
 
 
+def _check_projection_coverage(players: List[NflOptimizerPlayer], forced_excludes: Set[str]) -> List[str]:
+    """Returns a list of specific, human-readable reasons real
+    projection coverage can't fill every roster slot -- e.g. "0 QB(s)
+    with a real projection available (need 1)". Empty list means every
+    base slot has at least enough projected-eligible players (not a
+    full feasibility guarantee -- CP-SAT still does the real
+    combinatorial check -- just the same cheap, specific pre-check
+    optimizer/constraints.py::_concrete_infeasibility_reasons() does
+    for MLB)."""
+    candidate_pool = [p for p in players if p.key not in forced_excludes and p.projection is not None]
+    reasons: List[str] = []
+    for slot in DK_NFL_CLASSIC_ROSTER_SLOTS:
+        base_slot = slot["slot"]
+        available = eligible_for_slot(base_slot, candidate_pool)
+        if len(available) < slot["count"]:
+            reasons.append(f"Only {len(available)} {base_slot} player(s) with a real Big Money Native projection available (need {slot['count']}).")
+    return reasons
+
+
 def generate_lineups(players: List[NflOptimizerPlayer], settings: NflOptimizerSettings) -> NflGenerationResult:
     """Generates up to settings.num_lineups distinct legal lineups.
     Raises NflOptimizerConfigError for a contradictory/unresolvable
-    lock or exclude setting BEFORE any solver call -- never silently
-    drops a lock. Stops (without raising) and reports stopped_reason
-    when the solver itself can't find a legal lineup for the next slot
-    (e.g. an impossible combination of locks)."""
+    lock/exclude/mode setting BEFORE any solver call -- never silently
+    drops a lock. Raises NflProjectionCoverageError (mode="projection"
+    only) when real projection coverage can't fill every roster slot --
+    never silently returns an empty result or falls back to salary.
+    Otherwise stops (without raising) and reports stopped_reason when
+    the solver itself can't find a legal lineup for the next slot (e.g.
+    an impossible combination of locks)."""
+    if settings.mode not in VALID_MODES:
+        raise NflOptimizerConfigError(f"Unknown mode {settings.mode!r}; expected one of {sorted(VALID_MODES)}.")
+
     by_key = {p.key: p for p in players}
 
     locked_keys = set(settings.locks)
@@ -186,6 +243,15 @@ def generate_lineups(players: List[NflOptimizerPlayer], settings: NflOptimizerSe
             f"{sum(s['count'] for s in DK_NFL_CLASSIC_ROSTER_SLOTS)} roster spots."
         )
 
+    if settings.mode == "projection":
+        coverage_reasons = _check_projection_coverage(players, excluded_keys)
+        if coverage_reasons:
+            raise NflProjectionCoverageError(
+                "Real Big Money Native projection coverage cannot fill every roster slot -- refusing to "
+                "generate a projection-mode lineup rather than silently falling back to salary or treating "
+                "missing projections as zero: " + " ".join(coverage_reasons)
+            )
+
     lineups: List[NflLineup] = []
     previous_keys_list: List[List[str]] = []
     stopped_reason: Optional[str] = None
@@ -201,11 +267,13 @@ def generate_lineups(players: List[NflOptimizerPlayer], settings: NflOptimizerSe
             for slot, p in result
         ]
         total_salary = sum(a.salary for a in assignments)
+        total_projection = sum(p.projection for _, p in result) if settings.mode == "projection" else None
         first_player = result[0][1]
         lineups.append(NflLineup(
             index=i, assignments=assignments, total_salary=total_salary,
             remaining_salary=settings.salary_cap - total_salary,
             draft_group_id=first_player.draft_group_id, slate_date=first_player.slate_date,
+            mode=settings.mode, total_projection=total_projection,
         ))
         previous_keys_list.append([p.key for _, p in result])
 
