@@ -41,7 +41,7 @@ from dfs.providers.source_provenance import DRAFTKINGS_UNOFFICIAL_LIVE, UNOFFICI
 from dfs.slate_validation import resolve_game_ids
 from draftkings_unofficial import collector
 from draftkings_unofficial.client import DraftKingsUnofficialError
-from draftkings_unofficial.structural_validation import validate_classic_draftgroup
+from draftkings_unofficial.structural_validation import validate_classic_draftgroup, validate_nfl_classic_draftgroup
 
 
 def is_enabled() -> bool:
@@ -99,24 +99,30 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
             # roster template, salary cap, player/team/game identity
             # consistency -- see draftkings_unofficial/structural_
             # validation.py) determines whether this DraftGroup is
-            # genuinely a well-formed MLB Classic Salary Cap slate,
-            # independent of how many pitchers/hitters it lists (that's
-            # a content-plausibility question for source_realism.py's
-            # provider-aware rules, never a structural one). Only run for
-            # MLB -- the Classic roster-template check is MLB-specific by
-            # design; other sports keep the original UNOFFICIAL_
-            # DEVELOPMENT_SOURCE claim unchanged, out of scope here.
+            # genuinely a well-formed Classic Salary Cap slate,
+            # independent of how many players it lists (that's a
+            # content-plausibility question for source_realism.py's
+            # provider-aware rules, never a structural one). NFL M1:
+            # each sport gets its own Classic validator (same shared
+            # engine, sport-specific roster/team/position constants) --
+            # a sport with no validator here keeps the original
+            # UNOFFICIAL_DEVELOPMENT_SOURCE claim unchanged, out of scope
+            # until that sport's own M1 is built.
             structural_result = None
             if sport.upper() == "MLB":
                 structural_result = validate_classic_draftgroup(
                     slate.draft_group_id, universe.contests, detail.games, detail.draftables, detail.roster_rules,
                 )
-                if not structural_result.passed:
-                    warnings.append(
-                        f"Skipped DraftGroup {slate.draft_group_id} ({slate.label or slate.tag}): failed structural "
-                        f"validation -- {[f.message for f in structural_result.findings if f.level == 'BLOCK']}."
-                    )
-                    continue
+            elif sport.upper() == "NFL":
+                structural_result = validate_nfl_classic_draftgroup(
+                    slate.draft_group_id, universe.contests, detail.games, detail.draftables, detail.roster_rules,
+                )
+            if structural_result is not None and not structural_result.passed:
+                warnings.append(
+                    f"Skipped DraftGroup {slate.draft_group_id} ({slate.label or slate.tag}): failed structural "
+                    f"validation -- {[f.message for f in structural_result.findings if f.level == 'BLOCK']}."
+                )
+                continue
 
             game_strings = [f"{g.away_team.abbreviation}@{g.home_team.abbreviation}" for g in detail.games if g.away_team and g.home_team]
             game_ids = resolve_game_ids(game_strings, research_games) if research_games else []
