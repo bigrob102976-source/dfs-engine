@@ -13,8 +13,23 @@ import type { Lineup } from "../types";
 
 export type { SlateOption };
 
+// Worker-reliability fix: a real, correctly-provenanced provider-slate
+// artifact stays usable well past the 15-minute FRESH window instead of
+// triggering a live DraftKings call from Railway (permanently blocked --
+// see draftkings_unofficial/README.md). "stale" means real, reused data
+// older than 15 minutes but still within the safe reuse ceiling; see
+// poolCache.ts's PROVIDER_SLATE_STALE_MAX_MS for the exact bound.
+export type ProviderDataStatus = "fresh" | "stale";
+
 export interface SlateListResult {
-  status: "ready" | "not_connected" | "unavailable" | "auth_failed" | "no_slate";
+  // "stale_expired": a real provider-slate artifact exists for this date
+  // but has aged past the safe reuse ceiling -- the artifact is NOT
+  // reused (its slate/salary data is too old to trust) and no live
+  // DraftKings call is attempted (that path is known to fail from
+  // Railway). Distinct from "unavailable" so the UI can explain the
+  // real cause (the worker has fallen behind) rather than a generic
+  // provider failure.
+  status: "ready" | "not_connected" | "unavailable" | "auth_failed" | "no_slate" | "stale_expired";
   reason: string | null;
   providerName: string | null;
   providerType: "mock" | "real" | null;
@@ -23,6 +38,10 @@ export interface SlateListResult {
   source: ProviderSource | null;
   slates: SlateOption[];
   slatesAvailable: number;
+  // null when status !== "ready" (nothing meaningful to call fresh/stale).
+  dataStatus: ProviderDataStatus | null;
+  artifactAgeSeconds: number | null;
+  lastUpdatedAt: string | null;
 }
 
 /** One row in the player-pool table -- a flattened, UI-friendly view of
@@ -187,6 +206,14 @@ export interface OptimizerPoolResult {
   // computeBlueCollarCoverage, the single source of truth for this.
   blueCollarCoverage: BlueCollarCoverage;
   vegasCoverage: DkSlateVegasCoverage;
+  // Worker-reliability fix: whether the underlying DraftKings artifact
+  // this pool was built from is fresh (<=15 min old) or a reused,
+  // still-real stale artifact -- see poolCache.ts. Never "expired": an
+  // expired artifact is refused before a pool is ever built (loadPool
+  // throws instead).
+  dataStatus: ProviderDataStatus;
+  artifactAgeSeconds: number;
+  lastUpdatedAt: string;
 }
 
 export interface OptimizerBuildRequest {

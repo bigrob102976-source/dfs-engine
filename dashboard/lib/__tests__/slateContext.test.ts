@@ -33,6 +33,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate()], slatesAvailable: 1,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17");
@@ -46,6 +47,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate(), turbo], slatesAvailable: 2,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17", "turbo");
@@ -57,6 +59,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate()], slatesAvailable: 1,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17", "does-not-exist");
@@ -68,6 +71,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate({ gameIds: [] })], slatesAvailable: 1,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17", "main");
@@ -82,6 +86,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [main, draft], slatesAvailable: 2,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
     // Simulate a MEMBER viewer: only "main" is published.
     mockFilterSlates.mockImplementation(async (slates: SlateOption[]) => slates.filter((s) => s.slateId === "main"));
@@ -96,6 +101,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate()], slatesAvailable: 1,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const withoutOptIn = await resolveSlateContext("2026-08-17");
@@ -111,6 +117,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate(), turbo], slatesAvailable: 2,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17", undefined, { autoSelectSoleSlate: true });
@@ -122,6 +129,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [slate()], slatesAvailable: 1,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
 
     const ctx = await resolveSlateContext("2026-08-17", "does-not-exist", { autoSelectSoleSlate: true });
@@ -136,6 +144,7 @@ describe("resolveSlateContext", () => {
     vi.mocked(listSlates).mockResolvedValue({
       status: "ready", reason: null, providerName: "draftkings_csv", providerType: "real", isMock: false,
       isConnected: true, source: "real_dk_csv", slates: [main, turbo, night], slatesAvailable: 3,
+      dataStatus: "fresh", artifactAgeSeconds: 0, lastUpdatedAt: "2026-01-01T00:00:00.000Z",
     });
     // Simulate a MEMBER viewer: all three happen to be published.
     mockFilterSlates.mockImplementation(async (slates: SlateOption[]) => slates);

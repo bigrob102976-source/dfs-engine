@@ -50,6 +50,17 @@ function formatTime(iso: string | null): string {
   return d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 }
 
+// Worker-reliability fix: "DraftKings data last updated N minutes ago"
+// wording for the stale-data notice -- minutes below an hour, then
+// "1h 12m" style beyond that.
+function formatAgeMinutes(ageSeconds: number): string {
+  const minutes = Math.round(ageSeconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours}h${remMinutes ? ` ${remMinutes}m` : ""}`;
+}
+
 /** The Milestone 14 interactive optimizer workspace: slate selection,
  * player-pool browsing/locking/excluding/exposure, stack/salary/unique
  * constraints, an authoritative live pre-solve validation panel, and a
@@ -87,6 +98,14 @@ export function OptimizerWorkspace({
   const [dateInputValue, setDateInputValue] = useState("");
 
   const [slates, setSlates] = useState<SlateOption[]>([]);
+  // Worker-reliability fix, day-rollover safety: a persisted selectedSlateId
+  // (restored from localStorage at hydration, before this component has any
+  // idea whether it's still valid for today) must never trigger a pool load
+  // until the slate list has actually been fetched and that ID validated --
+  // otherwise a stale slate ID from a previous day/session fires a real
+  // /api/optimizer/pool request before the correction below ever runs. False
+  // until the first slates fetch settles (success OR failure), then stays true.
+  const [slatesValidated, setSlatesValidated] = useState(false);
   const [slateStatus, setSlateStatus] = useState<string | null>(null);
   const [slateReason, setSlateReason] = useState<string | null>(null);
   const [providerIsMock, setProviderIsMock] = useState(false);
@@ -288,6 +307,7 @@ export function OptimizerWorkspace({
       .then(() => {
         setSlatesLoading(true);
         setSlateUnavailableMessage(null);
+        setSlatesValidated(false);
         const url = selectedDate ? `/api/optimizer/slates?date=${encodeURIComponent(selectedDate)}` : "/api/optimizer/slates";
         return fetch(url);
       })
@@ -300,17 +320,23 @@ export function OptimizerWorkspace({
         setSlates(list);
         setSlatesLoading(false);
         setSelectedSlateId((current) => {
-          if (list.length === 1) return list[0].slateId;
-          // Milestone 31.2C, Part 18: a previously selected/persisted
-          // DraftGroup can genuinely disappear (DraftKings rolls its
-          // live lobby, or the date changed) -- surface this explicitly
-          // rather than silently clearing the selection.
+          // Milestone 31.2C, Part 18 (worker-reliability fix: this check
+          // must run BEFORE the "only one slate today" shortcut below --
+          // it used to run after, which meant a stale persisted slate ID
+          // was silently discarded with no explanation whenever today
+          // happened to have exactly one real slate; a day-rollover with
+          // a single Featured slate is exactly the common case). A
+          // previously selected/persisted DraftGroup can genuinely
+          // disappear (DraftKings rolls its live lobby, or the date
+          // changed) -- surface this explicitly rather than silently
+          // clearing the selection.
           if (current && !list.some((s) => s.slateId === current)) {
             setSlateUnavailableMessage("Previously selected slate is no longer available for this date. Please select another live slate below.");
             current = null;
           }
           if (current) return current;
           if (list.length === 0) return null;
+          if (list.length === 1) return list[0].slateId;
           // Nothing selected yet and DraftKings published more than one
           // real Classic slate (Featured, Turbo, Afternoon, ...) -- auto-
           // pick the Main/Featured one (always the largest by game count)
@@ -319,10 +345,12 @@ export function OptimizerWorkspace({
           const featured = list.reduce((best, s) => ((s.gameCount ?? 0) > (best.gameCount ?? 0) ? s : best), list[0]);
           return featured.slateId;
         });
+        setSlatesValidated(true);
       })
       .catch(() => {
         setSlatesLoading(false);
         setSlateStatus("unavailable");
+        setSlatesValidated(true);
       });
     // Runs right after hydration, and again whenever selectedDate changes
     // -- deliberately not re-run on every selectedSlateId change (that's
@@ -404,10 +432,15 @@ export function OptimizerWorkspace({
   }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam]);
 
   useEffect(() => {
-    if (!hydrated || !selectedSlateId) return;
+    // slatesValidated: never load a pool for a selectedSlateId that
+    // hasn't been confirmed present in a freshly-fetched slate list yet
+    // -- a persisted-from-localStorage ID restored at hydration is not
+    // trustworthy until this component has actually checked it (see
+    // setSlatesValidated's own comment above).
+    if (!hydrated || !selectedSlateId || !slatesValidated) return;
     loadPool(selectedSlateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, selectedSlateId, selectedDate]);
+  }, [hydrated, selectedSlateId, selectedDate, slatesValidated]);
 
   const buildRequestBody = useCallback(() => {
     const byId = new Map((pool?.players ?? []).map((p) => [p.dkPlayerId, p]));
@@ -858,6 +891,15 @@ export function OptimizerWorkspace({
       {poolError && <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{poolError}</div>}
       {reconcileWarnings.length > 0 && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{reconcileWarnings.join(" ")}</div>
+      )}
+      {/* Worker-reliability fix: a real, reused-but-stale DraftKings
+          artifact (>15 min old, still within the safe reuse ceiling)
+          never blocks the optimizer -- just an honest, visible notice.
+          Never shown when the data is fresh. */}
+      {pool && pool.dataStatus === "stale" && (
+        <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">
+          DraftKings data last updated {formatAgeMinutes(pool.artifactAgeSeconds)} ago.
+        </div>
       )}
 
       {pool && (

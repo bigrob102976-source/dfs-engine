@@ -33,7 +33,7 @@ export { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabe
 export interface SlateContext {
   slates: SlateOption[];
   selected: SlateOption | null;
-  status: "ready" | "not_connected" | "unavailable" | "auth_failed" | "no_slate";
+  status: "ready" | "not_connected" | "unavailable" | "auth_failed" | "no_slate" | "stale_expired";
   isMock: boolean;
   providerName: string | null;
   /** True when `selected` is set but its game_ids couldn't be resolved

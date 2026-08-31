@@ -98,6 +98,9 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     salaryCap: 50000,
     hasOwnership: true,
     vegasCoverage: { dkGames: 0, pregameCovered: 0, missing: 0, frozen: 0, inPlayIgnored: 0, invalid: 0, notMatched: 0, coveragePercent: 0, primaryCovered: 0, fallbackCovered: 0, games: [] },
+    dataStatus: "fresh",
+    artifactAgeSeconds: 0,
+    lastUpdatedAt: "2026-01-01T00:00:00.000Z",
   };
 }
 

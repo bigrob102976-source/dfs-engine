@@ -39,6 +39,14 @@ interface CachedPool {
   poolPath: string;
   ownershipPath: string | null;
   builtAt: string;
+  // The underlying DraftKings artifact's OWN generated_at_utc -- NOT
+  // re-fetched on every readPoolResult() call. dataStatus/
+  // artifactAgeSeconds are deliberately NOT frozen here: the in-memory
+  // poolCache Map can be read long after this entry was built (no
+  // expiry), so they are recomputed from this timestamp on every read
+  // (see readPoolResult) rather than trusting a value that could itself
+  // have gone stale.
+  lastUpdatedAt: string;
 }
 
 // Module-level cache: a slate's pool is built once (fetch -> build pool
@@ -58,18 +66,52 @@ export function __resetPoolCacheForTests(): void {
 }
 
 // How recent an already-fetched provider-slate document has to be to
-// reuse instead of calling DraftKings live again. DK contest/salary data
-// doesn't change second-to-second, so a short reuse window avoids an
-// unnecessary live call (and the live call's own failure, e.g. an
-// egress IP restriction) on every cache-cold page view without serving
-// meaningfully stale data.
+// reuse without any qualification. DK contest/salary data doesn't change
+// second-to-second, so a short reuse window avoids an unnecessary live
+// call on every cache-cold page view without serving meaningfully stale
+// data.
 const PROVIDER_SLATE_FRESHNESS_MS = 15 * 60 * 1000;
 
-function providerSlateFreshEnough(doc: Record<string, unknown> | null): boolean {
-  if (!doc) return false;
-  const generatedAt = typeof doc.generated_at_utc === "string" ? Date.parse(doc.generated_at_utc) : NaN;
-  if (Number.isNaN(generatedAt)) return false;
-  return Date.now() - generatedAt <= PROVIDER_SLATE_FRESHNESS_MS;
+// Worker-reliability fix: a real, correctly-provenanced artifact older
+// than FRESHNESS is still reused (marked stale) rather than triggering a
+// live DraftKings call from Railway -- that call is PERMANENTLY blocked
+// by DraftKings' own IP-level restriction on Railway's egress (the
+// entire reason the external Windows worker exists; see
+// draftkings_unofficial/README.md and worker/run_dk_fetch_worker.ps1).
+// Discarding a perfectly good real artifact just because it aged past 15
+// minutes, and then attempting a call that is guaranteed to fail, is
+// exactly the bug this ceiling fixes. Past this ceiling the artifact is
+// genuinely too old to trust (salary/slate data could have materially
+// changed) -- refuse it with a clear error rather than serving it OR
+// attempting the doomed live call.
+const PROVIDER_SLATE_STALE_MAX_MS = 2 * 60 * 60 * 1000;
+
+type ProviderSlateFreshness = "fresh" | "stale" | "expired";
+
+function providerSlateAgeMs(doc: Record<string, unknown> | null): number | null {
+  const generatedAt = typeof doc?.generated_at_utc === "string" ? Date.parse(doc.generated_at_utc) : NaN;
+  if (Number.isNaN(generatedAt)) return null;
+  return Date.now() - generatedAt;
+}
+
+/** null when the document carries no parseable generated_at_utc at all
+ * (e.g. a legacy artifact) -- callers treat that the same as "not
+ * reusable," identical to this function's pre-existing behavior, since
+ * that is a distinct, rarer edge case from "the worker fell behind." */
+function providerSlateFreshness(doc: Record<string, unknown> | null): ProviderSlateFreshness | null {
+  const age = providerSlateAgeMs(doc);
+  if (age === null) return null;
+  if (age <= PROVIDER_SLATE_FRESHNESS_MS) return "fresh";
+  if (age <= PROVIDER_SLATE_STALE_MAX_MS) return "stale";
+  return "expired";
+}
+
+function formatAge(ms: number): string {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return `${hours}h${remMinutes ? ` ${remMinutes}m` : ""}`;
 }
 
 /** Defense-in-depth alongside get_configured_provider()'s own cascade
@@ -95,8 +137,12 @@ function slateListResultFromProviderDoc(doc: Record<string, unknown>): SlateList
     gameIds: Array.isArray(s.game_ids) ? (s.game_ids as string[]) : [],
     playerCount: (s.player_count as number | null) ?? null,
   }));
-  const status = (doc.status as SlateListResult["status"]) ?? "unavailable";
+  const rawStatus = doc.status as string | undefined;
+  const status = (rawStatus as SlateListResult["status"]) ?? "unavailable";
   const providerName = (doc.provider_name as string | null) ?? null;
+  const hasSlateData = rawStatus === "ready" || rawStatus === "needs_selection";
+  const freshness = hasSlateData ? providerSlateFreshness(doc) : null;
+  const ageMs = providerSlateAgeMs(doc);
   return {
     status,
     reason: (doc.reason as string | null) ?? null,
@@ -107,23 +153,54 @@ function slateListResultFromProviderDoc(doc: Record<string, unknown>): SlateList
     source: asProviderSource(doc.source),
     slates,
     slatesAvailable: typeof doc.slates_available === "number" ? (doc.slates_available as number) : slates.length,
+    // A live-fetched doc has no explicit freshness signal issue (it was
+    // just generated) -- default to "fresh" rather than null so the UI
+    // never has to guess. A reused artifact's real computed freshness
+    // ("expired" never reaches this function -- see listSlates) wins.
+    dataStatus: hasSlateData ? (freshness === "expired" ? "stale" : (freshness ?? "fresh")) : null,
+    artifactAgeSeconds: ageMs !== null ? Math.round(ageMs / 1000) : null,
+    lastUpdatedAt: typeof doc.generated_at_utc === "string" ? doc.generated_at_utc : null,
   };
 }
 
 export async function listSlates(date: string): Promise<SlateListResult> {
   // A "ready" or "needs_selection" provider-slate document already
   // carries the full discovered `slates` array (selecting one slate
-  // never discards the others) -- reuse it when fresh enough instead of
-  // calling DraftKings live again.
+  // never discards the others) -- reuse it (fresh OR stale-but-usable)
+  // instead of calling DraftKings live again. Only when there is NO
+  // real, correctly-scoped artifact to reuse at all (missing, wrong
+  // provenance, or expired) do we fall through to a live call.
   const existing = await providerSlateFingerprint(date);
   const existingDoc = await safeReadJson<Record<string, unknown>>(existing.path);
-  if (
-    existingDoc &&
-    (existingDoc.status === "ready" || existingDoc.status === "needs_selection") &&
-    providerSlateFreshEnough(existingDoc) &&
-    isRealDraftKingsProvenance(existingDoc)
-  ) {
-    return slateListResultFromProviderDoc(existingDoc);
+  const hasUsableSlateData = existingDoc && (existingDoc.status === "ready" || existingDoc.status === "needs_selection") && isRealDraftKingsProvenance(existingDoc);
+  if (hasUsableSlateData) {
+    const freshness = providerSlateFreshness(existingDoc);
+    if (freshness === "fresh" || freshness === "stale") {
+      return slateListResultFromProviderDoc(existingDoc);
+    }
+    if (freshness === "expired") {
+      // CRITICAL: never attempt a live DraftKings call here -- Railway's
+      // egress is permanently IP-blocked, so that call is guaranteed to
+      // fail. Report the real cause (the worker has fallen behind)
+      // clearly instead of a generic provider failure or a doomed retry.
+      const ageMs = providerSlateAgeMs(existingDoc);
+      return {
+        status: "stale_expired",
+        reason: `DraftKings data was last updated ${ageMs !== null ? formatAge(ageMs) : "an unknown amount of time"} ago, which is too old to use safely. The automatic DraftKings fetch worker appears to be delayed -- please check back shortly.`,
+        providerName: (existingDoc!.provider_name as string | null) ?? null,
+        providerType: null,
+        isMock: false,
+        isConnected: false,
+        source: asProviderSource(existingDoc!.source),
+        slates: [],
+        slatesAvailable: 0,
+        dataStatus: null,
+        artifactAgeSeconds: ageMs !== null ? Math.round(ageMs / 1000) : null,
+        lastUpdatedAt: typeof existingDoc!.generated_at_utc === "string" ? (existingDoc!.generated_at_utc as string) : null,
+      };
+    }
+    // freshness === null (no parseable generated_at_utc at all) --
+    // falls through to the live call below, same as before this fix.
   }
 
   const result = await runPythonScript("scripts/list_dfs_slates.py", ["--date", date]);
@@ -140,6 +217,9 @@ export async function listSlates(date: string): Promise<SlateListResult> {
       source: null,
       slates: [],
       slatesAvailable: 0,
+      dataStatus: null,
+      artifactAgeSeconds: null,
+      lastUpdatedAt: null,
     };
   }
 
@@ -311,6 +391,14 @@ async function readPoolResult(entry: CachedPool): Promise<OptimizerPoolResult> {
     salaryCap: DK_CLASSIC_SALARY_CAP,
     hasOwnership: ownership !== null,
     vegasCoverage,
+    // Recomputed on every read (not frozen at build time) -- see
+    // CachedPool.lastUpdatedAt's own comment for why.
+    dataStatus: providerSlateFreshness({ generated_at_utc: entry.lastUpdatedAt }) === "stale" ? "stale" : "fresh",
+    artifactAgeSeconds: (() => {
+      const ms = providerSlateAgeMs({ generated_at_utc: entry.lastUpdatedAt });
+      return ms !== null ? Math.round(ms / 1000) : 0;
+    })(),
+    lastUpdatedAt: entry.lastUpdatedAt,
   };
 }
 
@@ -334,22 +422,33 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   }
 
   const providerBefore = await providerSlateFingerprint(date);
-  // Reuse an already-fetched, fresh-enough provider-slate document for
-  // THIS exact slate (selected_slate_id match -- a document fetched for
-  // a different slate on the same date carries no player data for this
-  // one) instead of calling DraftKings live again. forceRefresh always
-  // bypasses this, same as it always bypassed the pool cache above.
+  // Reuse an already-fetched provider-slate document for THIS exact
+  // slate (selected_slate_id match -- a document fetched for a different
+  // slate on the same date carries no player data for this one) --
+  // fresh OR stale-but-usable -- instead of calling DraftKings live
+  // again. forceRefresh always bypasses this, same as it always bypassed
+  // the pool cache above.
   const existingDoc = !forceRefresh ? await safeReadJson<Record<string, unknown>>(providerBefore.path) : null;
+  const hasUsableSlateData =
+    existingDoc && existingDoc.status === "ready" && existingDoc.selected_slate_id === slateId && isRealDraftKingsProvenance(existingDoc);
+  const existingFreshness = hasUsableSlateData ? providerSlateFreshness(existingDoc) : null;
+
+  if (hasUsableSlateData && existingFreshness === "expired") {
+    // CRITICAL: never fall back to a live DraftKings call here -- that
+    // path is permanently blocked from Railway. A clear, honest error
+    // instead of silently serving materially-stale salary/roster data
+    // or attempting a doomed live call.
+    const ageMs = providerSlateAgeMs(existingDoc);
+    throw new Error(
+      `DraftKings data for slate ${slateId} was last updated ${ageMs !== null ? formatAge(ageMs) : "an unknown amount of time"} ago, ` +
+        "which is too old to use safely. The automatic DraftKings fetch worker appears to be delayed -- please check back shortly.",
+    );
+  }
+
   let providerAfter = providerBefore;
   let providerDoc: Record<string, unknown> | null = null;
 
-  if (
-    existingDoc &&
-    existingDoc.status === "ready" &&
-    existingDoc.selected_slate_id === slateId &&
-    providerSlateFreshEnough(existingDoc) &&
-    isRealDraftKingsProvenance(existingDoc)
-  ) {
+  if (hasUsableSlateData && (existingFreshness === "fresh" || existingFreshness === "stale")) {
     providerDoc = existingDoc;
   } else {
     const fetchResult = await runPythonScript("scripts/fetch_dfs_slate.py", ["--date", date, "--slate-id", slateId]);
@@ -365,6 +464,8 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
   if (!providerAfter.path) {
     throw new Error(`Provider slate ${slateId} artifact path is unexpectedly missing.`);
   }
+
+  const lastUpdatedAt = typeof providerDoc.generated_at_utc === "string" ? (providerDoc.generated_at_utc as string) : new Date().toISOString();
 
   const poolBefore = await poolFingerprint(date);
   const poolResult = await runPythonScript("scripts/build_dfs_pool_from_provider.py", [
@@ -413,6 +514,7 @@ export async function loadPool(date: string, slateId: string, forceRefresh = fal
     poolPath: poolAfter.path,
     ownershipPath,
     builtAt: new Date().toISOString(),
+    lastUpdatedAt,
   };
   poolCache.set(key, entry);
   return readPoolResult(entry);

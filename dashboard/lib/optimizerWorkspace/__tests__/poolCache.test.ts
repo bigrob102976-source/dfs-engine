@@ -252,16 +252,54 @@ describe("listSlates", () => {
     ]);
   });
 
-  it("calls list_dfs_slates.py live when the existing provider-slate document is stale", async () => {
+  it("reuses a real STALE (>15min, <=2h) provider-slate document instead of calling DraftKings live (worker-reliability fix)", async () => {
     writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
       status: "ready",
-      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old
+      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old -- stale but usable
       provider_name: "draftkings_unofficial",
       is_mock: false,
       source: "draftkings_unofficial_live",
       selected_slate_id: "main",
       slates: [{ slate_id: "main", slate_name: "Featured", game_count: 9, start_time: null }],
     });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { listSlates } = await import("../poolCache");
+    const result = await listSlates(DATE);
+
+    expect(calls.map((c) => c.script)).toEqual([]); // CRITICAL: never a live DraftKings call
+    expect(result.status).toBe("ready");
+    expect(result.providerName).toBe("draftkings_unofficial");
+    expect(result.dataStatus).toBe("stale");
+    expect(result.artifactAgeSeconds).toBeGreaterThanOrEqual(3599);
+  });
+
+  it("reports stale_expired (never a live DraftKings call) when the real provider-slate document is older than the 2-hour ceiling", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3 hours old -- expired
+      provider_name: "draftkings_unofficial",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "main",
+      slates: [{ slate_id: "main", slate_name: "Featured", game_count: 9, start_time: null }],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { listSlates } = await import("../poolCache");
+    const result = await listSlates(DATE);
+
+    expect(calls.map((c) => c.script)).toEqual([]); // CRITICAL: never a live DraftKings call
+    expect(result.status).toBe("stale_expired");
+    expect(result.slates).toEqual([]);
+    expect(result.reason).toMatch(/too old to use safely/i);
+  });
+
+  it("still calls list_dfs_slates.py live when no real artifact exists at all for the date (cold start, unchanged behavior)", async () => {
     const calls: Array<{ script: string; args: string[] }> = [];
     const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
     __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
@@ -373,10 +411,10 @@ describe("loadPool", () => {
     expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
   });
 
-  it("does not reuse a stale provider-slate document even for the same slate", async () => {
+  it("reuses a real STALE (>15min, <=2h) provider-slate document for the same slate instead of calling DraftKings live (worker-reliability fix)", async () => {
     writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
       status: "ready",
-      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old
+      generated_at_utc: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour old -- stale but usable
       provider_name: "draftkings_unofficial",
       is_mock: false,
       source: "draftkings_unofficial_live",
@@ -389,9 +427,31 @@ describe("loadPool", () => {
     __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
 
     const { loadPool } = await import("../poolCache");
-    await loadPool(DATE, "mock-main");
+    const pool = await loadPool(DATE, "mock-main");
 
-    expect(calls.map((c) => c.script)).toContain("scripts/fetch_dfs_slate.py");
+    expect(calls.map((c) => c.script)).toEqual(["scripts/build_dfs_pool_from_provider.py", "scripts/project_dk_ownership.py"]);
+    expect(pool.dataStatus).toBe("stale");
+    expect(pool.artifactAgeSeconds).toBeGreaterThanOrEqual(3599);
+  });
+
+  it("refuses (throws) rather than reusing or live-fetching an EXPIRED (>2h) provider-slate document -- never a live DraftKings call", async () => {
+    writeJson(`dfs_input/${DATE}/provider_slate_${nextTs()}.json`, {
+      status: "ready",
+      generated_at_utc: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3 hours old -- expired
+      provider_name: "draftkings_unofficial",
+      is_mock: false,
+      source: "draftkings_unofficial_live",
+      selected_slate_id: "mock-main",
+      slates: [],
+      players: [],
+    });
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    await expect(loadPool(DATE, "mock-main")).rejects.toThrow(/too old to use safely/i);
+    expect(calls.map((c) => c.script)).toEqual([]); // CRITICAL: never a live DraftKings call, never fetch_dfs_slate.py
   });
 
   it("does not reuse a fresh, correctly-scoped provider-slate document if it isn't real DraftKings data (defense-in-depth)", async () => {
@@ -439,6 +499,18 @@ describe("loadPool", () => {
 
     const { loadPool } = await import("../poolCache");
     await expect(loadPool(DATE, "mock-main")).rejects.toThrow(/failed to build player pool/i);
+  });
+
+  it("reports dataStatus fresh with a near-zero age for a just-fetched slate", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(defaultHandlers(), calls));
+
+    const { loadPool } = await import("../poolCache");
+    const pool = await loadPool(DATE, "mock-main");
+    expect(pool.dataStatus).toBe("fresh");
+    expect(pool.artifactAgeSeconds).toBeLessThan(30);
+    expect(typeof pool.lastUpdatedAt).toBe("string");
   });
 
   it("still returns a usable pool when ownership projection fails (best-effort)", async () => {

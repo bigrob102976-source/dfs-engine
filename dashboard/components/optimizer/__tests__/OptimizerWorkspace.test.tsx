@@ -204,6 +204,77 @@ describe("OptimizerWorkspace", () => {
     expect(screen.queryByText(/DFS.*not connected/i)).not.toBeInTheDocument();
   });
 
+  it("worker-reliability fix, day-rollover safety: a previous day's persisted DraftGroup is rejected and today's valid slate is auto-selected", async () => {
+    window.localStorage.setItem(
+      "mlb-dfs-optimizer-workspace-v1",
+      JSON.stringify({
+        selectedSlateId: "yesterday-slate-152902", locks: [], exclusions: [], maxExposure: {}, stackSize: null,
+        stackTeam: null, allowPitcherVsHitter: false, minSalary: null, minUnique: 1, lineups: 20, objective: "projection",
+      }),
+    );
+    const { calls } = installFetchMock();
+    render(<OptimizerWorkspace />);
+
+    // Yesterday's persisted slate ("yesterday-slate-152902") is not in
+    // today's real slate list (SLATES_READY only has "mock-main") --
+    // the app must discard it and auto-select today's valid slate rather
+    // than requesting a pool for a slate that no longer exists.
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/previously selected slate is no longer available/i)).toBeInTheDocument();
+
+    const poolCall = calls.find((c) => c.url === "/api/optimizer/pool");
+    expect(poolCall).toBeDefined();
+    const body = JSON.parse(poolCall!.init!.body as string);
+    expect(body.slateId).toBe("mock-main"); // today's real, valid slate -- never yesterday's stale ID
+    expect(body.slateId).not.toBe("yesterday-slate-152902");
+  });
+
+  it("worker-reliability fix: shows no stale-data notice when the pool is fresh", async () => {
+    installFetchMock({
+      "/api/optimizer/pool": () => jsonResponse({ pool: { ...POOL_RESULT, dataStatus: "fresh", artifactAgeSeconds: 30, lastUpdatedAt: "2026-08-12T18:00:00.000Z" } }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.queryByText(/DraftKings data last updated/i)).not.toBeInTheDocument();
+  });
+
+  it("worker-reliability fix: shows a visible, non-blocking notice when the pool is built from a real, reused STALE artifact", async () => {
+    installFetchMock({
+      "/api/optimizer/pool": () =>
+        jsonResponse({ pool: { ...POOL_RESULT, dataStatus: "stale", artifactAgeSeconds: 47 * 60, lastUpdatedAt: "2026-08-12T17:13:00.000Z" } }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/DraftKings data last updated 47 minutes ago/i)).toBeInTheDocument();
+    // Never blocks the optimizer -- Build Lineups stays available.
+    expect(screen.getByText("Build Lineups")).toBeInTheDocument();
+    expect(screen.getByText("Build Lineups")).not.toBeDisabled();
+  });
+
+  it("worker-reliability fix: shows the clear stale_expired message and never a generic error when the real artifact has expired", async () => {
+    installFetchMock({
+      "/api/optimizer/slates": () =>
+        jsonResponse({
+          date: "2026-08-12",
+          status: "stale_expired",
+          reason: "DraftKings data was last updated 3h 12m ago, which is too old to use safely. The automatic DraftKings fetch worker appears to be delayed -- please check back shortly.",
+          providerName: "draftkings_unofficial",
+          providerType: null,
+          isMock: false,
+          isConnected: false,
+          source: "draftkings_unofficial_live",
+          slates: [],
+          slatesAvailable: 0,
+          dataStatus: null,
+          artifactAgeSeconds: 11520,
+          lastUpdatedAt: "2026-08-12T14:48:00.000Z",
+        }),
+    });
+    render(<OptimizerWorkspace />);
+    await waitFor(() => expect(screen.getByText(/too old to use safely/i)).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText("Build Lineups")).toBeDisabled();
+  });
+
   it("shows a clear message (never crashes) when DFS_SALARY_PROVIDER is explicitly set to an unrecognized value", async () => {
     installFetchMock({
       "/api/optimizer/slates": () =>
