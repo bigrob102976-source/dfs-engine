@@ -91,7 +91,7 @@ def test_enabled_provider_is_the_automatic_cascade_default(monkeypatch):
 
     monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: False)
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
     monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
 
     provider, reason, source = get_configured_provider("2026-08-20")
@@ -128,7 +128,7 @@ def test_explicit_override_works_without_any_flag(monkeypatch):
     from dfs.providers.config import get_configured_provider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
     monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
 
     provider, reason, source = get_configured_provider("2026-08-20")
@@ -159,7 +159,7 @@ def test_enabled_provider_builds_provider_slate_result(monkeypatch):
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
     monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
 
     provider = DraftKingsUnofficialProvider()
@@ -180,6 +180,80 @@ def test_enabled_provider_builds_provider_slate_result(monkeypatch):
     assert len(players) == 1
     assert players[0].name == "A"
     assert players[0].opponent == "TOR"
+
+
+# 2026-09-01 disk incident: the scheduled production worker's ONE call
+# path (this provider's get_slate()) must default the local raw archive
+# OFF, since it grew unbounded to 27.31 GB in 12 days -- R2 is now the
+# real durable RAW record (canonical_ingestion/raw_capture.py, M2).
+
+
+def _wire_universe_and_detail(monkeypatch, captured_kwargs):
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
+
+    def fake_universe(sport_code, **kwargs):
+        captured_kwargs["universe"] = kwargs
+        return universe
+
+    def fake_detail(*args, **kwargs):
+        captured_kwargs["detail"] = kwargs
+        return _detail_ok()
+
+    monkeypatch.setattr(collector, "collect_sport_universe", fake_universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", fake_detail)
+
+
+def test_scheduled_worker_path_disables_local_raw_archive_by_default(monkeypatch):
+    monkeypatch.delenv("DK_UNOFFICIAL_LOCAL_RAW_ARCHIVE_ENABLED", raising=False)
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    captured: dict = {}
+    _wire_universe_and_detail(monkeypatch, captured)
+
+    DraftKingsUnofficialProvider().get_slate("2026-08-20", sport="MLB")
+
+    assert captured["universe"]["save_snapshot"] is False
+    assert captured["detail"]["save_snapshot"] is False
+
+
+def test_local_raw_archive_can_still_be_enabled_explicitly_for_development(monkeypatch):
+    monkeypatch.setenv("DK_UNOFFICIAL_LOCAL_RAW_ARCHIVE_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    captured: dict = {}
+    _wire_universe_and_detail(monkeypatch, captured)
+
+    DraftKingsUnofficialProvider().get_slate("2026-08-20", sport="MLB")
+
+    assert captured["universe"]["save_snapshot"] is True
+    assert captured["detail"]["save_snapshot"] is True
+
+
+def test_disabling_local_raw_archive_does_not_affect_r2_persistence(monkeypatch):
+    # Structural proof, not just behavioral: draftkings_unofficial/collector.py
+    # (the module save_snapshot controls) never imports the R2/object-storage
+    # abstraction at all -- disabling local disk archiving cannot, even in
+    # principle, touch R2. research/artifact_storage.py-based persistence
+    # (the REAL durable RAW/NORMALIZED record, plus the pre-existing
+    # provider_slate_*.json artifact) lives in an entirely separate module
+    # this provider's get_slate() never imports either.
+    import ast
+    import inspect
+
+    import draftkings_unofficial.collector as collector_module
+    import dfs.providers.draftkings_unofficial_provider as provider_module
+
+    for module in (collector_module, provider_module):
+        source = inspect.getsource(module)
+        tree = ast.parse(source)
+        imported_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported_names.add(node.module)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported_names.add(alias.name)
+        assert not any("artifact_storage" in name for name in imported_names), f"{module.__name__} must never import research.artifact_storage"
 
 
 def _detail_with_multi_slot_player():
@@ -208,7 +282,7 @@ def test_multi_roster_slot_rows_for_the_same_player_are_merged_not_duplicated(mo
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
     monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_with_multi_slot_player())
 
     provider = DraftKingsUnofficialProvider()
@@ -234,7 +308,7 @@ def test_multi_roster_slot_rows_preserve_all_draftable_ids(monkeypatch):
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
     monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_with_multi_slot_player())
 
     provider = DraftKingsUnofficialProvider()
@@ -253,7 +327,7 @@ def test_no_active_slate_raises_provider_no_slate_error(monkeypatch):
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_NO_ACTIVE_SLATE, sport_code="NHL")
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
 
     provider = DraftKingsUnofficialProvider()
     with pytest.raises(ProviderNoSlateError):
@@ -265,7 +339,7 @@ def test_no_slates_matching_requested_date_raises_no_slate_error(monkeypatch):
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()])
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
 
     provider = DraftKingsUnofficialProvider()
     with pytest.raises(ProviderNoSlateError):
@@ -277,7 +351,7 @@ def test_universe_error_status_raises_provider_unavailable(monkeypatch):
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
 
     universe = collector.SportUniverseResult(status=collector.STATUS_UNAVAILABLE, sport_code="MLB", error="down")
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
 
     provider = DraftKingsUnofficialProvider()
     with pytest.raises(ProviderUnavailableError):
@@ -306,7 +380,7 @@ def test_config_surfaces_real_failure_without_csv_or_mock_fallback(monkeypatch):
     monkeypatch.setattr(config_module, "CsvImportPoolProvider", _NeverCalledCsv)
 
     universe = collector.SportUniverseResult(status=collector.STATUS_UNAVAILABLE, sport_code="MLB", error="down")
-    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
 
     provider, reason, source = get_configured_provider("2026-08-20")
     assert provider is None

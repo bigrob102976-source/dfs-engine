@@ -41,6 +41,7 @@ from dfs.providers.source_provenance import DRAFTKINGS_UNOFFICIAL_LIVE, UNOFFICI
 from dfs.slate_validation import resolve_game_ids
 from draftkings_unofficial import collector
 from draftkings_unofficial.client import DraftKingsUnofficialError
+from draftkings_unofficial.persistence import local_raw_archive_enabled
 from draftkings_unofficial.structural_validation import validate_classic_draftgroup
 
 
@@ -82,6 +83,16 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
             extra_kwargs["cache"] = cache
         if capture is not None:
             extra_kwargs["capture"] = capture
+        # 2026-09-01 disk incident fix: this is the ONE call path the
+        # scheduled production worker actually uses (via
+        # scripts/fetch_dfs_slate.py) -- collector.py's own
+        # save_snapshot=True default grew an un-pruned local disk
+        # archive to 27.31 GB in 12 days. R2 (canonical_ingestion/
+        # raw_capture.py, M2) is now the real durable RAW record, so
+        # this defaults local archiving OFF here specifically, with an
+        # explicit env-var opt-in for local debugging -- see
+        # draftkings_unofficial/persistence.py's module docstring.
+        extra_kwargs["save_snapshot"] = local_raw_archive_enabled(default=False)
         universe = collector.collect_sport_universe(sport.upper(), **extra_kwargs)
         if universe.status == collector.STATUS_NO_ACTIVE_SLATE:
             raise ProviderNoSlateError(f"DraftKings unofficial: NO ACTIVE SLATE for sport={sport!r}.")
