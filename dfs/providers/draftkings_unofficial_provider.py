@@ -155,11 +155,16 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                     merged_by_player_id[key] = {
                         "name": d.display_name, "team": d.team_abbreviation or "", "opponent": opponent,
                         "game": game_str, "salary": d.salary or 0, "position_eligibility": [],
-                        "start_time": game.start_time if game else None,
+                        "start_time": game.start_time if game else None, "draftable_ids": [],
                     }
                     player_order.append(key)
                 if d.position and d.position not in merged_by_player_id[key]["position_eligibility"]:
                     merged_by_player_id[key]["position_eligibility"].append(d.position)
+                # M1D: preserve every per-roster-slot draftableId for this
+                # player_id -- never used as identity (that's `key`,
+                # above), only carried forward for the future canonical
+                # slate-player row (canonical/models.py).
+                merged_by_player_id[key]["draftable_ids"].append(str(d.draftable_id))
 
             players: List[ProviderPlayer] = []
             for key in player_order:
@@ -169,6 +174,7 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                     salary=r["salary"], position_eligibility=r["position_eligibility"], slate_id=slate_id,
                     slate_name=slate.label or slate.tag, start_time=r["start_time"],
                     source=self.name, retrieved_at=retrieved_at,
+                    provider_draftable_ids=r["draftable_ids"],
                 ))
             players_by_slate[slate_id] = players
 

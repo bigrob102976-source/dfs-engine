@@ -226,6 +226,28 @@ def test_multi_roster_slot_rows_for_the_same_player_are_merged_not_duplicated(mo
     assert result.slates[0].player_count == 2
 
 
+def test_multi_roster_slot_rows_preserve_all_draftable_ids(monkeypatch):
+    # M1D: draftableId must be preserved (never discarded, never used as
+    # identity) even though rows sharing one player_id are merged into a
+    # single ProviderPlayer.
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_with_multi_slot_player())
+
+    provider = DraftKingsUnofficialProvider()
+    result = provider.get_slate("2026-08-20", sport="MLB")
+    players = result.players_by_slate[result.slates[0].slate_id]
+
+    flex_player = next(p for p in players if p.name == "Flex Player")
+    other_player = next(p for p in players if p.name == "Other Player")
+    assert flex_player.provider_draftable_ids == ["101", "102"]
+    assert flex_player.external_player_id == "999"  # draftableId never becomes the identity
+    assert other_player.provider_draftable_ids == ["201"]
+
+
 def test_no_active_slate_raises_provider_no_slate_error(monkeypatch):
     monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
     from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider

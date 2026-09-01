@@ -27,6 +27,16 @@ class ProviderPlayer:
     start_time: Optional[str]  # ISO-8601 if the provider exposes it
     source: str
     retrieved_at: str
+    # M1D: DraftKings' draftables endpoint returns one row per player PER
+    # ROSTER-SLOT ELIGIBILITY (draftableId), while external_player_id
+    # above is always the provider's stable, player-level identity (DK's
+    # playerId) -- see draftkings_unofficial_provider.py's merge comment
+    # for the confirmed live example (Ohtani, one player_id, two
+    # draftableIds). This field preserves ALL of a player's per-slate
+    # draftableIds (previously discarded after normalization, per the M0
+    # audit); it is never used as, and must never be collapsed into,
+    # player identity.
+    provider_draftable_ids: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

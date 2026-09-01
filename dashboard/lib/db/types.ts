@@ -268,3 +268,105 @@ export interface WorkerHeartbeatRow {
   status: string;
   metadata_json: string | null;
 }
+
+// M1: canonical slate + player identity foundation
+// (lib/db/migrations/0009_slate_identity_foundation.sql /
+// migrations-postgres/0010_slate_identity_foundation.sql). ADDITIVE
+// FOUNDATION ONLY -- no production query module reads/writes these
+// tables yet; see canonical/ (Python) for the mirrored dataclasses.
+
+export type ReviewStatus = "AUTO_APPROVED" | "NEEDS_REVIEW" | "REVIEWED_APPROVED" | "REVIEWED_REJECTED";
+
+export interface PlayerRow {
+  internal_player_id: string;
+  sport: string;
+  canonical_name: string;
+  normalized_name: string;
+  current_team: string | null;
+  position: string | null;
+  active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlayerExternalIdRow {
+  id: string;
+  internal_player_id: string;
+  sport: string;
+  provider: string;
+  external_id: string;
+  external_id_type: string;
+  match_method: string;
+  match_confidence: number;
+  review_status: ReviewStatus;
+  is_current: number;
+  valid_from: string;
+  valid_to: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SlateValidationState = "PENDING" | "VALID" | "REJECTED";
+
+export interface CanonicalSlateRow {
+  internal_slate_id: string;
+  sport: string;
+  site: string;
+  provider: string;
+  provider_slate_id: string;
+  slate_name: string | null;
+  slate_date: string;
+  first_game_start_utc: string;
+  game_count: number | null;
+  game_ids_json: string | null;
+  salary_cap: number | null;
+  roster_template_json: string | null;
+  source_provenance: string;
+  validation_state: SlateValidationState;
+  validation_findings_json: string | null;
+  schema_version: string;
+  raw_hash: string | null;
+  normalized_hash: string | null;
+  fetched_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SlatePlayerIdentityStatus = "RESOLVED" | "UNRESOLVED" | "REVIEW_REQUIRED";
+
+export interface CanonicalSlatePlayerRow {
+  internal_slate_id: string;
+  provider_player_id: string;
+  internal_player_id: string | null;
+  provider_draftable_ids_json: string | null;
+  name: string;
+  team: string;
+  opponent: string | null;
+  game_id: string | null;
+  salary: number;
+  position_eligibility_json: string | null;
+  roster_slot_eligibility_json: string | null;
+  identity_status: SlatePlayerIdentityStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export type IdentityReviewQueueStatus = "PENDING" | "RESOLVED" | "REJECTED";
+
+export interface IdentityReviewQueueRow {
+  id: string;
+  sport: string;
+  provider: string;
+  external_id: string;
+  provider_player_name: string;
+  provider_team: string | null;
+  provider_position: string | null;
+  candidate_internal_player_id: string | null;
+  reason: string;
+  status: IdentityReviewQueueStatus;
+  resolved_internal_player_id: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
