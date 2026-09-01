@@ -65,6 +65,13 @@ async function main() {
   } else {
     console.log(`\nNOT PROMOTED -- ${result.reason}`);
   }
+  // M3K: a single, compact, uniquely-prefixed line a calling process
+  // (scripts/fetch_dfs_slate.py) can parse without needing to locate a
+  // multi-line pretty-printed JSON block inside captured stdout -- used
+  // to gate the M3K success heartbeat on `promoted === true` specifically
+  // (not merely "this script exited 0", which is also true for a
+  // legitimate no-op/rejection outcome).
+  console.log(`RESULT_JSON:${JSON.stringify(result)}`);
 }
 
 main().catch((err) => {

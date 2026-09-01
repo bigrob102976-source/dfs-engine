@@ -40,7 +40,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dfs.providers.base import ProviderAuthenticationError, ProviderNoSlateError, ProviderUnavailableError
 from dfs.providers.config import get_configured_provider
 
-FETCH_TIMEOUT_SECONDS = 60
+# M3D: each per-slate fetch_dfs_slate.py invocation now also performs
+# an in-process canonical RAW/NORMALIZED write plus a Postgres shadow
+# promotion subprocess (see fetch_dfs_slate.py::CANONICAL_PROMOTION_
+# TIMEOUT_SECONDS) -- this outer timeout must stay comfortably larger
+# than that inner budget, or this script could kill a per-slate child
+# process while its OWN nested promotion subprocess is still validly
+# running within its own budget.
+FETCH_TIMEOUT_SECONDS = 90
 
 
 def main() -> None:
@@ -75,14 +82,31 @@ def main() -> None:
     failures = []
     for slate in result.slates:
         print(f"\n--- fetching {slate.slate_id} ({slate.slate_name}) ---")
-        proc = subprocess.run(
-            [
-                sys.executable, "scripts/fetch_dfs_slate.py",
-                "--date", args.date, "--slate-id", slate.slate_id,
-                "--sport", args.sport, "--site", args.site,
-            ],
-            capture_output=True, text=True, timeout=FETCH_TIMEOUT_SECONDS, cwd=repo_root,
-        )
+        # M3D: a slow/hung slate (network or shadow-promotion side) must
+        # never stop the OTHER valid slates in this cycle from being
+        # attempted -- catch both a real timeout and any other
+        # unexpected subprocess-launch failure per slate, record it, and
+        # continue the loop.
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable, "scripts/fetch_dfs_slate.py",
+                    "--date", args.date, "--slate-id", slate.slate_id,
+                    "--sport", args.sport, "--site", args.site,
+                ],
+                capture_output=True, text=True, timeout=FETCH_TIMEOUT_SECONDS, cwd=repo_root,
+            )
+        except subprocess.TimeoutExpired as exc:
+            print(f"TIMEOUT after {FETCH_TIMEOUT_SECONDS}s fetching {slate.slate_id} -- skipping, continuing with remaining slates.", file=sys.stderr)
+            if exc.stdout:
+                print(exc.stdout[-500:] if isinstance(exc.stdout, str) else exc.stdout.decode(errors="replace")[-500:])
+            failures.append(slate.slate_id)
+            continue
+        except Exception as exc:  # noqa: BLE001 -- one slate's launch failure must not stop the batch
+            print(f"ERROR launching fetch for {slate.slate_id}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            failures.append(slate.slate_id)
+            continue
+
         print(proc.stdout[-500:])
         if proc.returncode != 0:
             print(proc.stderr[-500:], file=sys.stderr)

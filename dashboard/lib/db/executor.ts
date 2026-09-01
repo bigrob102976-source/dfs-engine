@@ -20,14 +20,26 @@ let executorInstance: SqlExecutor | null = null;
  * broken Postgres connection surfaces as a rejected query promise from
  * whatever query module called it, never a silent SQLite substitution.
  *
- * Deliberately does NOT apply Postgres migrations itself -- migrations
- * are an explicit, separate operator step (see
- * lib/db/postgresClient.ts::runPostgresMigrations and this milestone's
- * documented production migration command), never an implicit side
- * effect of the first query a request happens to make. (SQLite's
- * lib/db/client.ts::getDb() already applies its own migrations on open,
- * same as before this milestone -- that pre-existing, cheap, purely-local
- * behavior is intentionally left unchanged.) */
+ * Deliberately does NOT apply Postgres migrations itself from THIS
+ * function -- lib/db/postgresClient.ts::runPostgresMigrations is a
+ * separate, explicit call this codebase never makes from inside a
+ * request handler. (SQLite's lib/db/client.ts::getDb() already applies
+ * its own migrations on open, same as before this milestone -- that
+ * pre-existing, cheap, purely-local behavior is intentionally left
+ * unchanged.)
+ *
+ * CORRECTION (M2, 2026-09-01): the paragraph above describes this
+ * repository's OWN code, not the actual production deploy pipeline.
+ * Real deploy logs confirmed Railway is configured (in its own
+ * project/service settings, outside this repo and its version control)
+ * to run `npm run db:migrate:postgres` automatically after every
+ * deploy -- e.g. migrations 0010 and 0011 were both auto-applied to
+ * production within seconds of their deploy completing, with no manual
+ * step taken. Do NOT assume a migration merged to main requires (or
+ * waits for) a separate manual apply step in production -- it doesn't.
+ * See dashboard/lib/db/migrationSafety.ts (M3G) for the resulting
+ * safety guardrail this makes necessary, and this repo's M2/M3
+ * milestone reports for the full finding. */
 export function getExecutor(): SqlExecutor {
   if (!executorInstance) {
     const decision = resolveDbBackend();

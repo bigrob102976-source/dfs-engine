@@ -150,11 +150,14 @@ export interface SchemaReadiness {
  * open a connection" (checkPostgresConnection above) -- a fresh Postgres
  * database connects fine and has zero tables. Compares
  * listPostgresMigrationFiles()'s on-disk list against schema_migrations'
- * applied rows; never applies anything itself (migrations are an
- * explicit, separate operator step -- see the production migration
- * command documented alongside this milestone's final report). Never
- * throws; a query failure (e.g. schema_migrations doesn't exist yet on a
- * brand-new database) is reported as ready:false, not a crash. */
+ * applied rows; this function never applies anything itself -- but see
+ * lib/db/executor.ts::getExecutor()'s M2 CORRECTION docstring: Railway's
+ * own deploy configuration (not this repo's code) DOES run the
+ * migration command automatically on every deploy, so "ready:false"
+ * here should be read as "not applied as of this exact read," not "an
+ * operator still needs to do something." Never throws; a query failure
+ * (e.g. schema_migrations doesn't exist yet on a brand-new database) is
+ * reported as ready:false, not a crash. */
 export async function checkPostgresSchemaReadiness(client: PostgresQueryable = getPostgresPool()): Promise<SchemaReadiness> {
   const expected = listPostgresMigrationFiles();
   try {

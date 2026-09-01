@@ -126,3 +126,39 @@ def test_normalized_hash_draftable_id_change_different_hash():
     players_b = _players()
     players_b[1]["providerDraftableIds"] = ["20"]  # lost a real draftableId
     assert compute_normalized_hash(slate, players_a) != compute_normalized_hash(slate, players_b)
+
+
+# M3H -- cross-language golden fixtures (reciprocal of
+# dashboard/lib/__tests__/canonicalHashing.test.ts's identical cases).
+# If EITHER language's implementation ever changes in a way that shifts
+# these hashes, this test and its TypeScript counterpart both fail --
+# that is the whole point: a silent one-sided drift is caught here.
+
+_GOLDEN_SLATE_1 = {
+    "internalSlateId": "uuid-1", "sport": "MLB", "site": "draftkings", "provider": "draftkings_unofficial",
+    "providerSlateId": "152904", "slateName": "Main", "slateDate": "2026-08-31",
+    "firstGameStartUtc": "2026-08-31T23:05:00Z", "gameCount": 2, "gameIds": ["g2", "g1"],
+    "salaryCap": 50000, "rosterTemplate": {"OF": 3, "P": 2}, "sourceProvenance": "DRAFTKINGS_UNOFFICIAL_LIVE",
+    "validationState": "VALID", "validationFindings": [], "fetchedAt": "2026-08-31T20:00:00Z",
+}
+
+_GOLDEN_PLAYERS_1 = [
+    {"internalSlateId": "uuid-1", "internalPlayerId": None, "providerPlayerId": "999", "providerDraftableIds": ["102", "101"],
+     "name": "José Ramírez", "team": "CLE", "opponent": "BOS", "gameId": "g1", "salary": 5200,
+     "positionEligibility": ["OF", "1B"], "rosterSlotEligibility": [], "identityStatus": "UNRESOLVED"},
+    {"internalSlateId": "uuid-1", "internalPlayerId": None, "providerPlayerId": "555", "providerDraftableIds": ["201"],
+     "name": "Flex Player", "team": "BOS", "opponent": "CLE", "gameId": "g1", "salary": 4000,
+     "positionEligibility": ["P"], "rosterSlotEligibility": [], "identityStatus": "RESOLVED"},
+]
+
+_GOLDEN_HASH_1 = "7122ee09477fb050aa7209dab410560b62386b00d1d51a5f4dcda39b1d1f2675"
+_GOLDEN_HASH_2_EMPTY_PLAYERS = "50129d3870a9da66f88e09a2032d49037402652b872e92f63f64293fed0750e2"
+
+
+def test_golden_fixture_matches_typescript_two_players_unicode_name():
+    assert compute_normalized_hash(_GOLDEN_SLATE_1, _GOLDEN_PLAYERS_1) == _GOLDEN_HASH_1
+
+
+def test_golden_fixture_matches_typescript_empty_players():
+    slate2 = dict(_GOLDEN_SLATE_1, providerSlateId="999999")
+    assert compute_normalized_hash(slate2, []) == _GOLDEN_HASH_2_EMPTY_PLAYERS

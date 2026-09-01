@@ -20,6 +20,8 @@ Usage:
 """
 
 import argparse
+import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -35,7 +37,15 @@ from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
 DEFAULT_OUTPUT_ROOT = "dfs_input"
-CANONICAL_SHADOW_TIMEOUT_SECONDS = 60
+# M3: promotion is a single Postgres round-trip (no DK network call) --
+# generous but bounded so one stuck promotion can't stall the worker.
+# Kept comfortably below scripts/fetch_all_dfs_slates.py's own outer
+# per-slate FETCH_TIMEOUT_SECONDS (90s), which must always exceed
+# real-fetch-time + this budget with margin -- see that script's own
+# comment on FETCH_TIMEOUT_SECONDS for why.
+CANONICAL_PROMOTION_TIMEOUT_SECONDS = 45
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DASHBOARD_ROOT = REPO_ROOT / "dashboard"
 
 
 def _load_research_games(date: str) -> list:
@@ -109,8 +119,25 @@ def main() -> None:
 
     print(f"\nProvider: {provider.name} (source: {source})")
     research_games = _load_research_games(args.date)
+
+    # M3: capture EXACT raw bytes during THIS ONE real fetch (additive
+    # kwarg, see draftkings_unofficial/client.py::RawCapture) so the
+    # canonical shadow path can reuse it below instead of performing its
+    # OWN second independent real DK fetch -- see
+    # canonical_ingestion/pipeline.py's M3 REDESIGN docstring for why
+    # that redundant fetch was measurably breaking the worker's
+    # execution-time budget. Only the real DK provider supports this
+    # kwarg (mock/CSV providers do not), so it's passed conditionally.
+    recorder = None
+    get_slate_kwargs = {}
+    if provider.name == "draftkings_unofficial":
+        from canonical_ingestion.raw_capture import RawCaptureRecorder
+
+        recorder = RawCaptureRecorder()
+        get_slate_kwargs["capture"] = recorder.record
+
     try:
-        result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=research_games)
+        result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=research_games, **get_slate_kwargs)
     except ProviderAuthenticationError as e:
         print(f"\nDFS SALARIES: AUTHENTICATION FAILED\n{e}")
         path = _save_document(args, status="auth_failed", reason=str(e), provider_name=provider.name, source=source)
@@ -176,40 +203,129 @@ def main() -> None:
     )
     print(f"\nFile written:\n  - {path}")
 
-    # M2: parallel/shadow canonical ingestion -- attached HERE,
+    # M2/M3: parallel/shadow canonical ingestion -- attached HERE,
     # deliberately AFTER the legacy artifact write above has already
     # succeeded, and ONLY for the real DraftKings Unofficial provider
-    # (never mock/CSV -- there is no independent real DraftGroup to
-    # re-fetch against for those). Wrapped so that ANY shadow-path
-    # failure (network, validation, storage) can NEVER affect this
-    # script's own exit code or the legacy artifact just written -- see
-    # canonical_ingestion/pipeline.py's M2I docstring. The customer-
-    # facing path (poolCache.ts, reading the file written above) is
-    # completely unaffected either way.
-    if provider.name == "draftkings_unofficial":
-        _run_canonical_shadow_ingestion(args.date, chosen.slate_id, args.sport, args.site)
+    # (never mock/CSV -- those never populate `recorder`). Runs IN-PROCESS
+    # (M3: no subprocess, no second fetch -- reuses `result`/`recorder`
+    # from the ONE real fetch above) through RAW+NORMALIZED R2, then
+    # automatically triggers Postgres shadow promotion as a single
+    # subprocess call to the Node/TS promotion script (Postgres access
+    # has always lived exclusively on the Node side of this codebase --
+    # see canonical_ingestion/__init__.py). Every step is wrapped so a
+    # shadow-path failure can NEVER affect this script's own exit code
+    # or the legacy artifact just written -- see canonical_ingestion/
+    # pipeline.py's M2I/M3C docstring. The customer-facing path
+    # (poolCache.ts, reading the file written above) is unaffected
+    # either way.
+    if provider.name == "draftkings_unofficial" and recorder is not None:
+        try:
+            _run_canonical_shadow_and_promotion(args.date, args.sport, args.site, chosen, result, recorder)
+        except Exception as exc:  # noqa: BLE001 -- M3C: belt-and-suspenders; the legacy artifact above is already written and must not be affected
+            print(f"\nCANONICAL SHADOW/PROMOTION: unexpected top-level failure -- {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
-def _run_canonical_shadow_ingestion(date: str, slate_id: str, sport: str, site: str) -> None:
+def _run_canonical_shadow_and_promotion(date: str, sport: str, site: str, chosen_slate_info, fetch_result, recorder) -> dict:
+    """Returns a structured shadow-status dict (never raises) -- the
+    caller is expected to print it; a future M3E status-recording step
+    can also persist it. Fields mirror
+    canonical_ingestion.pipeline.ShadowIngestionResult plus a nested
+    `promotion` result."""
+    from canonical_ingestion.pipeline import build_normalized_from_fetch
+
+    provider_players = fetch_result.players_by_slate.get(chosen_slate_info.slate_id, [])
+    shadow_result = build_normalized_from_fetch(
+        sport=sport, site=site, provider_name="draftkings_unofficial", slate_info=chosen_slate_info,
+        provider_players=provider_players, recorder=recorder, date=date,
+    )
+    print("\n--- canonical shadow ingestion ---")
+    print(json.dumps(shadow_result.to_dict(), indent=2, default=str))
+
+    status = shadow_result.to_dict()
+    status["promotion"] = None
+
+    if not shadow_result.ok:
+        print(f"CANONICAL SHADOW INGESTION: FAILED -- {shadow_result.error_type}: {shadow_result.error}", file=sys.stderr)
+        return status
+
+    print(
+        f"CANONICAL SHADOW INGESTION: OK -- {shadow_result.player_count} players "
+        f"({shadow_result.resolved_count} resolved, {shadow_result.unresolved_count} unresolved, "
+        f"{shadow_result.review_required_count} review-required)"
+    )
+    promotion = _run_canonical_promotion(shadow_result.normalized_key)
+    status["promotion"] = promotion
+
+    # M3K: fire the optional success heartbeat ONLY when every real stage
+    # succeeded -- a real slate was found (we're in this function at
+    # all), real players were fetched (checked below), NORMALIZED write
+    # succeeded (shadow_result.ok, already true to reach here), AND
+    # Postgres promotion actually PROMOTED (not merely "the script exited
+    # 0" -- a legitimate no-op/rejection also exits 0). See
+    # canonical_ingestion/heartbeat.py's own docstring for the full
+    # definition and why "the worker merely started" is never sufficient.
+    if provider_players and promotion.get("promoted") is True:
+        from canonical_ingestion.heartbeat import send_success_heartbeat
+
+        send_success_heartbeat(detail=f"{chosen_slate_info.slate_id}: {shadow_result.player_count} players")
+
+    return status
+
+
+def _run_canonical_promotion(normalized_key: str) -> dict:
+    """Automatic M3B promotion trigger -- a single subprocess call to
+    the SAME Node/TS promotion function M2's manual proof used
+    (dashboard/lib/db/canonicalPromotion.ts, via
+    dashboard/scripts/promote-canonical-slate.ts), never a second,
+    divergent promotion implementation. `npx` is a platform shim (a
+    .CMD file on Windows) that Python's subprocess cannot exec directly
+    without shell resolution -- shutil.which() resolves the real
+    executable path instead, avoiding shell=True entirely. Run with
+    cwd=DASHBOARD_ROOT so npx resolves the project's own pinned local
+    tsx install rather than reaching out to fetch one. Never raises --
+    a promotion failure here must never affect the legacy artifact
+    already written above."""
+    npx_path = shutil.which("npx")
+    if npx_path is None:
+        print("CANONICAL PROMOTION: skipped -- npx not found on PATH.", file=sys.stderr)
+        return {"ok": False, "error": "npx not found on PATH", "error_type": "npx_not_found"}
+
+    print("\n--- canonical shadow promotion ---")
     try:
         proc = subprocess.run(
-            [
-                sys.executable, "scripts/ingest_canonical_slate.py",
-                "--date", date, "--slate-id", slate_id, "--sport", sport, "--site", site,
-            ],
-            capture_output=True, text=True, timeout=CANONICAL_SHADOW_TIMEOUT_SECONDS,
-            cwd=Path(__file__).resolve().parent.parent, check=False,
+            [npx_path, "tsx", "scripts/promote-canonical-slate.ts", "--key", normalized_key],
+            capture_output=True, text=True, timeout=CANONICAL_PROMOTION_TIMEOUT_SECONDS, cwd=DASHBOARD_ROOT, check=False,
         )
-    except Exception as exc:  # noqa: BLE001 -- M2I: report, never let this break the legacy fetch
-        print(f"\nCANONICAL SHADOW INGESTION: could not even be launched -- {type(exc).__name__}: {exc}", file=sys.stderr)
-        return
-    # M2I: the shadow script itself always exits 0 and prints its own
-    # ok:true/false JSON result -- print its real output here (subprocess
-    # output is otherwise lost with capture_output=True) so a canonical
-    # failure is fully visible in this worker run's own log, never silent.
+    except Exception as exc:  # noqa: BLE001 -- M2I/M3C: report, never let this break the legacy fetch
+        print(f"CANONICAL PROMOTION: could not be launched -- {type(exc).__name__}: {exc}", file=sys.stderr)
+        return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
     print(proc.stdout)
     if proc.stderr:
         print(proc.stderr, file=sys.stderr)
+
+    if proc.returncode != 0:
+        print(f"CANONICAL PROMOTION: FAILED -- exit code {proc.returncode}", file=sys.stderr)
+        return {"ok": False, "promoted": False, "error": f"exit code {proc.returncode}", "error_type": "promotion_script_nonzero_exit", "stderr_tail": proc.stderr[-1000:]}
+
+    # M3K: parse the single-line RESULT_JSON: marker (see
+    # promote-canonical-slate.ts's own comment) to know whether this
+    # attempt actually PROMOTED -- distinct from "the script exited 0",
+    # which is also true for a legitimate no-op/rejection.
+    promoted = None
+    reason = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("RESULT_JSON:"):
+            try:
+                parsed = json.loads(line[len("RESULT_JSON:"):])
+                promoted = parsed.get("promoted")
+                reason = parsed.get("reason")
+            except (ValueError, TypeError):
+                pass
+            break
+
+    print(f"CANONICAL PROMOTION: OK (script succeeded; promoted={promoted})")
+    return {"ok": True, "promoted": promoted, "reason": reason, "stdout_tail": proc.stdout[-1000:]}
 
 
 if __name__ == "__main__":

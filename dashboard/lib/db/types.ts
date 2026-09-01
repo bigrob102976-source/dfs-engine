@@ -332,6 +332,18 @@ export interface CanonicalSlateRow {
   current_normalized_artifact_path: string | null;
   current_raw_artifact_path: string | null;
   promoted_at: string | null;
+  // M3E: shadow ingestion status/observability (migrations/0011_canonical_shadow_status.sql).
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  consecutive_failures: number;
+  last_error_type: string | null;
+  last_error_summary: string | null;
+  player_count: number | null;
+  resolved_identity_count: number | null;
+  unresolved_identity_count: number | null;
+  review_required_count: number | null;
+  is_semantic_duplicate: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -5,10 +5,17 @@
 // separate, one-time SQLite-data-import tool, which already calls this
 // same runPostgresMigrations() as its first step before copying rows).
 //
-// Deliberately a manual, explicit command -- never run implicitly on
-// app startup or on the first request (see lib/db/executor.ts's own
-// docstring for why: migrations must be a deliberate operator action,
-// not a side effect of serving traffic).
+// This script itself never runs implicitly on app startup or on the
+// first request (see lib/db/executor.ts's own docstring). CORRECTION
+// (M2, 2026-09-01): that does NOT mean production migrations only ever
+// happen via a human manually running this file -- Railway's own
+// deploy configuration (outside this repo, in its project/service
+// settings) invokes exactly this command automatically after every
+// deploy. Confirmed live: migrations 0010 and 0011 both auto-applied
+// to production within seconds of their respective deploys completing.
+// Every migration merged to main should be written and reviewed as if
+// it WILL run against production immediately on merge -- see
+// lib/db/migrationSafety.ts (M3G) for the resulting guardrail.
 //
 // Usage (from dashboard/, Node 22.5+):
 //

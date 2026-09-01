@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import type { CanonicalSlateArtifactDocument, CanonicalSlatePlayerDocument, IdentityMatchDocument } from "./canonicalArtifact";
 import { KNOWN_SLATE_SCHEMA_VERSIONS } from "./canonicalArtifact";
+import { computeNormalizedHash } from "../canonicalHashing";
 import type { SqlExecutor } from "./sqlExecutor";
 
 // M2G / M2J -- the ONE function that writes to the canonical Postgres
@@ -37,14 +38,28 @@ export interface PromotionOptions {
    * older-artifact/no-op guards below. Never set automatically. */
   force?: boolean;
   /** M2J: when given, the artifact's own embedded normalizedHash must
-   * match this value exactly or promotion is refused. This is an
-   * INTEGRITY check against a value the operator already trusts (e.g.
-   * copied from the ingestion run's own console output) -- it does NOT
-   * independently re-derive normalizedHash from raw content (that
-   * algorithm lives in canonical/hashing.py; porting it to TypeScript
-   * is out of scope for M2, see this repo's M2 final report for the
-   * explicit, honest scope note). */
+   * match this value exactly or promotion is refused. An INTEGRITY
+   * check against a value the operator already trusts (e.g. copied from
+   * the ingestion run's own console output) -- independent of
+   * `verifyNormalizedHash` below, which re-derives the hash from
+   * content instead of comparing against an operator-supplied string. */
   expectedNormalizedHash?: string;
+  /** M3H/M3I: when true, independently RECOMPUTES normalizedHash from
+   * `artifact.slate`/`artifact.players` (dashboard/lib/canonicalHashing.ts
+   * -- verified byte-parity with canonical/hashing.py, see that
+   * module's own test suite) and compares it against the artifact's own
+   * declared `normalizedHash`. A mismatch means the artifact was
+   * tampered with, corrupted in storage, or hand-edited after Python
+   * wrote it -- refused unconditionally, `force` does not override this
+   * (force only skips the older-artifact/no-op guards, never an
+   * integrity check). Not enabled for live automatic promotion (M3B) --
+   * the artifact there was written moments ago by the SAME trusted
+   * pipeline that computed the hash, so re-verification is redundant
+   * work on every single ingestion; scripts/rehydrate-canonical-current.ts
+   * (M3I) always sets this true, since rehydration reads an
+   * arbitrary-age artifact an operator selected, which is exactly the
+   * scenario this guards against. */
+  verifyNormalizedHash?: boolean;
 }
 
 export interface PromotionResult {
@@ -156,17 +171,84 @@ async function createReviewQueueEntryIfNeeded(
   return true;
 }
 
+/** M3E: records a REJECTED-validation attempt (a routine automatic-path
+ * outcome, e.g. DK returning a Snake/Showdown-format DraftGroup that
+ * fails structural validation) as a full slates row -- `slate.*`'s
+ * shape is trustworthy here (schemaVersion is known-good; only content
+ * validation failed), so a real row can be written for diagnosability,
+ * with consecutive_failures incremented and no player/identity sync
+ * attempted. Deliberately NOT done for an unknown schemaVersion (the
+ * artifact's shape itself isn't trustworthy) or a hash-mismatch
+ * rehydration refusal (an operator-facing integrity guard, not a
+ * routine automatic outcome) -- those stay pure no-DB-write refusals. */
+async function recordRejectedAttempt(db: SqlExecutor, artifact: CanonicalSlateArtifactDocument, errorType: string, errorSummary: string): Promise<void> {
+  const slate = artifact.slate;
+  const now = new Date().toISOString();
+  const proposedInternalSlateId = slate.internalSlateId || crypto.randomUUID();
+  // raw_hash/normalized_hash are DELIBERATELY never set from a rejected
+  // attempt (NULL on first insert, left untouched by the ON CONFLICT
+  // branch below) -- their meaning everywhere else in this schema is
+  // "the hash of the CURRENTLY PROMOTED content." A rejected artifact
+  // was never promoted; letting its hash leak into these columns could
+  // cause a LATER genuinely-valid artifact that happens to normalize to
+  // the same hash to be incorrectly treated as an identical-hash no-op.
+  await db.run(
+    `INSERT INTO slates (
+       internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
+       game_count, game_ids_json, salary_cap, roster_template_json, source_provenance, validation_state,
+       validation_findings_json, schema_version, raw_hash, normalized_hash, fetched_at,
+       last_attempt_at, last_failure_at, consecutive_failures, last_error_type, last_error_summary,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, 1, ?, ?, ?, ?)
+     ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
+       slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
+       game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
+       roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
+       validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
+       schema_version = excluded.schema_version,
+       last_attempt_at = excluded.last_attempt_at, last_failure_at = excluded.last_failure_at,
+       consecutive_failures = slates.consecutive_failures + 1,
+       last_error_type = excluded.last_error_type, last_error_summary = excluded.last_error_summary,
+       updated_at = excluded.updated_at`,
+    [
+      proposedInternalSlateId, slate.sport, slate.site, slate.provider, slate.providerSlateId, slate.slateName, slate.slateDate,
+      slate.firstGameStartUtc, slate.gameCount, JSON.stringify(slate.gameIds), slate.salaryCap, slate.rosterTemplate ? JSON.stringify(slate.rosterTemplate) : null,
+      slate.sourceProvenance, slate.validationState, JSON.stringify(slate.validationFindings), artifact.schemaVersion,
+      slate.fetchedAt, now, now, errorType, errorSummary, now, now,
+    ],
+  );
+}
+
+/** M3E: a no-op outcome (identical hash, or an older artifact refused)
+ * is NOT a failure -- but is still a real attempt worth recording for
+ * liveness/staleness monitoring, without touching consecutive_failures
+ * or any player/identity data. */
+async function recordNoOpAttempt(db: SqlExecutor, internalSlateId: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.run("UPDATE slates SET last_attempt_at = ? WHERE internal_slate_id = ?", [now, internalSlateId]);
+}
+
 export async function promoteCanonicalArtifact(
   db: SqlExecutor, artifact: CanonicalSlateArtifactDocument, options: PromotionOptions,
 ): Promise<PromotionResult> {
   if (!KNOWN_SLATE_SCHEMA_VERSIONS.has(artifact.schemaVersion)) {
     return { promoted: false, reason: `Unknown schemaVersion '${artifact.schemaVersion}' -- refusing to promote an artifact this code doesn't know how to read.` };
   }
-  if (artifact.slate.validationState !== "VALID") {
-    return { promoted: false, reason: `slate.validationState is '${artifact.slate.validationState}', not VALID -- refusing to promote.` };
-  }
   if (options.expectedNormalizedHash && options.expectedNormalizedHash !== artifact.normalizedHash) {
     return { promoted: false, reason: "normalizedHash does not match the operator-supplied expected value -- refusing to promote." };
+  }
+  if (options.verifyNormalizedHash) {
+    const recomputed = computeNormalizedHash(artifact.slate as unknown as Record<string, unknown>, artifact.players as unknown as Array<Record<string, unknown>>);
+    if (recomputed !== artifact.normalizedHash) {
+      return {
+        promoted: false,
+        reason: `Independently recomputed normalizedHash ('${recomputed}') does not match the artifact's own declared normalizedHash ('${artifact.normalizedHash}') -- the artifact appears tampered or corrupted. Refusing to promote/rehydrate.`,
+      };
+    }
+  }
+  if (artifact.slate.validationState !== "VALID") {
+    await recordRejectedAttempt(db, artifact, "VALIDATION_REJECTED", `slate.validationState was '${artifact.slate.validationState}': ${artifact.slate.validationFindings.join("; ") || "no findings given"}`);
+    return { promoted: false, reason: `slate.validationState is '${artifact.slate.validationState}', not VALID -- refusing to promote.` };
   }
 
   return db.transaction(async (tx) => {
@@ -178,9 +260,11 @@ export async function promoteCanonicalArtifact(
 
     if (existing && !options.force) {
       if (existing.normalized_hash != null && existing.normalized_hash === artifact.normalizedHash) {
+        await recordNoOpAttempt(tx, existing.internal_slate_id);
         return { promoted: false, reason: "identical normalizedHash to the currently-promoted version -- semantic no-op.", internalSlateId: existing.internal_slate_id };
       }
       if (existing.fetched_at && slate.fetchedAt && existing.fetched_at > slate.fetchedAt) {
+        await recordNoOpAttempt(tx, existing.internal_slate_id);
         return { promoted: false, reason: "incoming artifact is older than the currently-promoted version -- CURRENT not moved backward.", internalSlateId: existing.internal_slate_id };
       }
     }
@@ -188,40 +272,16 @@ export async function promoteCanonicalArtifact(
     const now = new Date().toISOString();
     const proposedInternalSlateId = slate.internalSlateId || crypto.randomUUID();
 
-    const upserted = await tx.get<{ internal_slate_id: string }>(
-      `INSERT INTO slates (
-         internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
-         game_count, game_ids_json, salary_cap, roster_template_json, source_provenance, validation_state,
-         validation_findings_json, schema_version, raw_hash, normalized_hash, fetched_at,
-         current_normalized_artifact_path, current_raw_artifact_path, promoted_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
-         slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
-         game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
-         roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
-         validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
-         schema_version = excluded.schema_version, raw_hash = excluded.raw_hash, normalized_hash = excluded.normalized_hash,
-         fetched_at = excluded.fetched_at, current_normalized_artifact_path = excluded.current_normalized_artifact_path,
-         current_raw_artifact_path = excluded.current_raw_artifact_path, promoted_at = excluded.promoted_at, updated_at = excluded.updated_at
-       RETURNING internal_slate_id`,
-      [
-        proposedInternalSlateId, slate.sport, slate.site, slate.provider, slate.providerSlateId, slate.slateName, slate.slateDate,
-        slate.firstGameStartUtc, slate.gameCount, JSON.stringify(slate.gameIds), slate.salaryCap, slate.rosterTemplate ? JSON.stringify(slate.rosterTemplate) : null,
-        slate.sourceProvenance, slate.validationState, JSON.stringify(slate.validationFindings), artifact.schemaVersion, artifact.rawHash, artifact.normalizedHash,
-        slate.fetchedAt, options.normalizedArtifactPath, options.rawArtifactPath ?? null, now, now, now,
-      ],
-    );
-    // internal_slate_id is NEVER included in the DO UPDATE SET clause
-    // above -- an existing row's canonical id is never overwritten by a
-    // later ingestion's own (necessarily different) proposed uuid. This
-    // is M2D's actual stability mechanism -- see canonical_ingestion/
-    // normalize.py's docstring for why Python doesn't need to query
-    // Postgres to achieve the same guarantee.
-    const internalSlateId = upserted!.internal_slate_id;
-
-    await tx.run("DELETE FROM slate_players WHERE internal_slate_id = ?", [internalSlateId]);
-
+    // M3E: resolve identity for every player FIRST (independent of the
+    // slates/slate_players rows -- only touches players/
+    // player_external_ids/identity_review_queue), so the counts
+    // recorded on `slates` below reflect the REAL final identityStatus
+    // each player gets (which can differ from artifact.identityMatches'
+    // own status -- resolveInternalPlayerId can upgrade an UNRESOLVED
+    // match to RESOLVED via a pre-existing crosswalk row), never a
+    // possibly-stale pre-resolution estimate.
     let reviewQueueEntriesCreated = 0;
+    const resolvedPlayers: Array<{ player: CanonicalSlatePlayerDocument; internalPlayerId: string | null; identityStatus: CanonicalSlatePlayerDocument["identityStatus"] }> = [];
     for (const player of artifact.players) {
       const match = artifact.identityMatches[player.providerPlayerId];
       const internalPlayerId = await resolveInternalPlayerId(tx, slate.sport, player, match, now);
@@ -235,7 +295,58 @@ export async function promoteCanonicalArtifact(
       } else {
         identityStatus = "UNRESOLVED";
       }
+      resolvedPlayers.push({ player, internalPlayerId, identityStatus });
+    }
 
+    const playerCount = resolvedPlayers.length;
+    const resolvedCount = resolvedPlayers.filter((p) => p.identityStatus === "RESOLVED").length;
+    const reviewRequiredCount = resolvedPlayers.filter((p) => p.identityStatus === "REVIEW_REQUIRED").length;
+    const unresolvedCount = playerCount - resolvedCount - reviewRequiredCount;
+    const isSemanticDuplicate = artifact.isSemanticDuplicate ? 1 : 0;
+
+    const upserted = await tx.get<{ internal_slate_id: string }>(
+      `INSERT INTO slates (
+         internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
+         game_count, game_ids_json, salary_cap, roster_template_json, source_provenance, validation_state,
+         validation_findings_json, schema_version, raw_hash, normalized_hash, fetched_at,
+         current_normalized_artifact_path, current_raw_artifact_path, promoted_at,
+         last_attempt_at, last_success_at, consecutive_failures, last_error_type, last_error_summary,
+         player_count, resolved_identity_count, unresolved_identity_count, review_required_count, is_semantic_duplicate,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
+         slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
+         game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
+         roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
+         validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
+         schema_version = excluded.schema_version, raw_hash = excluded.raw_hash, normalized_hash = excluded.normalized_hash,
+         fetched_at = excluded.fetched_at, current_normalized_artifact_path = excluded.current_normalized_artifact_path,
+         current_raw_artifact_path = excluded.current_raw_artifact_path, promoted_at = excluded.promoted_at,
+         last_attempt_at = excluded.last_attempt_at, last_success_at = excluded.last_success_at,
+         consecutive_failures = 0, last_error_type = NULL, last_error_summary = NULL,
+         player_count = excluded.player_count, resolved_identity_count = excluded.resolved_identity_count,
+         unresolved_identity_count = excluded.unresolved_identity_count, review_required_count = excluded.review_required_count,
+         is_semantic_duplicate = excluded.is_semantic_duplicate, updated_at = excluded.updated_at
+       RETURNING internal_slate_id`,
+      [
+        proposedInternalSlateId, slate.sport, slate.site, slate.provider, slate.providerSlateId, slate.slateName, slate.slateDate,
+        slate.firstGameStartUtc, slate.gameCount, JSON.stringify(slate.gameIds), slate.salaryCap, slate.rosterTemplate ? JSON.stringify(slate.rosterTemplate) : null,
+        slate.sourceProvenance, slate.validationState, JSON.stringify(slate.validationFindings), artifact.schemaVersion, artifact.rawHash, artifact.normalizedHash,
+        slate.fetchedAt, options.normalizedArtifactPath, options.rawArtifactPath ?? null, now, now, now,
+        playerCount, resolvedCount, unresolvedCount, reviewRequiredCount, isSemanticDuplicate, now, now,
+      ],
+    );
+    // internal_slate_id is NEVER included in the DO UPDATE SET clause
+    // above -- an existing row's canonical id is never overwritten by a
+    // later ingestion's own (necessarily different) proposed uuid. This
+    // is M2D's actual stability mechanism -- see canonical_ingestion/
+    // normalize.py's docstring for why Python doesn't need to query
+    // Postgres to achieve the same guarantee.
+    const internalSlateId = upserted!.internal_slate_id;
+
+    await tx.run("DELETE FROM slate_players WHERE internal_slate_id = ?", [internalSlateId]);
+
+    for (const { player, internalPlayerId, identityStatus } of resolvedPlayers) {
       await tx.run(
         `INSERT INTO slate_players
           (internal_slate_id, provider_player_id, internal_player_id, provider_draftable_ids_json, name, team, opponent, game_id, salary,

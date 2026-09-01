@@ -6,15 +6,24 @@
 // is not a separate, divergent code path; it is "promotion, triggered
 // by an operator instead of live ingestion."
 //
-// Every M2J requirement is already enforced inside promoteCanonicalArtifact:
+// Every M2J/M3I requirement is already enforced inside promoteCanonicalArtifact:
 //   - schemaVersion checked (unknown version -> refused)
+//   - normalizedHash independently RECOMPUTED from artifact content
+//     (dashboard/lib/canonicalHashing.ts, M3H -- verified byte-parity
+//     with canonical/hashing.py) and compared against the artifact's
+//     own declared normalizedHash -- a tampered/corrupted/hand-edited
+//     artifact is refused unconditionally, even with --force (this
+//     script is the ONE caller that sets verifyNormalizedHash: true --
+//     live automatic promotion, M3B, does not, since that artifact was
+//     written moments ago by the same trusted pipeline)
 //   - validation required (validationState must be VALID)
 //   - transactional (one db.transaction() call)
 //   - no fuzzy identity guesses (identity was already decided by
 //     canonical_ingestion/identity_bridge.py; this never re-decides)
 //   - unresolved identity allowed (nullable internal_player_id)
 //   - an older artifact cannot silently overwrite a newer CURRENT
-//     UNLESS --force is passed
+//     UNLESS --force is passed (force does NOT bypass the hash-tamper
+//     check above -- only the older-artifact/no-op guards)
 //
 // --force is the one thing THIS script adds beyond ordinary promotion:
 // an explicit, operator-only override (never automatic, never callable
@@ -77,6 +86,7 @@ async function main() {
     normalizedArtifactPath: key,
     rawArtifactPath: null,
     expectedNormalizedHash: expectedHash,
+    verifyNormalizedHash: true,
     force,
   });
 

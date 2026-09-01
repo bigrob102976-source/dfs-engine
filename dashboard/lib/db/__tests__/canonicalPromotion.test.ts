@@ -4,6 +4,17 @@ import type { CanonicalSlateArtifactDocument } from "../canonicalArtifact";
 import { promoteCanonicalArtifact } from "../canonicalPromotion";
 import { __resetDbForTests, getDb } from "../client";
 import { __resetExecutorForTests, getExecutor } from "../executor";
+import { computeNormalizedHash } from "../../canonicalHashing";
+
+/** Real, content-derived normalizedHash for `artifact` -- baseArtifact()'s
+ * default "norm-hash-1" is a plain placeholder string, not actually
+ * derived from its own content, so any verifyNormalizedHash:true test
+ * must overwrite it with the real value first or it will always look
+ * "tampered." */
+function withRealHash(artifact: CanonicalSlateArtifactDocument): CanonicalSlateArtifactDocument {
+  artifact.normalizedHash = computeNormalizedHash(artifact.slate as unknown as Record<string, unknown>, artifact.players as unknown as Array<Record<string, unknown>>);
+  return artifact;
+}
 
 beforeEach(() => {
   __resetDbForTests();
@@ -76,14 +87,80 @@ describe("promoteCanonicalArtifact", () => {
     expect(count).toBe(0);
   });
 
-  it("rejects a REJECTED validationState without writing anything", async () => {
+  it("rejects a REJECTED validationState -- never promoted, never syncs slate_players", async () => {
     const db = getExecutor();
     const artifact = baseArtifact();
     artifact.slate.validationState = "REJECTED";
+    artifact.slate.validationFindings = ["structural validation failed: bad roster template"];
     const result = await promoteCanonicalArtifact(db, artifact, opts());
     expect(result.promoted).toBe(false);
-    const count = (getDb().prepare("SELECT COUNT(*) as c FROM slates").get() as { c: number }).c;
-    expect(count).toBe(0);
+    expect(result.internalSlateId).toBeUndefined();
+
+    const players = (getDb().prepare("SELECT COUNT(*) as c FROM slate_players").get() as { c: number }).c;
+    expect(players).toBe(0); // never synced -- a rejected slate has no promoted player set
+  });
+
+  it("M3E: a REJECTED validationState IS recorded as a failed attempt for observability", async () => {
+    const db = getExecutor();
+    const artifact = baseArtifact();
+    artifact.slate.validationState = "REJECTED";
+    artifact.slate.validationFindings = ["structural validation failed: bad roster template"];
+    await promoteCanonicalArtifact(db, artifact, opts());
+
+    const row = getDb().prepare("SELECT validation_state, consecutive_failures, last_error_type, last_error_summary, last_attempt_at, last_failure_at FROM slates WHERE provider_slate_id = '152904'").get() as Record<string, unknown>;
+    expect(row.validation_state).toBe("REJECTED");
+    expect(row.consecutive_failures).toBe(1);
+    expect(row.last_error_type).toBe("VALIDATION_REJECTED");
+    expect(String(row.last_error_summary)).toMatch(/bad roster template/);
+    expect(row.last_attempt_at).toBeTruthy();
+    expect(row.last_failure_at).toBeTruthy();
+  });
+
+  it("M3E: consecutive_failures increments across repeated REJECTED attempts and resets on a later success", async () => {
+    const db = getExecutor();
+    const rejected = baseArtifact();
+    rejected.slate.validationState = "REJECTED";
+    await promoteCanonicalArtifact(db, rejected, opts());
+    await promoteCanonicalArtifact(db, rejected, opts());
+
+    const afterRejections = getDb().prepare("SELECT consecutive_failures FROM slates WHERE provider_slate_id = '152904'").get() as { consecutive_failures: number };
+    expect(afterRejections.consecutive_failures).toBe(2);
+
+    const success = baseArtifact();
+    success.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+    const result = await promoteCanonicalArtifact(db, success, opts());
+    expect(result.promoted).toBe(true);
+
+    const afterSuccess = getDb().prepare("SELECT consecutive_failures, last_error_type FROM slates WHERE provider_slate_id = '152904'").get() as { consecutive_failures: number; last_error_type: string | null };
+    expect(afterSuccess.consecutive_failures).toBe(0);
+    expect(afterSuccess.last_error_type).toBeNull();
+  });
+
+  it("M3E: successful promotion records player/identity counts and last_success_at", async () => {
+    const db = getExecutor();
+    const result = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+    const row = getDb().prepare("SELECT player_count, resolved_identity_count, unresolved_identity_count, review_required_count, is_semantic_duplicate, last_success_at, last_attempt_at FROM slates WHERE internal_slate_id = ?").get(result.internalSlateId!) as Record<string, unknown>;
+    expect(row.player_count).toBe(1);
+    expect(row.unresolved_identity_count).toBe(1);
+    expect(row.resolved_identity_count).toBe(0);
+    expect(row.review_required_count).toBe(0);
+    expect(row.is_semantic_duplicate).toBe(0);
+    expect(row.last_success_at).toBeTruthy();
+    expect(row.last_attempt_at).toBeTruthy();
+  });
+
+  it("M3E: a semantic no-op still updates last_attempt_at without touching consecutive_failures", async () => {
+    const db = getExecutor();
+    const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+    const before = getDb().prepare("SELECT last_attempt_at FROM slates WHERE internal_slate_id = ?").get(first.internalSlateId!) as { last_attempt_at: string };
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+    expect(second.promoted).toBe(false);
+
+    const after = getDb().prepare("SELECT last_attempt_at, consecutive_failures FROM slates WHERE internal_slate_id = ?").get(first.internalSlateId!) as { last_attempt_at: string; consecutive_failures: number };
+    expect(after.last_attempt_at).not.toBe(before.last_attempt_at);
+    expect(after.consecutive_failures).toBe(0);
   });
 
   it("M2D: repeated ingestion of the same provider slate reuses internalSlateId, never mints a new one", async () => {
@@ -253,5 +330,62 @@ describe("promoteCanonicalArtifact", () => {
 
     const row = getDb().prepare("SELECT * FROM slates WHERE internal_slate_id = 'mid-tx'").get();
     expect(row).toBeUndefined(); // the slates insert was rolled back too, even though it succeeded on its own
+  });
+
+  describe("M3I: verifyNormalizedHash (rehydration hardening)", () => {
+    it("accepts a valid, untampered artifact", async () => {
+      const db = getExecutor();
+      const artifact = withRealHash(baseArtifact());
+      const result = await promoteCanonicalArtifact(db, artifact, opts({ verifyNormalizedHash: true }));
+      expect(result.promoted).toBe(true);
+    });
+
+    it("rejects a tampered artifact whose declared normalizedHash does not match its real content", async () => {
+      const db = getExecutor();
+      const artifact = baseArtifact();
+      artifact.normalizedHash = "this-does-not-match-the-real-content-hash";
+      const result = await promoteCanonicalArtifact(db, artifact, opts({ verifyNormalizedHash: true }));
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toMatch(/tampered|corrupted/);
+      const count = (getDb().prepare("SELECT COUNT(*) as c FROM slates").get() as { c: number }).c;
+      expect(count).toBe(0);
+    });
+
+    it("--force does NOT bypass a hash-tamper rejection", async () => {
+      const db = getExecutor();
+      const artifact = baseArtifact();
+      artifact.normalizedHash = "tampered-hash-value";
+      const result = await promoteCanonicalArtifact(db, artifact, opts({ verifyNormalizedHash: true, force: true }));
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toMatch(/tampered|corrupted/);
+    });
+
+    it("an unsupported schemaVersion is still rejected even when verifyNormalizedHash is requested", async () => {
+      const db = getExecutor();
+      const artifact = baseArtifact({ schemaVersion: "slate_normalized_v99" });
+      const result = await promoteCanonicalArtifact(db, artifact, opts({ verifyNormalizedHash: true }));
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toMatch(/Unknown schemaVersion/);
+    });
+
+    it("an older artifact is still rejected under verifyNormalizedHash (real content, just stale)", async () => {
+      const db = getExecutor();
+      const newer = withRealHash(baseArtifact());
+      newer.slate.fetchedAt = "2026-08-31T21:00:00.000Z";
+      newer.normalizedHash = computeNormalizedHash(newer.slate as unknown as Record<string, unknown>, newer.players as unknown as Array<Record<string, unknown>>);
+      await promoteCanonicalArtifact(db, newer, opts());
+
+      // Genuinely different content (not just a different fetchedAt,
+      // which is excluded from the hash and would otherwise make this
+      // indistinguishable from the identical-hash no-op case) so the
+      // real, correctly-declared hash differs from `newer`'s.
+      const older = baseArtifact();
+      older.slate.fetchedAt = "2026-08-31T18:00:00.000Z";
+      older.players[0].salary = 4600;
+      older.normalizedHash = computeNormalizedHash(older.slate as unknown as Record<string, unknown>, older.players as unknown as Array<Record<string, unknown>>);
+      const result = await promoteCanonicalArtifact(db, older, opts({ verifyNormalizedHash: true }));
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toMatch(/older/);
+    });
   });
 });
