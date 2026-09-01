@@ -77,18 +77,18 @@ def test_shadow_failure_never_triggers_promotion(monkeypatch):
     assert status["ok"] is False
 
 
-def test_run_canonical_promotion_invokes_resolved_npx_with_correct_args(monkeypatch):
+def test_run_canonical_promotion_invokes_resolved_railway_ssh_with_correct_args(monkeypatch):
     captured = {}
 
     def fake_which(name):
-        assert name == "npx"
-        return r"C:\Program Files\nodejs\npx.CMD"
+        assert name == "railway"
+        return r"C:\Users\bigro\AppData\Roaming\npm\railway.CMD"
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
         captured["cwd"] = kwargs.get("cwd")
         captured["timeout"] = kwargs.get("timeout")
-        return _FakeCompletedProcess(returncode=0, stdout='{"promoted": true}')
+        return _FakeCompletedProcess(returncode=0, stdout='RESULT_JSON:{"promoted": true}')
 
     monkeypatch.setattr(fetch_dfs_slate.shutil, "which", fake_which)
     monkeypatch.setattr(fetch_dfs_slate.subprocess, "run", fake_run)
@@ -96,14 +96,18 @@ def test_run_canonical_promotion_invokes_resolved_npx_with_correct_args(monkeypa
     result = fetch_dfs_slate._run_canonical_promotion("normalized/MLB/x.json")
 
     assert result["ok"] is True
-    assert captured["argv"][0] == r"C:\Program Files\nodejs\npx.CMD"
-    assert captured["argv"][1:] == ["tsx", "scripts/promote-canonical-slate.ts", "--key", "normalized/MLB/x.json"]
-    assert captured["cwd"] == fetch_dfs_slate.DASHBOARD_ROOT
+    assert captured["argv"][0] == r"C:\Users\bigro\AppData\Roaming\npm\railway.CMD"
+    assert captured["argv"][1:] == [
+        "ssh", "--service", fetch_dfs_slate.CANONICAL_PROMOTION_RAILWAY_SERVICE,
+        "--environment", fetch_dfs_slate.CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
+        "--", "npx", "tsx", "scripts/promote-canonical-slate.ts", "--key", "normalized/MLB/x.json",
+    ]
+    assert captured["cwd"] == fetch_dfs_slate.REPO_ROOT
     assert captured["timeout"] == fetch_dfs_slate.CANONICAL_PROMOTION_TIMEOUT_SECONDS
 
 
 def test_run_canonical_promotion_reports_nonzero_exit_without_raising(monkeypatch):
-    monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: "/usr/bin/npx")
+    monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: "/usr/bin/railway")
     monkeypatch.setattr(fetch_dfs_slate.subprocess, "run", lambda argv, **kwargs: _FakeCompletedProcess(returncode=1, stderr="boom"))
 
     result = fetch_dfs_slate._run_canonical_promotion("normalized/x.json")
@@ -111,15 +115,15 @@ def test_run_canonical_promotion_reports_nonzero_exit_without_raising(monkeypatc
     assert result["error_type"] == "promotion_script_nonzero_exit"
 
 
-def test_run_canonical_promotion_missing_npx_reported_not_raised(monkeypatch):
+def test_run_canonical_promotion_missing_railway_cli_reported_not_raised(monkeypatch):
     monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: None)
     result = fetch_dfs_slate._run_canonical_promotion("normalized/x.json")
     assert result["ok"] is False
-    assert result["error_type"] == "npx_not_found"
+    assert result["error_type"] == "railway_cli_not_found"
 
 
 def test_run_canonical_promotion_subprocess_exception_never_propagates(monkeypatch):
-    monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: "/usr/bin/npx")
+    monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: "/usr/bin/railway")
 
     def raise_timeout(argv, **kwargs):
         raise subprocess.TimeoutExpired(cmd=argv, timeout=45)
@@ -157,7 +161,7 @@ def test_main_survives_an_unexpected_shadow_exception_and_still_wrote_legacy_art
         def get_slate(self, *args, **kwargs):
             return fake_result
 
-    monkeypatch.setattr(fetch_dfs_slate, "get_configured_provider", lambda date: (FakeProvider(), None, "explicit"))
+    monkeypatch.setattr(fetch_dfs_slate, "get_configured_provider", lambda date, **kwargs: (FakeProvider(), None, "explicit"))
 
     def raise_unexpected(*args, **kwargs):
         raise RuntimeError("unexpected shadow bug")

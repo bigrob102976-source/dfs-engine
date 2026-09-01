@@ -37,15 +37,28 @@ from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
 DEFAULT_OUTPUT_ROOT = "dfs_input"
-# M3: promotion is a single Postgres round-trip (no DK network call) --
-# generous but bounded so one stuck promotion can't stall the worker.
-# Kept comfortably below scripts/fetch_all_dfs_slates.py's own outer
-# per-slate FETCH_TIMEOUT_SECONDS (90s), which must always exceed
-# real-fetch-time + this budget with margin -- see that script's own
-# comment on FETCH_TIMEOUT_SECONDS for why.
-CANONICAL_PROMOTION_TIMEOUT_SECONDS = 45
+# M3: promotion is a single Postgres round-trip plus real `railway ssh`
+# connection setup overhead (confirmed live: ~14.5s typical) -- generous
+# but bounded so one stuck promotion can't stall the worker. Kept
+# comfortably below scripts/fetch_all_dfs_slates.py's own outer per-slate
+# FETCH_TIMEOUT_SECONDS (90s), which must always exceed real-fetch-time +
+# this budget with margin -- see that script's own comment on
+# FETCH_TIMEOUT_SECONDS for why.
+CANONICAL_PROMOTION_TIMEOUT_SECONDS = 60
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DASHBOARD_ROOT = REPO_ROOT / "dashboard"
+# M3 architecture finding: this Windows worker machine has real DK
+# network access but NOT network access to Railway's private network
+# (postgres.railway.internal only resolves from inside a container
+# actually running on Railway -- confirmed live: a local `railway run`
+# subprocess promotion attempt failed with
+# "getaddrinfo ENOTFOUND postgres.railway.internal"). `railway ssh`
+# executes the command INSIDE the real deployed container instead of
+# locally, which DOES have that access (same real command verified live:
+# a Postgres promotion via railway ssh succeeded, ~14.5s). This is the
+# same --service/--environment pair every other railway invocation for
+# this project already uses (see worker/run_dk_fetch_worker.ps1).
+CANONICAL_PROMOTION_RAILWAY_SERVICE = "dfs-engine"
+CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT = "production"
 
 
 def _load_research_games(date: str) -> list:
@@ -109,7 +122,23 @@ def main() -> None:
     print("DFS SALARY PROVIDER FETCH")
     print("=" * 70)
 
-    provider, reason, source = get_configured_provider(args.date)
+    # M3 bugfix (found via a real natural worker cycle logging
+    # EmptyRawCaptureError for every slate): draftkings_unofficial/cache.py's
+    # shared, process-global TTL cache means get_configured_provider()'s
+    # OWN internal probe call below is the genuine FIRST real network
+    # fetch in this process -- passing `capture` only to THIS script's
+    # later provider.get_slate() call (further down) never fires it,
+    # since that call is a same-process cache HIT by the time it runs.
+    # `capture` must be wired into the probe call itself; see
+    # dfs/providers/config.py::get_configured_provider's own updated
+    # docstring. Created unconditionally (before we even know which
+    # provider will be selected) and simply unused if the outcome isn't
+    # draftkings_unofficial -- passing it into get_configured_provider is
+    # harmless either way (mock/explicit-override branches never touch it).
+    from canonical_ingestion.raw_capture import RawCaptureRecorder
+
+    recorder = RawCaptureRecorder()
+    provider, reason, source = get_configured_provider(args.date, capture=recorder.record)
     if provider is None:
         print("\nDFS SALARIES: NOT CONNECTED")
         print(reason)
@@ -120,21 +149,13 @@ def main() -> None:
     print(f"\nProvider: {provider.name} (source: {source})")
     research_games = _load_research_games(args.date)
 
-    # M3: capture EXACT raw bytes during THIS ONE real fetch (additive
-    # kwarg, see draftkings_unofficial/client.py::RawCapture) so the
-    # canonical shadow path can reuse it below instead of performing its
-    # OWN second independent real DK fetch -- see
-    # canonical_ingestion/pipeline.py's M3 REDESIGN docstring for why
-    # that redundant fetch was measurably breaking the worker's
-    # execution-time budget. Only the real DK provider supports this
-    # kwarg (mock/CSV providers do not), so it's passed conditionally.
-    recorder = None
-    get_slate_kwargs = {}
-    if provider.name == "draftkings_unofficial":
-        from canonical_ingestion.raw_capture import RawCaptureRecorder
-
-        recorder = RawCaptureRecorder()
-        get_slate_kwargs["capture"] = recorder.record
+    # Only the real DK provider accepts `capture`/`cache` kwargs at all
+    # (mock/CSV providers do not) -- passed here too for robustness
+    # (e.g. if the shared cache's TTL ever changes), but the real fix is
+    # the probe call above; this call is expected to be a cache hit.
+    get_slate_kwargs = {"capture": recorder.record} if provider.name == "draftkings_unofficial" else {}
+    if provider.name != "draftkings_unofficial":
+        recorder = None
 
     try:
         result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=research_games, **get_slate_kwargs)
@@ -277,28 +298,36 @@ def _run_canonical_promotion(normalized_key: str) -> dict:
     the SAME Node/TS promotion function M2's manual proof used
     (dashboard/lib/db/canonicalPromotion.ts, via
     dashboard/scripts/promote-canonical-slate.ts), never a second,
-    divergent promotion implementation. `npx` is a platform shim (a
-    .CMD file on Windows) that Python's subprocess cannot exec directly
-    without shell resolution -- shutil.which() resolves the real
-    executable path instead, avoiding shell=True entirely. Run with
-    cwd=DASHBOARD_ROOT so npx resolves the project's own pinned local
-    tsx install rather than reaching out to fetch one. Never raises --
-    a promotion failure here must never affect the legacy artifact
-    already written above."""
-    npx_path = shutil.which("npx")
-    if npx_path is None:
-        print("CANONICAL PROMOTION: skipped -- npx not found on PATH.", file=sys.stderr)
-        return {"ok": False, "error": "npx not found on PATH", "error_type": "npx_not_found"}
+    divergent promotion implementation.
 
-    print("\n--- canonical shadow promotion ---")
+    M3 architecture finding: this Windows worker machine can reach real
+    DraftKings endpoints but NOT Railway's private network
+    (postgres.railway.internal) -- confirmed live, a local `railway run`
+    subprocess promotion attempt failed with "getaddrinfo ENOTFOUND
+    postgres.railway.internal". `railway ssh` runs the command INSIDE
+    the actual deployed container instead, which DOES have that access
+    -- confirmed live (~14.5s typical, well inside this function's
+    timeout budget). This is the one real network round-trip this
+    function makes; never raises regardless of outcome -- a promotion
+    failure here must never affect the legacy artifact already written
+    above."""
+    railway_path = shutil.which("railway")
+    if railway_path is None:
+        print("CANONICAL PROMOTION: skipped -- railway CLI not found on PATH.", file=sys.stderr)
+        return {"ok": False, "promoted": False, "error": "railway CLI not found on PATH", "error_type": "railway_cli_not_found"}
+
+    print("\n--- canonical shadow promotion (via railway ssh) ---")
     try:
         proc = subprocess.run(
-            [npx_path, "tsx", "scripts/promote-canonical-slate.ts", "--key", normalized_key],
-            capture_output=True, text=True, timeout=CANONICAL_PROMOTION_TIMEOUT_SECONDS, cwd=DASHBOARD_ROOT, check=False,
+            [
+                railway_path, "ssh", "--service", CANONICAL_PROMOTION_RAILWAY_SERVICE, "--environment", CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
+                "--", "npx", "tsx", "scripts/promote-canonical-slate.ts", "--key", normalized_key,
+            ],
+            capture_output=True, text=True, timeout=CANONICAL_PROMOTION_TIMEOUT_SECONDS, cwd=REPO_ROOT, check=False,
         )
     except Exception as exc:  # noqa: BLE001 -- M2I/M3C: report, never let this break the legacy fetch
         print(f"CANONICAL PROMOTION: could not be launched -- {type(exc).__name__}: {exc}", file=sys.stderr)
-        return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+        return {"ok": False, "promoted": False, "error": str(exc), "error_type": type(exc).__name__}
 
     print(proc.stdout)
     if proc.stderr:

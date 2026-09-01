@@ -137,6 +137,45 @@ def test_config_defaults_to_draftkings_unofficial_when_available(monkeypatch):
     assert source == "draftkings_unofficial_live"
 
 
+def test_capture_omitted_when_not_provided_zero_behavior_change(monkeypatch):
+    # A fake with the OLD, narrower get_slate() signature (no capture
+    # param at all) must keep working when capture is not requested --
+    # confirms get_configured_provider() never passes capture=None
+    # explicitly (which would break any such caller).
+    _patch_cascade(monkeypatch, dk_unofficial_available=True, mock_mode_enabled=False)
+    provider, reason, source = get_configured_provider(TEST_DATE)
+    assert provider is not None
+    assert reason is None
+
+
+def test_capture_fires_during_get_configured_providers_own_probe_call(monkeypatch):
+    # M3 regression test: confirmed live that draftkings_unofficial/cache.py's
+    # shared TTL cache means get_configured_provider()'s own internal
+    # probe call is the genuine FIRST real fetch in a normal
+    # fetch_dfs_slate.py process -- capture must fire HERE, not only on
+    # a caller's own later (cache-hit) get_slate() call, or shadow
+    # ingestion silently captures nothing (EmptyRawCaptureError).
+    captured = []
+
+    class _CaptureAwareFake(DFSSalaryProvider):
+        name = "draftkings_unofficial"
+        requires_api_key = False
+
+        def get_slate(self, date, sport="MLB", site="draftkings", research_games=None, capture=None, cache=None):
+            if capture is not None:
+                capture("https://api.draftkings.com/fake", '{"ok": true}')
+            return ProviderSlateResult(slates=[], players_by_slate={}, source="draftkings_unofficial", retrieved_at="now")
+
+    monkeypatch.setattr(config_module, "DraftKingsUnofficialProvider", _CaptureAwareFake)
+    monkeypatch.setattr(config_module, "is_mock_mode_enabled", lambda: False)
+    monkeypatch.delenv("DFS_SALARY_PROVIDER", raising=False)
+
+    provider, reason, source = get_configured_provider(TEST_DATE, capture=lambda url, body: captured.append((url, body)))
+    assert provider is not None
+    assert len(captured) == 1
+    assert captured[0][0] == "https://api.draftkings.com/fake"
+
+
 def test_config_falls_back_to_mock_only_when_explicitly_enabled(monkeypatch):
     """Milestone 19 (preserved under M1): mock is never used silently --
     it requires Mock Mode to be explicitly turned on

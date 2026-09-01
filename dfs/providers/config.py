@@ -60,8 +60,22 @@ PROVIDER_FACTORIES: Dict[str, Callable[[], DFSSalaryProvider]] = {
 NO_PROVIDER_CONFIGURED_MESSAGE = "No live DraftKings salary provider configured."
 
 
-def get_configured_provider(date: str) -> Tuple[Optional[DFSSalaryProvider], Optional[str], str]:
+def get_configured_provider(date: str, capture: Optional[Callable[[str, str], None]] = None) -> Tuple[Optional[DFSSalaryProvider], Optional[str], str]:
     """Returns (provider, reason, source).
+
+    `capture` is purely additive (default None -- zero behavior change
+    for every existing caller). M3 finding: this function's own internal
+    probe call below (`dk_unofficial.get_slate(date)`) is genuinely the
+    FIRST real network fetch in a normal fetch_dfs_slate.py run --
+    draftkings_unofficial/cache.py's shared, process-global TTL cache
+    means a caller's own SUBSEQUENT get_slate() call for the same date/
+    sport/site is a cache hit that never touches the network again (by
+    design, to avoid doubling real DK traffic -- see the comment below).
+    That also means a `capture` callback passed only to the caller's
+    later get_slate() call would NEVER fire (confirmed live: a worker
+    cycle logged EmptyRawCaptureError for every real slate because of
+    exactly this). Passing `capture` HERE, to the actual first real
+    fetch, is the fix -- scripts/fetch_dfs_slate.py now does this.
 
     `source` is one of:
       - "explicit": DFS_SALARY_PROVIDER named the result (successfully
@@ -97,7 +111,14 @@ def get_configured_provider(date: str) -> Tuple[Optional[DFSSalaryProvider], Opt
         # subsequent get_slate() call for the same date/sport/site land
         # within the same process and well inside those TTLs, so this
         # never doubles real network traffic to DraftKings.
-        dk_unofficial.get_slate(date)
+        # `capture` omitted entirely (not passed as capture=None) when
+        # unset, so this call signature is byte-for-byte identical to
+        # before this parameter existed for any test/caller whose fake
+        # DraftKingsUnofficialProvider stand-in has a narrower get_slate()
+        # signature -- mirrors draftkings_unofficial/collector.py's
+        # identical _capture_kwargs() convention.
+        probe_kwargs = {"capture": capture} if capture is not None else {}
+        dk_unofficial.get_slate(date, **probe_kwargs)
         return dk_unofficial, None, "draftkings_unofficial_live"
     except (ProviderUnavailableError, ProviderNoSlateError) as exc:
         return None, f"{NO_PROVIDER_CONFIGURED_MESSAGE} DraftKings Unofficial: {exc}", "unconfigured"
