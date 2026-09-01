@@ -60,8 +60,16 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
     requires_api_key = False
 
     def get_slate(
-        self, date: str, sport: str = "MLB", site: str = "draftkings", research_games: Optional[List[dict]] = None
+        self, date: str, sport: str = "MLB", site: str = "draftkings", research_games: Optional[List[dict]] = None,
+        capture=None, cache=None,
     ) -> ProviderSlateResult:
+        # M2B: `capture`/`cache` are purely additive (default None --
+        # zero behavior change for every existing caller, which is every
+        # call site in this codebase today). See
+        # draftkings_unofficial/client.py::RawCapture's docstring --
+        # canonical_ingestion is the only caller that passes these, to
+        # obtain genuine byte-exact RAW captures for the shadow
+        # ingestion path without redesigning this provider.
         if not is_enabled():
             raise ProviderUnavailableError(
                 "DraftKingsUnofficialProvider is disabled via DK_UNOFFICIAL_ENABLED (operational kill "
@@ -69,7 +77,12 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
                 "permanent default DraftKings slate source."
             )
 
-        universe = collector.collect_sport_universe(sport.upper())
+        extra_kwargs: Dict[str, object] = {}
+        if cache is not None:
+            extra_kwargs["cache"] = cache
+        if capture is not None:
+            extra_kwargs["capture"] = capture
+        universe = collector.collect_sport_universe(sport.upper(), **extra_kwargs)
         if universe.status == collector.STATUS_NO_ACTIVE_SLATE:
             raise ProviderNoSlateError(f"DraftKings unofficial: NO ACTIVE SLATE for sport={sport!r}.")
         if universe.status != collector.STATUS_OK:
@@ -87,7 +100,7 @@ class DraftKingsUnofficialProvider(DFSSalaryProvider):
         for slate in day_slates:
             slate_id = f"dkunofficial-{slate.draft_group_id}"
             try:
-                detail = collector.collect_slate_detail(slate.draft_group_id, sport.upper(), game_type_id=slate.game_type_id)
+                detail = collector.collect_slate_detail(slate.draft_group_id, sport.upper(), game_type_id=slate.game_type_id, **extra_kwargs)
             except DraftKingsUnofficialError as exc:
                 warnings.append(f"Skipped DraftGroup {slate.draft_group_id} ({slate.label or slate.tag}): {exc}")
                 continue

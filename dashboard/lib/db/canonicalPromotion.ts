@@ -1,0 +1,259 @@
+import crypto from "node:crypto";
+
+import type { CanonicalSlateArtifactDocument, CanonicalSlatePlayerDocument, IdentityMatchDocument } from "./canonicalArtifact";
+import { KNOWN_SLATE_SCHEMA_VERSIONS } from "./canonicalArtifact";
+import type { SqlExecutor } from "./sqlExecutor";
+
+// M2G / M2J -- the ONE function that writes to the canonical Postgres
+// shadow-CURRENT tables (players, player_external_ids, slates,
+// slate_players, identity_review_queue -- see
+// dashboard/lib/db/migrations-postgres/0010_slate_identity_foundation.sql).
+// Used by BOTH:
+//   - dashboard/scripts/promote-canonical-slate.ts (live shadow
+//     ingestion's promotion step)
+//   - dashboard/scripts/rehydrate-canonical-current.ts (M2J: rebuilding
+//     CURRENT from a stored NORMALIZED R2 artifact)
+// so promotion and rehydration are provably the same operation, never
+// two divergent implementations.
+//
+// This is the Node/TS side of M2 deliberately: this codebase's Postgres
+// access has always lived exclusively here (see
+// player_identity/persistence.py's own documented reason for never
+// adding a Python-to-Postgres dependency) -- canonical_ingestion/ (the
+// Python shadow pipeline) only ever writes the immutable NORMALIZED R2
+// artifact this function reads.
+//
+// NEVER wired into poolCache.ts, the optimizer APIs, or any
+// customer-facing read path during M2 -- see this milestone's explicit
+// customer-protection rules.
+
+export interface PromotionOptions {
+  /** Repo-relative NORMALIZED artifact path/key this document was read
+   * from -- recorded on the slates row for traceability (M2H). */
+  normalizedArtifactPath: string;
+  /** RAW manifest path/key, if known -- recorded alongside. */
+  rawArtifactPath?: string | null;
+  /** M2J: an explicit, operator-only override that skips the
+   * older-artifact/no-op guards below. Never set automatically. */
+  force?: boolean;
+  /** M2J: when given, the artifact's own embedded normalizedHash must
+   * match this value exactly or promotion is refused. This is an
+   * INTEGRITY check against a value the operator already trusts (e.g.
+   * copied from the ingestion run's own console output) -- it does NOT
+   * independently re-derive normalizedHash from raw content (that
+   * algorithm lives in canonical/hashing.py; porting it to TypeScript
+   * is out of scope for M2, see this repo's M2 final report for the
+   * explicit, honest scope note). */
+  expectedNormalizedHash?: string;
+}
+
+export interface PromotionResult {
+  promoted: boolean;
+  reason: string;
+  internalSlateId?: string;
+  reviewQueueEntriesCreated?: number;
+}
+
+/** Denormalized, informational index column only -- NOT used for any
+ * identity decision (that already happened in Python; see
+ * canonical_ingestion/identity_bridge.py). Deliberately NOT claimed to
+ * be equivalent to dfs/name_normalization.py::normalize_name -- this is
+ * a simpler, display/index-only normalization. */
+function normalizeNameForIndex(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function findCurrentExternalId(tx: SqlExecutor, sport: string, provider: string, externalId: string): Promise<string | null> {
+  const row = await tx.get<{ internal_player_id: string }>(
+    "SELECT internal_player_id FROM player_external_ids WHERE provider = ? AND external_id = ? AND sport = ? AND is_current = 1",
+    [provider, externalId, sport],
+  );
+  return row?.internal_player_id ?? null;
+}
+
+async function attachExternalIdIfMissing(
+  tx: SqlExecutor, internalPlayerId: string, sport: string, provider: string, externalId: string, externalIdType: string,
+  matchMethod: string, matchConfidence: number, now: string,
+): Promise<void> {
+  const existing = await tx.get<{ id: string }>(
+    "SELECT id FROM player_external_ids WHERE provider = ? AND external_id = ? AND sport = ? AND is_current = 1",
+    [provider, externalId, sport],
+  );
+  if (existing) return;
+  await tx.run(
+    `INSERT INTO player_external_ids
+      (id, internal_player_id, sport, provider, external_id, external_id_type, match_method, match_confidence, review_status, is_current, valid_from, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AUTO_APPROVED', 1, ?, ?, ?)`,
+    [crypto.randomUUID(), internalPlayerId, sport, provider, externalId, externalIdType, matchMethod, matchConfidence, now, now, now],
+  );
+}
+
+/** Resolves the internal_player_id for one slate player using ONLY the
+ * deterministic decision canonical_ingestion/identity_bridge.py already
+ * computed (`match`) -- this function NEVER re-decides or fuzzy-matches
+ * on its own. It DOES check for a pre-existing crosswalk row first
+ * (stability across repeated ingestions -- once a DK id is resolved, it
+ * stays resolved to the same internal player forever, even if a later
+ * fetch's own match attempt came back UNRESOLVED for some reason). */
+async function resolveInternalPlayerId(
+  tx: SqlExecutor, sport: string, player: CanonicalSlatePlayerDocument, match: IdentityMatchDocument | undefined, now: string,
+): Promise<string | null> {
+  const dkHint = match?.externalIdHints.find((h) => h.provider === "draftkings");
+  const dkExternalId = dkHint?.externalId ?? player.providerPlayerId;
+
+  const existingByDk = await findCurrentExternalId(tx, sport, "draftkings", dkExternalId);
+  if (existingByDk) return existingByDk;
+
+  if (!match || match.identityStatus !== "RESOLVED") {
+    return null; // UNRESOLVED or REVIEW_REQUIRED, and no prior crosswalk row exists -- servable, unresolved.
+  }
+
+  const mlbamHint = match.externalIdHints.find((h) => h.provider === "mlbam");
+  if (mlbamHint) {
+    const existingByMlbam = await findCurrentExternalId(tx, sport, "mlbam", mlbamHint.externalId);
+    if (existingByMlbam) {
+      await attachExternalIdIfMissing(tx, existingByMlbam, sport, "draftkings", dkExternalId, "player_id", match.matchMethod ?? "exact_deterministic_source_mapping", match.matchConfidence ?? 1.0, now);
+      return existingByMlbam;
+    }
+  }
+
+  // Brand new player -- mint.
+  const internalPlayerId = crypto.randomUUID();
+  await tx.run(
+    "INSERT INTO players (internal_player_id, sport, canonical_name, normalized_name, current_team, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+    [internalPlayerId, sport, player.name, normalizeNameForIndex(player.name), player.team, now, now],
+  );
+  await attachExternalIdIfMissing(tx, internalPlayerId, sport, "draftkings", dkExternalId, "player_id", match.matchMethod ?? "exact_deterministic_source_mapping", match.matchConfidence ?? 1.0, now);
+  if (mlbamHint) {
+    await attachExternalIdIfMissing(tx, internalPlayerId, sport, "mlbam", mlbamHint.externalId, "mlbam_id", match.matchMethod ?? "exact_deterministic_source_mapping", match.matchConfidence ?? 1.0, now);
+  }
+  return internalPlayerId;
+}
+
+/** Creates a PENDING identity_review_queue row for `player`, UNLESS one
+ * already exists for the same (sport, provider, externalId) -- avoids
+ * duplicate review-queue spam across repeated ingestions of the same
+ * ambiguous player (M2K's explicit requirement). Returns whether a new
+ * row was actually created. */
+async function createReviewQueueEntryIfNeeded(
+  tx: SqlExecutor, sport: string, player: CanonicalSlatePlayerDocument, match: IdentityMatchDocument, now: string,
+): Promise<boolean> {
+  const dkHint = match.externalIdHints.find((h) => h.provider === "draftkings");
+  const externalId = dkHint?.externalId ?? player.providerPlayerId;
+
+  const existing = await tx.get<{ id: string }>(
+    "SELECT id FROM identity_review_queue WHERE sport = ? AND provider = 'draftkings' AND external_id = ? AND status = 'PENDING'",
+    [sport, externalId],
+  );
+  if (existing) return false;
+
+  await tx.run(
+    `INSERT INTO identity_review_queue
+      (id, sport, provider, external_id, provider_player_name, provider_team, provider_position, candidate_internal_player_id, reason, status, created_at, updated_at)
+     VALUES (?, ?, 'draftkings', ?, ?, ?, NULL, NULL, ?, 'PENDING', ?, ?)`,
+    [crypto.randomUUID(), sport, externalId, player.name, player.team, match.reason ?? "Ambiguous identity match -- needs human review.", now, now],
+  );
+  return true;
+}
+
+export async function promoteCanonicalArtifact(
+  db: SqlExecutor, artifact: CanonicalSlateArtifactDocument, options: PromotionOptions,
+): Promise<PromotionResult> {
+  if (!KNOWN_SLATE_SCHEMA_VERSIONS.has(artifact.schemaVersion)) {
+    return { promoted: false, reason: `Unknown schemaVersion '${artifact.schemaVersion}' -- refusing to promote an artifact this code doesn't know how to read.` };
+  }
+  if (artifact.slate.validationState !== "VALID") {
+    return { promoted: false, reason: `slate.validationState is '${artifact.slate.validationState}', not VALID -- refusing to promote.` };
+  }
+  if (options.expectedNormalizedHash && options.expectedNormalizedHash !== artifact.normalizedHash) {
+    return { promoted: false, reason: "normalizedHash does not match the operator-supplied expected value -- refusing to promote." };
+  }
+
+  return db.transaction(async (tx) => {
+    const slate = artifact.slate;
+    const existing = await tx.get<{ internal_slate_id: string; fetched_at: string | null; normalized_hash: string | null }>(
+      "SELECT internal_slate_id, fetched_at, normalized_hash FROM slates WHERE sport = ? AND site = ? AND provider = ? AND provider_slate_id = ?",
+      [slate.sport, slate.site, slate.provider, slate.providerSlateId],
+    );
+
+    if (existing && !options.force) {
+      if (existing.normalized_hash != null && existing.normalized_hash === artifact.normalizedHash) {
+        return { promoted: false, reason: "identical normalizedHash to the currently-promoted version -- semantic no-op.", internalSlateId: existing.internal_slate_id };
+      }
+      if (existing.fetched_at && slate.fetchedAt && existing.fetched_at > slate.fetchedAt) {
+        return { promoted: false, reason: "incoming artifact is older than the currently-promoted version -- CURRENT not moved backward.", internalSlateId: existing.internal_slate_id };
+      }
+    }
+
+    const now = new Date().toISOString();
+    const proposedInternalSlateId = slate.internalSlateId || crypto.randomUUID();
+
+    const upserted = await tx.get<{ internal_slate_id: string }>(
+      `INSERT INTO slates (
+         internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
+         game_count, game_ids_json, salary_cap, roster_template_json, source_provenance, validation_state,
+         validation_findings_json, schema_version, raw_hash, normalized_hash, fetched_at,
+         current_normalized_artifact_path, current_raw_artifact_path, promoted_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
+         slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
+         game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
+         roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
+         validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
+         schema_version = excluded.schema_version, raw_hash = excluded.raw_hash, normalized_hash = excluded.normalized_hash,
+         fetched_at = excluded.fetched_at, current_normalized_artifact_path = excluded.current_normalized_artifact_path,
+         current_raw_artifact_path = excluded.current_raw_artifact_path, promoted_at = excluded.promoted_at, updated_at = excluded.updated_at
+       RETURNING internal_slate_id`,
+      [
+        proposedInternalSlateId, slate.sport, slate.site, slate.provider, slate.providerSlateId, slate.slateName, slate.slateDate,
+        slate.firstGameStartUtc, slate.gameCount, JSON.stringify(slate.gameIds), slate.salaryCap, slate.rosterTemplate ? JSON.stringify(slate.rosterTemplate) : null,
+        slate.sourceProvenance, slate.validationState, JSON.stringify(slate.validationFindings), artifact.schemaVersion, artifact.rawHash, artifact.normalizedHash,
+        slate.fetchedAt, options.normalizedArtifactPath, options.rawArtifactPath ?? null, now, now, now,
+      ],
+    );
+    // internal_slate_id is NEVER included in the DO UPDATE SET clause
+    // above -- an existing row's canonical id is never overwritten by a
+    // later ingestion's own (necessarily different) proposed uuid. This
+    // is M2D's actual stability mechanism -- see canonical_ingestion/
+    // normalize.py's docstring for why Python doesn't need to query
+    // Postgres to achieve the same guarantee.
+    const internalSlateId = upserted!.internal_slate_id;
+
+    await tx.run("DELETE FROM slate_players WHERE internal_slate_id = ?", [internalSlateId]);
+
+    let reviewQueueEntriesCreated = 0;
+    for (const player of artifact.players) {
+      const match = artifact.identityMatches[player.providerPlayerId];
+      const internalPlayerId = await resolveInternalPlayerId(tx, slate.sport, player, match, now);
+
+      let identityStatus: CanonicalSlatePlayerDocument["identityStatus"];
+      if (internalPlayerId) {
+        identityStatus = "RESOLVED";
+      } else if (match?.identityStatus === "REVIEW_REQUIRED") {
+        identityStatus = "REVIEW_REQUIRED";
+        if (await createReviewQueueEntryIfNeeded(tx, slate.sport, player, match, now)) reviewQueueEntriesCreated += 1;
+      } else {
+        identityStatus = "UNRESOLVED";
+      }
+
+      await tx.run(
+        `INSERT INTO slate_players
+          (internal_slate_id, provider_player_id, internal_player_id, provider_draftable_ids_json, name, team, opponent, game_id, salary,
+           position_eligibility_json, roster_slot_eligibility_json, identity_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          internalSlateId, player.providerPlayerId, internalPlayerId, JSON.stringify(player.providerDraftableIds), player.name, player.team,
+          player.opponent, player.gameId, player.salary, JSON.stringify(player.positionEligibility), JSON.stringify(player.rosterSlotEligibility),
+          identityStatus, now, now,
+        ],
+      );
+    }
+
+    return {
+      promoted: true,
+      reason: existing ? "Updated existing canonical slate." : "Created new canonical slate.",
+      internalSlateId,
+      reviewQueueEntriesCreated,
+    };
+  });
+}

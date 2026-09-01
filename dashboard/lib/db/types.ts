@@ -328,6 +328,10 @@ export interface CanonicalSlateRow {
   raw_hash: string | null;
   normalized_hash: string | null;
   fetched_at: string | null;
+  // M2H: additive promotion metadata (migrations/0010_canonical_slate_promotion_metadata.sql).
+  current_normalized_artifact_path: string | null;
+  current_raw_artifact_path: string | null;
+  promoted_at: string | null;
   created_at: string;
   updated_at: string;
 }

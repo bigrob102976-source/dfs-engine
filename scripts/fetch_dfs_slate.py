@@ -20,6 +20,7 @@ Usage:
 """
 
 import argparse
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,7 @@ from research.prediction_snapshot import timestamp_tag
 from research.storage import save_json
 
 DEFAULT_OUTPUT_ROOT = "dfs_input"
+CANONICAL_SHADOW_TIMEOUT_SECONDS = 60
 
 
 def _load_research_games(date: str) -> list:
@@ -173,6 +175,41 @@ def main() -> None:
         raw_result=result, chosen_slate_id=chosen.slate_id,
     )
     print(f"\nFile written:\n  - {path}")
+
+    # M2: parallel/shadow canonical ingestion -- attached HERE,
+    # deliberately AFTER the legacy artifact write above has already
+    # succeeded, and ONLY for the real DraftKings Unofficial provider
+    # (never mock/CSV -- there is no independent real DraftGroup to
+    # re-fetch against for those). Wrapped so that ANY shadow-path
+    # failure (network, validation, storage) can NEVER affect this
+    # script's own exit code or the legacy artifact just written -- see
+    # canonical_ingestion/pipeline.py's M2I docstring. The customer-
+    # facing path (poolCache.ts, reading the file written above) is
+    # completely unaffected either way.
+    if provider.name == "draftkings_unofficial":
+        _run_canonical_shadow_ingestion(args.date, chosen.slate_id, args.sport, args.site)
+
+
+def _run_canonical_shadow_ingestion(date: str, slate_id: str, sport: str, site: str) -> None:
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable, "scripts/ingest_canonical_slate.py",
+                "--date", date, "--slate-id", slate_id, "--sport", sport, "--site", site,
+            ],
+            capture_output=True, text=True, timeout=CANONICAL_SHADOW_TIMEOUT_SECONDS,
+            cwd=Path(__file__).resolve().parent.parent, check=False,
+        )
+    except Exception as exc:  # noqa: BLE001 -- M2I: report, never let this break the legacy fetch
+        print(f"\nCANONICAL SHADOW INGESTION: could not even be launched -- {type(exc).__name__}: {exc}", file=sys.stderr)
+        return
+    # M2I: the shadow script itself always exits 0 and prints its own
+    # ok:true/false JSON result -- print its real output here (subprocess
+    # output is otherwise lost with capture_output=True) so a canonical
+    # failure is fully visible in this worker run's own log, never silent.
+    print(proc.stdout)
+    if proc.stderr:
+        print(proc.stderr, file=sys.stderr)
 
 
 if __name__ == "__main__":

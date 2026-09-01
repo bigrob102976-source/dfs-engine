@@ -40,7 +40,7 @@ _VOLATILE_SLATE_FIELDS = frozenset({
 })
 
 _VOLATILE_PLAYER_FIELDS = frozenset({
-    "internalPlayerId", "identityStatus", "createdAt", "updatedAt",
+    "internalPlayerId", "internalSlateId", "identityStatus", "createdAt", "updatedAt",
 })
 
 

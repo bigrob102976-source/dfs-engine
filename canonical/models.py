@@ -166,6 +166,18 @@ class CanonicalSlateArtifact:
     raw_hash: Optional[str] = None
     normalized_hash: Optional[str] = None
     schema_version: str = CURRENT_SLATE_SCHEMA_VERSION
+    # M2E: keyed by providerPlayerId -- the DETERMINISTIC identity
+    # resolution decision computed at normalization time (see
+    # canonical_ingestion/identity_bridge.py), carried in the artifact so
+    # the separate Postgres-owning promotion step (Node/TS -- this
+    # codebase's Postgres access has always lived exclusively in
+    # dashboard/lib/db/*.ts; see player_identity/persistence.py's own
+    # documented reason for never adding a Python-to-Postgres dependency)
+    # can perform the actual internal_player_id lookup-or-mint without
+    # re-deciding or fuzzy-matching anything itself. Additive field --
+    # existing M1 CanonicalSlateArtifact construction/tests are
+    # unaffected (defaults to empty).
+    identity_matches: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -174,4 +186,5 @@ class CanonicalSlateArtifact:
             "normalizedHash": self.normalized_hash,
             "slate": self.slate.to_dict(),
             "players": [p.to_dict() for p in self.players],
+            "identityMatches": dict(self.identity_matches),
         }

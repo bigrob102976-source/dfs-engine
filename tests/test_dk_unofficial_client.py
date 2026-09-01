@@ -220,3 +220,42 @@ def test_get_contest_details_returns_parsed_payload(monkeypatch):
     _ok({"contestDetail": {"contestSummary": "hi"}}, monkeypatch)
     result = get_contest_details(1)
     assert result == {"contestDetail": {"contestSummary": "hi"}}
+
+
+def test_capture_receives_exact_response_body(monkeypatch):
+    # M2B: the additive `capture` hook must see the EXACT decoded body
+    # text, before any JSON parsing.
+    _ok({"a": 1, "b": [1, 2, 3]}, monkeypatch)
+    captured = []
+    result = get_sports(capture=lambda url, body: captured.append((url, body)))
+    assert result == {"a": 1, "b": [1, 2, 3]}
+    assert len(captured) == 1
+    url, body = captured[0]
+    assert url == dk_client.SPORTS_URL
+    assert json.loads(body) == {"a": 1, "b": [1, 2, 3]}
+
+
+def test_capture_not_called_when_not_provided(monkeypatch):
+    # Zero behavior change for every existing caller that doesn't pass it.
+    _ok({"a": 1}, monkeypatch)
+    assert get_sports() == {"a": 1}  # no capture kwarg at all -- must not raise
+
+
+def test_capture_exception_never_breaks_a_real_fetch(monkeypatch):
+    _ok({"a": 1}, monkeypatch)
+
+    def bad_capture(url, body):
+        raise RuntimeError("boom")
+
+    assert get_sports(capture=bad_capture) == {"a": 1}
+
+
+def test_capture_fires_on_every_wrapped_endpoint(monkeypatch):
+    _ok({"x": 1}, monkeypatch)
+    captured = []
+    cb = lambda url, body: captured.append(url)
+    get_contests("MLB", capture=cb)
+    get_draftables(12345, capture=cb)
+    get_game_type_rules(2, capture=cb)
+    get_contest_details(1, capture=cb)
+    assert len(captured) == 4

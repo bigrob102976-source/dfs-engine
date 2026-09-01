@@ -30,7 +30,19 @@ shape change is detected and reported instead of crashing.
 import json
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+
+# M2B: an optional, purely-additive hook for capturing the EXACT raw
+# response body at the one place this codebase ever sees it -- every
+# caller above this module only ever receives the already-parsed dict
+# `_get_json` returns (see this module's own docstring: the decoded
+# `body` string is discarded the moment json.loads succeeds). Default
+# None on every function below means ZERO behavior change for every
+# existing caller (draftkings_unofficial/collector.py's normal
+# collection path, every existing test) -- this is not a redesign of
+# the client, just an opt-in observation point for canonical_ingestion's
+# genuine byte-exact RAW capture (see canonical_ingestion/raw_capture.py).
+RawCapture = Callable[[str, str], None]  # (url, exact_response_body_text) -> None
 
 USER_AGENT = "Mozilla/5.0 (compatible; BigMoneyDFS-dev/1.0)"
 REQUEST_TIMEOUT_SECONDS = 20
@@ -68,7 +80,7 @@ class DraftKingsUnofficialUnavailableError(DraftKingsUnofficialError):
     connection refused)."""
 
 
-def _get_json(url: str) -> Any:
+def _get_json(url: str, capture: Optional[RawCapture] = None) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
@@ -96,27 +108,38 @@ def _get_json(url: str) -> Any:
         # (the endpoint isn't returning its normal contract at all).
         raise DraftKingsUnofficialAccessRestrictedError(f"DraftKings returned HTML instead of JSON (likely a login/CAPTCHA wall): {url}")
 
+    # M2B: fires with the EXACT decoded response body, before any
+    # parsing -- the one true byte-exact capture point. A capture
+    # exception is never allowed to break a real DK call; canonical_
+    # ingestion's own recorder never raises, but this is a defensive
+    # floor regardless.
+    if capture is not None:
+        try:
+            capture(url, body)
+        except Exception:  # noqa: BLE001 -- observation must never break a real fetch
+            pass
+
     try:
         return json.loads(body)
     except ValueError as exc:
         raise DraftKingsUnofficialUnavailableError(f"DraftKings returned invalid JSON ({url}): {exc}") from exc
 
 
-def get_sports() -> Dict[str, Any]:
-    return _get_json(SPORTS_URL)
+def get_sports(capture: Optional[RawCapture] = None) -> Dict[str, Any]:
+    return _get_json(SPORTS_URL, capture=capture)
 
 
-def get_contests(sport_code: str) -> Dict[str, Any]:
-    return _get_json(CONTESTS_URL.format(sport_code=sport_code))
+def get_contests(sport_code: str, capture: Optional[RawCapture] = None) -> Dict[str, Any]:
+    return _get_json(CONTESTS_URL.format(sport_code=sport_code), capture=capture)
 
 
-def get_draftables(draft_group_id: int) -> Dict[str, Any]:
-    return _get_json(DRAFTABLES_URL.format(draft_group_id=draft_group_id))
+def get_draftables(draft_group_id: int, capture: Optional[RawCapture] = None) -> Dict[str, Any]:
+    return _get_json(DRAFTABLES_URL.format(draft_group_id=draft_group_id), capture=capture)
 
 
-def get_game_type_rules(game_type_id: int) -> Dict[str, Any]:
-    return _get_json(GAME_TYPE_RULES_URL.format(game_type_id=game_type_id))
+def get_game_type_rules(game_type_id: int, capture: Optional[RawCapture] = None) -> Dict[str, Any]:
+    return _get_json(GAME_TYPE_RULES_URL.format(game_type_id=game_type_id), capture=capture)
 
 
-def get_contest_details(contest_id: int) -> Optional[Dict[str, Any]]:
-    return _get_json(CONTEST_DETAILS_URL.format(contest_id=contest_id))
+def get_contest_details(contest_id: int, capture: Optional[RawCapture] = None) -> Optional[Dict[str, Any]]:
+    return _get_json(CONTEST_DETAILS_URL.format(contest_id=contest_id), capture=capture)

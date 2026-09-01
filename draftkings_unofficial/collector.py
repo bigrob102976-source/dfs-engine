@@ -27,6 +27,19 @@ STATUS_RATE_LIMITED = "rate_limited"
 STATUS_UNAVAILABLE = "unavailable"
 
 
+def _capture_kwargs(capture: Optional[client.RawCapture]) -> Dict[str, Any]:
+    """M2B: omits the `capture` kwarg entirely when unset, so the call
+    signature to client.get_X() is byte-for-byte identical to before
+    this feature existed whenever no caller asked for capture -- several
+    existing tests monkeypatch client.get_contests/get_draftables/
+    get_game_type_rules with narrow lambdas that only accept their
+    original positional argument, and unconditionally passing
+    `capture=None` would break every one of them for no behavioral
+    reason. Real callers (canonical_ingestion) always pass a real,
+    non-None capture, so this never hides a genuine capture request."""
+    return {"capture": capture} if capture is not None else {}
+
+
 @dataclass
 class SportsResult:
     status: str
@@ -114,10 +127,20 @@ def collect_sports(save_snapshot: bool = True, cache: Optional[DkUnofficialCache
     return SportsResult(status=STATUS_OK, sports=sports, skipped=skipped, schema_check=check.to_dict())
 
 
-def collect_sport_universe(sport_code: str, save_snapshot: bool = True, cache: Optional[DkUnofficialCache] = None) -> SportUniverseResult:
+def collect_sport_universe(
+    sport_code: str, save_snapshot: bool = True, cache: Optional[DkUnofficialCache] = None,
+    capture: Optional[client.RawCapture] = None,
+) -> SportUniverseResult:
+    # M2B: `capture`, like `save_snapshot`/`cache` above, is purely
+    # additive (default None -- zero behavior change for every existing
+    # caller). It only fires on an actual cache MISS (a real HTTP call);
+    # canonical_ingestion always passes its own fresh, unshared
+    # DkUnofficialCache instance so a shadow-ingestion run captures every
+    # underlying endpoint call, not whatever the shared default cache
+    # happened to already hold.
     cache = cache or get_default_cache()
     try:
-        payload = cache.get_or_fetch("contests", sport_code, lambda: client.get_contests(sport_code))
+        payload = cache.get_or_fetch("contests", sport_code, lambda: client.get_contests(sport_code, **_capture_kwargs(capture)))
     except Exception as exc:  # noqa: BLE001
         return SportUniverseResult(status=_handle_client_error(exc), sport_code=sport_code, error=str(exc))
 
@@ -155,10 +178,12 @@ def collect_sport_universe(sport_code: str, save_snapshot: bool = True, cache: O
 def collect_slate_detail(
     draft_group_id: int, sport_code: str, game_type_id: Optional[int] = None,
     research_package: Optional[dict] = None, save_snapshot: bool = True, cache: Optional[DkUnofficialCache] = None,
+    capture: Optional[client.RawCapture] = None,
 ) -> SlateDetailResult:
+    # M2B: see collect_sport_universe's identical `capture` docstring.
     cache = cache or get_default_cache()
     try:
-        payload = cache.get_or_fetch("draftables", str(draft_group_id), lambda: client.get_draftables(draft_group_id))
+        payload = cache.get_or_fetch("draftables", str(draft_group_id), lambda: client.get_draftables(draft_group_id, **_capture_kwargs(capture)))
     except Exception as exc:  # noqa: BLE001
         return SlateDetailResult(status=_handle_client_error(exc), draft_group_id=draft_group_id, error=str(exc))
 
@@ -178,7 +203,7 @@ def collect_slate_detail(
     rules_check_dict: Optional[dict] = None
     if game_type_id is not None:
         try:
-            rules_payload = cache.get_or_fetch("rules", str(game_type_id), lambda: client.get_game_type_rules(game_type_id))
+            rules_payload = cache.get_or_fetch("rules", str(game_type_id), lambda: client.get_game_type_rules(game_type_id, **_capture_kwargs(capture)))
             if save_snapshot:
                 try:
                     persistence.save_raw("rules", str(game_type_id), rules_payload)
