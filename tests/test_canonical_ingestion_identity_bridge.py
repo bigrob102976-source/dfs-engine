@@ -86,3 +86,52 @@ def test_dk_id_attached_correctly_mlbam_only_when_known():
     providers = [h.provider for h in result.external_id_hints]
     assert providers == ["draftkings"]  # no mlbam hint when unresolved
     assert result.external_id_hints[0].external_id == "12345"
+
+
+def test_m8_davis_martin_real_regression_fixture_resolves_via_fresh_crosswalk():
+    # Real, live-verified M7/M8 case: legacy resolved this player (via its
+    # own always-current probable-starters research file) while canonical
+    # did not, because player_identity_crosswalk/ had gone 9 days stale --
+    # a fresh crosswalk entry (this fixture) resolves him correctly with
+    # no matching-tier change at all. Real DK id/MLBAM id/team, from
+    # production on 2026-09-02.
+    crosswalk = {"663436": _identity(mlb_id="663436", name="Davis Martin", team="CWS")}
+    index = build_name_team_index(crosswalk)
+    result = resolve_dk_player(_dk_player(name="Davis Martin", team="CWS", external_id="915705"), index)
+
+    assert result.identity_status == IDENTITY_STATUS_RESOLVED
+    assert result.match_method == METHOD_EXACT_DETERMINISTIC_SOURCE_MAPPING
+    hints = {h.provider: h.external_id for h in result.external_id_hints}
+    assert hints["draftkings"] == "915705"
+    assert hints["mlbam"] == "663436"
+
+
+def test_m8d_dk_team_abbreviation_is_normalized_before_lookup_ari_to_az():
+    # M8C/M8D: legacy's dfs/player_resolver.py already normalizes DK's
+    # "ARI" to the research package's "AZ" before matching; this bridge
+    # previously used DK's raw team code directly, so a real Diamondbacks
+    # player would silently fail to resolve even with a perfectly fresh
+    # crosswalk entry (current_team is always "AZ", sourced from the live
+    # MLB roster fetch -- see player_identity/models.py).
+    crosswalk = {"1": _identity(mlb_id="1", name="Corbin Carroll", team="AZ")}
+    index = build_name_team_index(crosswalk)
+    result = resolve_dk_player(_dk_player(name="Corbin Carroll", team="ARI", external_id="500"), index)
+    assert result.identity_status == IDENTITY_STATUS_RESOLVED
+    assert result.candidate_mlb_player_ids == ["1"]
+
+
+def test_m8d_dk_team_abbreviation_is_normalized_before_lookup_oak_to_ath():
+    crosswalk = {"2": _identity(mlb_id="2", name="Some Athletic", team="ATH")}
+    index = build_name_team_index(crosswalk)
+    result = resolve_dk_player(_dk_player(name="Some Athletic", team="OAK", external_id="501"), index)
+    assert result.identity_status == IDENTITY_STATUS_RESOLVED
+    assert result.candidate_mlb_player_ids == ["2"]
+
+
+def test_m8d_team_normalization_does_not_change_unrelated_abbreviations():
+    # Guards against the normalization table being applied too broadly --
+    # every other team code must pass through completely unchanged.
+    crosswalk = {"3": _identity(mlb_id="3", name="Some Player", team="BOS")}
+    index = build_name_team_index(crosswalk)
+    result = resolve_dk_player(_dk_player(name="Some Player", team="BOS", external_id="502"), index)
+    assert result.identity_status == IDENTITY_STATUS_RESOLVED

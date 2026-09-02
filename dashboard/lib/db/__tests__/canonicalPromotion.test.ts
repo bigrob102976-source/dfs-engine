@@ -260,6 +260,57 @@ describe("promoteCanonicalArtifact", () => {
     ]);
   });
 
+  it("M8E: a traded player (new DK player_id, new team, same MLBAM id) reuses the SAME internalPlayerId -- never mints a second Player row", async () => {
+    const db = getExecutor();
+    const first = baseArtifact();
+    first.players[0].identityStatus = "RESOLVED";
+    first.players[0].team = "BOS";
+    first.identityMatches["999"] = {
+      identityStatus: "RESOLVED", matchMethod: "exact_deterministic_source_mapping", matchConfidence: 1.0,
+      externalIdHints: [{ provider: "draftkings", externalId: "999", externalIdType: "player_id" }, { provider: "mlbam", externalId: "660271", externalIdType: "mlbam_id" }],
+      candidateMlbPlayerIds: ["660271"], reason: null,
+    };
+    const firstResult = await promoteCanonicalArtifact(db, first, opts());
+    const firstPlayerRow = getDb().prepare("SELECT internal_player_id FROM slate_players WHERE internal_slate_id = ?").get(firstResult.internalSlateId!) as Record<string, unknown>;
+    const stableInternalPlayerId = firstPlayerRow.internal_player_id as string;
+    expect(stableInternalPlayerId).toBeTruthy();
+
+    // A genuinely different slate (a later date, DK reissued a new
+    // player_id "777" for this player now playing for NYY instead of
+    // BOS -- simulating a real trade) -- the ONLY shared fact is the
+    // same MLBAM id.
+    const traded = baseArtifact({
+      slate: { ...baseArtifact().slate, internalSlateId: "proposed-uuid-2", providerSlateId: "999888", slateDate: "2026-09-05", fetchedAt: "2026-09-05T20:00:00.000Z" },
+    });
+    traded.players = [
+      { internalSlateId: "x", internalPlayerId: null, providerPlayerId: "777", providerDraftableIds: ["301"], name: "Flex Player", team: "NYY", opponent: "BOS", gameId: null, salary: 5200, positionEligibility: ["1B", "OF"], rosterSlotEligibility: [], identityStatus: "RESOLVED" },
+    ];
+    traded.identityMatches = {
+      "777": {
+        identityStatus: "RESOLVED", matchMethod: "exact_deterministic_source_mapping", matchConfidence: 1.0,
+        externalIdHints: [{ provider: "draftkings", externalId: "777", externalIdType: "player_id" }, { provider: "mlbam", externalId: "660271", externalIdType: "mlbam_id" }],
+        candidateMlbPlayerIds: ["660271"], reason: null,
+      },
+    };
+    const tradedResult = await promoteCanonicalArtifact(db, traded, opts({ normalizedArtifactPath: "normalized/MLB/2026-09-05/draftkings_unofficial/999888/x.json" }));
+    const tradedPlayerRow = getDb().prepare("SELECT internal_player_id, team FROM slate_players WHERE internal_slate_id = ?").get(tradedResult.internalSlateId!) as Record<string, unknown>;
+
+    expect(tradedPlayerRow.internal_player_id).toBe(stableInternalPlayerId); // SAME canonical identity across the trade
+    expect(tradedPlayerRow.team).toBe("NYY"); // team metadata itself DOES update per-slate
+
+    const playerCount = (getDb().prepare("SELECT COUNT(*) as c FROM players WHERE internal_player_id = ?").get(stableInternalPlayerId) as { c: number }).c;
+    expect(playerCount).toBe(1); // never a second Player row minted
+
+    const draftkingsIds = getDb()
+      .prepare("SELECT external_id, is_current, valid_to FROM player_external_ids WHERE internal_player_id = ? AND provider = 'draftkings' ORDER BY external_id")
+      .all(stableInternalPlayerId) as Array<{ external_id: string; is_current: number; valid_to: string | null }>;
+    expect(draftkingsIds.map((r) => r.external_id)).toEqual(["777", "999"]); // BOTH historical DK ids remain attached, never deleted
+    const byId = new Map(draftkingsIds.map((r) => [r.external_id, r]));
+    expect(byId.get("777")).toEqual(expect.objectContaining({ is_current: 1, valid_to: null })); // the new, current mapping
+    expect(byId.get("999")?.is_current).toBe(0); // superseded, not deleted
+    expect(byId.get("999")?.valid_to).toBeTruthy(); // historical close-out timestamp recorded
+  });
+
   it("review-required creates exactly one identity_review_queue entry, never duplicated on re-ingestion", async () => {
     const db = getExecutor();
     const artifact = baseArtifact();

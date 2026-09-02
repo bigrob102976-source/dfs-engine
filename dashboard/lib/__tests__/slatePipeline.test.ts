@@ -157,12 +157,12 @@ describe("runSlatePipeline", () => {
     expect(result.errors).toEqual([]);
     expect(calls.map((c) => c.script)).toEqual([
       "scripts/build_research_package.py",
+      "scripts/refresh_player_identity.py",
       "scripts/run_real_pitcher_agent.py",
       "scripts/run_real_batter_agent.py",
       "scripts/fetch_dfs_slate.py",
       "scripts/build_dfs_pool_from_provider.py",
       "scripts/project_dk_ownership.py",
-      "scripts/refresh_player_identity.py",
       "scripts/build_game_environment_report.py",
       "scripts/run_native_projection_engine.py",
       "scripts/run_ai_projection_engine.py",
@@ -480,6 +480,35 @@ describe("runSlatePipeline", () => {
     const scripts = calls.map((c) => c.script);
     expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/run_native_projection_engine.py"));
     expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/fetch_bluecollar_projections.py"));
+  });
+
+  it("M8B/M8D: the player identity refresh still runs (and still updates the crosswalk) even when the DK pool build fails -- the real, live-confirmed root cause of a stale canonical identity crosswalk", async () => {
+    // Real production scenario (2026-09-02): DraftKings returns HTTP 403
+    // to requests from inside Railway's network, so fetch_dfs_slate.py
+    // fails on every automatic admin refresh. Before this fix,
+    // refresh_player_identity.py ran AFTER loadPool() and was therefore
+    // never reached once loadPool() threw and returned early -- silently
+    // starving canonical's identity crosswalk of updates for 9+ real
+    // days, causing a real player (Davis Martin) to go unresolved in
+    // canonical while legacy resolved him fine from an independent
+    // source. This test proves the fix: identity refresh must be
+    // attempted and observably run even though the DK-dependent pool
+    // build fails right after it.
+    const handlers = { ...defaultHandlers(), "scripts/fetch_dfs_slate.py": () => fail("DraftKings restricted access (HTTP 403)") };
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).toBe("ERROR"); // the legacy, customer-facing pool build genuinely failed
+    expect(result.errors.some((e) => e.includes("Player pool build failed"))).toBe(true);
+    // ...but the identity crosswalk refresh was still attempted, and ran
+    // to completion, BEFORE the DK-dependent step ever failed.
+    const scripts = calls.map((c) => c.script);
+    expect(scripts).toContain("scripts/refresh_player_identity.py");
+    expect(scripts.indexOf("scripts/refresh_player_identity.py")).toBeLessThan(scripts.indexOf("scripts/fetch_dfs_slate.py"));
   });
 
   it("M32.7: refreshes research_output (schedule/lineups) and re-scores both Agents BEFORE the pool is built", async () => {

@@ -96,6 +96,20 @@ async function findCurrentExternalId(tx: SqlExecutor, sport: string, provider: s
   return row?.internal_player_id ?? null;
 }
 
+/** M8H -- preserves M1's identity rules: a player may accumulate
+ * multiple HISTORICAL provider ids over time (e.g. DraftKings issues a
+ * new player_id after a real trade), but the schema's own Invariant 2
+ * (idx_player_external_ids_current_per_player, migrations/0009) allows
+ * only ONE row per (internal_player_id, provider, sport) to be
+ * is_current=1 at once. If this player already has a DIFFERENT current
+ * external id for this exact provider, that old row is superseded
+ * (is_current=0, valid_to=now) -- never deleted, never left dangling --
+ * before the new one is inserted as current. This is the SAME player
+ * (mlbam id decided that already, upstream in resolveInternalPlayerId);
+ * a team change is metadata, never grounds for a second canonical
+ * identity (M8E). No `UNIQUE(internal_player_id, provider)` constraint
+ * is restored here -- multiple non-current rows for the same provider
+ * remain fully legal, exactly as M1 specified. */
 async function attachExternalIdIfMissing(
   tx: SqlExecutor, internalPlayerId: string, sport: string, provider: string, externalId: string, externalIdType: string,
   matchMethod: string, matchConfidence: number, now: string,
@@ -105,6 +119,18 @@ async function attachExternalIdIfMissing(
     [provider, externalId, sport],
   );
   if (existing) return;
+
+  const priorCurrent = await tx.get<{ id: string; external_id: string }>(
+    "SELECT id, external_id FROM player_external_ids WHERE internal_player_id = ? AND provider = ? AND sport = ? AND is_current = 1",
+    [internalPlayerId, provider, sport],
+  );
+  if (priorCurrent && priorCurrent.external_id !== externalId) {
+    await tx.run(
+      "UPDATE player_external_ids SET is_current = 0, valid_to = ?, updated_at = ? WHERE id = ?",
+      [now, now, priorCurrent.id],
+    );
+  }
+
   await tx.run(
     `INSERT INTO player_external_ids
       (id, internal_player_id, sport, provider, external_id, external_id_type, match_method, match_confidence, review_status, is_current, valid_from, created_at, updated_at)

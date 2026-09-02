@@ -41,6 +41,7 @@ from canonical.identity_models import (
 )
 from canonical.models import IDENTITY_STATUS_RESOLVED, IDENTITY_STATUS_REVIEW_REQUIRED, IDENTITY_STATUS_UNRESOLVED
 from dfs.name_normalization import normalize_name
+from dfs.team_abbreviations import normalize_dk_team_abbr
 from player_identity.models import CanonicalIdentity
 from player_identity.persistence import load_crosswalk
 
@@ -104,12 +105,26 @@ def load_name_team_index() -> NameTeamIndex:
 def resolve_dk_player(provider_player, index: NameTeamIndex) -> DkIdentityBridgeResult:
     """Resolves one dfs/providers/models.py ProviderPlayer against the
     MLB identity crosswalk index. Never fuzzy -- an exact dict lookup on
-    (normalize_name(provider_player.name), provider_player.team); no
-    edit-distance/similarity scoring exists anywhere in this path."""
+    (normalize_name(provider_player.name), normalize_dk_team_abbr(provider_player.team));
+    no edit-distance/similarity scoring exists anywhere in this path.
+
+    M8C/M8D: the crosswalk's own `current_team` is always sourced from a
+    live MLB roster fetch (player_identity/roster_source.py), which uses
+    the Research Engine's team-abbreviation convention (e.g. "AZ",
+    "ATH") -- not necessarily DraftKings' own abbreviation for the same
+    team (e.g. "ARI", "OAK"). dfs/player_resolver.py (legacy) already
+    normalizes through dfs/team_abbreviations.py::normalize_dk_team_abbr
+    before its own name+team lookup; this bridge previously did not,
+    which would silently and needlessly fail to resolve every
+    Diamondbacks/Athletics player even when the crosswalk otherwise had
+    them. Reusing the SAME existing, deterministic, already-tested
+    mapping here (never inventing a second one) closes that gap without
+    adding any new matching tier or fuzzy logic."""
     external_id_hints = [ExternalIdHint(provider="draftkings", external_id=provider_player.external_player_id, external_id_type="player_id")]
 
     normalized = normalize_name(provider_player.name)
-    candidates = index.get((normalized, provider_player.team), [])
+    normalized_team = normalize_dk_team_abbr(provider_player.team)
+    candidates = index.get((normalized, normalized_team), [])
 
     if len(candidates) == 1:
         identity = candidates[0]
@@ -129,12 +144,12 @@ def resolve_dk_player(provider_player, index: NameTeamIndex) -> DkIdentityBridge
             candidate_mlb_player_ids=[c.mlb_player_id for c in candidates],
             reason=(
                 f"{len(candidates)} MLB identity crosswalk entries share the exact normalized name "
-                f"'{normalized}' and team '{provider_player.team}' -- genuine ambiguity, needs human review."
+                f"'{normalized}' and team '{normalized_team}' -- genuine ambiguity, needs human review."
             ),
         )
 
     return DkIdentityBridgeResult(
         identity_status=IDENTITY_STATUS_UNRESOLVED,
         external_id_hints=external_id_hints,
-        reason=f"No exact (normalized name, team) match in the MLB identity crosswalk for '{normalized}' / '{provider_player.team}'.",
+        reason=f"No exact (normalized name, team) match in the MLB identity crosswalk for '{normalized}' / '{normalized_team}'.",
     )

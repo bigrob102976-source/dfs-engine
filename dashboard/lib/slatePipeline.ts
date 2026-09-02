@@ -141,6 +141,32 @@ export async function runSlatePipeline(
     console.error(`[M7A] canonical eligibility refresh for ${date} threw unexpectedly (isolated -- legacy pipeline unaffected):`, err);
   }
 
+  // M8B/M8D -- refreshes the roster-derived identity crosswalk
+  // (player_identity/refresh.py), consulted by BOTH legacy's
+  // dfs/player_resolver.py (widening its candidate pool beyond today's
+  // probable-pitcher/posted-lineup research) and canonical's
+  // canonical_ingestion/identity_bridge.py. MOVED here (was previously
+  // after "Building player pool" below) once a live M8 audit found its
+  // ONLY real dependency is research_output/<date>/teams.json --
+  // written by "Refreshing MLB schedule and lineups" just above, NOT by
+  // the DK-dependent pool-build step below. The prior placement meant a
+  // DK-side failure in the pool-build step's own try/catch (which
+  // returns early -- see below) silently prevented this crosswalk from
+  // ever refreshing at all, even though it has nothing to do with DK.
+  // Live-confirmed root cause of a real 9-day-stale crosswalk that made
+  // canonical unable to resolve a player (Davis Martin, MLBAM 663436)
+  // that legacy resolved fine from its own independent, always-current
+  // probable-starters research file. Never blocks the slate:
+  // scripts/refresh_player_identity.py always exits 0 and a missing/
+  // failed team fetch is recorded in its own JSON status line, not as a
+  // pipeline failure -- `status` below is computed from readiness/pool
+  // presence alone, never from `errors.length`.
+  onProgress(2, "Refreshing MLB player identity");
+  const identityResult = await runPythonScript("scripts/refresh_player_identity.py", ["--date", date]);
+  if (identityResult.exitCode !== 0) {
+    errors.push(`Player identity refresh failed: ${tail(identityResult.stdout + identityResult.stderr, 800)}`);
+  }
+
   // M32.7 AUTOMATIC PROMOTION: re-score the Pitcher/Batter Agents FIRST,
   // before the player pool is (re)built below -- confirmed live gap
   // this milestone's own validation surfaced: "Building player pool"
@@ -154,7 +180,7 @@ export async function runSlatePipeline(
   // blocks the slate: both scripts fail loudly (non-zero exit) only on
   // a genuine crash, never for "no eligible players yet" (an early
   // slate with nobody confirmed yet still exits 0 with zero scored).
-  onProgress(2, "Scoring starting pitchers");
+  onProgress(3, "Scoring starting pitchers");
   const pitcherAgentResult = await runPythonScript("scripts/run_real_pitcher_agent.py", ["--date", date]);
   if (pitcherAgentResult.exitCode !== 0) {
     errors.push(`Pitcher Agent scoring failed: ${tail(pitcherAgentResult.stdout + pitcherAgentResult.stderr, 800)}`);
@@ -201,26 +227,6 @@ export async function runSlatePipeline(
     // comparing against a state the pipeline never actually reached.
     errors.push(`Player pool build failed: ${message}`);
     return { status: "ERROR", errors, changeReport: diffSlateState(stateBefore, stateBefore), canonicalEligibilityRefresh };
-  }
-
-  // Canonical MLB Player Identity Foundation: refreshes the roster-
-  // derived identity crosswalk (player_identity/refresh.py) for every
-  // team playing on `date` -- independent of starting-lineup
-  // confirmation, using research_output/<date>/teams.json (schedule-
-  // derived, guaranteed to exist by now since "Building player pool"
-  // above already built/loaded the research package). Runs BEFORE
-  // Native/AI/BlueCollar below so they consult the freshest possible
-  // crosswalk; the DK pool build just above already benefited from
-  // whatever crosswalk a PRIOR refresh had accumulated (rosters change
-  // slowly day to day, so this is a minor, documented ordering
-  // trade-off, not a correctness gap -- see this script's own module
-  // docstring). Never blocks the slate: scripts/refresh_player_identity.py
-  // always exits 0 and a missing/failed team fetch is recorded in its
-  // own JSON status line, not as a pipeline failure.
-  onProgress(35, "Refreshing MLB player identity");
-  const identityResult = await runPythonScript("scripts/refresh_player_identity.py", ["--date", date]);
-  if (identityResult.exitCode !== 0) {
-    errors.push(`Player identity refresh failed: ${tail(identityResult.stdout + identityResult.stderr, 800)}`);
   }
 
   // M32.7 GLOBAL REFRESH: "Admin Refresh Data should be the single
