@@ -154,7 +154,7 @@ function jsonResponse(body: unknown) {
   return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
 }
 
-function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit) => Promise<Response>>> = {}) {
+function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit, url?: string) => Promise<Response>>> = {}) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const impl = vi.fn((url: string, init?: RequestInit) => {
     calls.push({ url, init });
@@ -162,7 +162,7 @@ function installFetchMock(overrides: Partial<Record<string, (init?: RequestInit)
     // string (?slateId=...&date=...) -- matched by prefix so an override
     // keyed by the bare path still applies regardless of query params.
     const overrideKey = Object.keys(overrides).find((k) => url === k || url.startsWith(k));
-    if (overrideKey) return overrides[overrideKey]!(init);
+    if (overrideKey) return overrides[overrideKey]!(init, url);
     if (url === "/api/optimizer/slates") return jsonResponse(SLATES_READY);
     if (url === "/api/optimizer/pool") return jsonResponse({ pool: POOL_RESULT });
     if (url === "/api/optimizer/validate") return jsonResponse({ errors: [] });
@@ -1020,6 +1020,58 @@ describe("OptimizerWorkspace", () => {
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
       expect(screen.queryByText("Canonical Postgres (Admin Test)")).not.toBeInTheDocument();
       expect(screen.getByText("Build Lineups")).not.toBeDisabled();
+    });
+
+    it("T2: shows a clear, actionable, admin-specific message (never the generic customer 'worker delayed' wording) when canonical test data has gone stale, with a working Retry button", async () => {
+      let retried = false;
+      const { calls } = installFetchMock({
+        "/api/optimizer/slates": (_init, url) => {
+          const isCanonical = (url ?? "").includes("servingBackend=CANONICAL_POSTGRES");
+          if (!isCanonical) return jsonResponse({ ...SLATES_READY, servingBackend: "LEGACY_R2" });
+          if (!retried) {
+            return jsonResponse({
+              date: "2026-08-12", status: "stale_expired",
+              reason: "Canonical Postgres slate data was last promoted too long ago to serve safely -- the automatic worker appears to be delayed.",
+              providerName: "draftkings_unofficial", providerType: "real", isMock: false, isConnected: true,
+              source: "draftkings_unofficial_live", slates: [], slatesAvailable: 0, dataStatus: null, artifactAgeSeconds: 10000,
+              lastUpdatedAt: "2026-08-12T10:00:00Z", servingBackend: "CANONICAL_POSTGRES",
+            });
+          }
+          return jsonResponse({ ...SLATES_READY, servingBackend: "CANONICAL_POSTGRES" });
+        },
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByLabelText("Admin Test Mode: Canonical Slate Data")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+
+      await waitFor(() => expect(screen.getByText(/needs a refresh/)).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByText(/admin-only test data source/)).toBeInTheDocument();
+      // Never the generic customer-facing wording for this specific case.
+      expect(screen.queryByText(/automatic worker appears to be delayed/)).not.toBeInTheDocument();
+
+      const slatesCallsBefore = calls.filter((c) => c.url.startsWith("/api/optimizer/slates")).length;
+      retried = true;
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      const slatesCallsAfter = calls.filter((c) => c.url.startsWith("/api/optimizer/slates")).length;
+      expect(slatesCallsAfter).toBeGreaterThan(slatesCallsBefore);
+    });
+
+    it("T2: the generic (non-canonical) stale_expired message still shows for LEGACY_R2 with its own Retry button", async () => {
+      installFetchMock({
+        "/api/optimizer/slates": () =>
+          jsonResponse({
+            date: "2026-08-12", status: "stale_expired",
+            reason: "DraftKings data was last updated 3h 12m ago, which is too old to use safely. The automatic DraftKings fetch worker appears to be delayed -- please check back shortly.",
+            providerName: "draftkings_unofficial", providerType: null, isMock: false, isConnected: false,
+            source: "draftkings_unofficial_live", slates: [], slatesAvailable: 0, dataStatus: null, artifactAgeSeconds: 11520,
+            lastUpdatedAt: "2026-08-12T14:48:00.000Z", servingBackend: "LEGACY_R2",
+          }),
+      });
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText(/too old to use safely/i)).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(screen.queryByText(/admin-only test data source/)).not.toBeInTheDocument();
     });
 
     it("a canonicalTestMode value persisted in localStorage while ADMIN never sticks once canUseCanonicalServing is false", async () => {

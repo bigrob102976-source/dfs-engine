@@ -160,6 +160,11 @@ export function OptimizerWorkspace({
   // what was requested, so a silent server-side downgrade (flag flipped
   // mid-session, session no longer admin) is visible rather than hidden.
   const [activeServingBackend, setActiveServingBackend] = useState<"LEGACY_R2" | "CANONICAL_POSTGRES" | null>(null);
+  // T2 Step 8/9: a manual "Retry" affordance for the canonical-test-mode
+  // staleness notice below -- incrementing this re-runs the slates-fetch
+  // effect without requiring a full page reload or toggling the checkbox
+  // off and back on.
+  const [slatesRetryNonce, setSlatesRetryNonce] = useState(0);
   // Milestone 32.4: BIG MONEY ML COVERAGE gate -- fetched only for ADMIN,
   // only once a pool is loaded, never blocks build/validate on its own.
   const [mlCoverage, setMlCoverage] = useState<BigMoneyMlCoverage | null>(null);
@@ -387,10 +392,11 @@ export function OptimizerWorkspace({
     // Runs right after hydration, and again whenever selectedDate OR
     // canonicalTestMode changes (T1C: toggling the backend must reload
     // the slate list, since canonical/legacy can have different
-    // available DraftGroups) -- deliberately not re-run on every
-    // selectedSlateId change (that's handled by the selectedSlateId
-    // effect below).
-  }, [hydrated, selectedDate, canonicalTestMode]);
+    // available DraftGroups), OR slatesRetryNonce changes (T2: a manual
+    // "Retry" click after a transient/stale failure) -- deliberately not
+    // re-run on every selectedSlateId change (that's handled by the
+    // selectedSlateId effect below).
+  }, [hydrated, selectedDate, canonicalTestMode, slatesRetryNonce]);
 
   // 4. Load the selected slate's player pool. Reconciles existing
   // locks/exclusions/exposures/stackTeam against the new pool (Milestone
@@ -954,12 +960,56 @@ export function OptimizerWorkspace({
       {slateUnavailableMessage && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{slateUnavailableMessage}</div>
       )}
-      {slateStatus && slateStatus !== "ready" && (
+      {/* T2 Step 8: canonical Postgres test data is only refreshed by an
+          admin manually re-running the fetch worker (DraftKings itself
+          cannot be reached from Railway's own network -- see M7/M8's own
+          reports) -- so "stale_expired" here means something different,
+          and more actionable, than the customer-facing LEGACY_R2 message
+          below. Never a blank screen, never the generic "worker appears
+          to be delayed" wording that reads as a real outage. */}
+      {slateStatus === "stale_expired" && canonicalTestMode && activeServingBackend === "CANONICAL_POSTGRES" ? (
+        <div className="rounded border border-purple/40 bg-purple/5 px-3 py-2 text-xs text-purple">
+          <span>
+            Canonical Postgres test data needs a refresh -- this is an admin-only test data source, not automatically kept current the way
+            the normal live site is. Ask a developer to re-run the fetch worker, or turn off Admin Test Mode to use the normal site.
+          </span>
+          <button
+            type="button"
+            onClick={() => setSlatesRetryNonce((n) => n + 1)}
+            className="ml-2 rounded bg-purple/20 px-2 py-0.5 font-semibold uppercase tracking-wide text-purple hover:bg-purple/30"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        slateStatus &&
+        slateStatus !== "ready" && (
+          <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
+            {SLATE_STATUS_MESSAGES[slateStatus] ?? slateReason ?? `Slate status: ${slateStatus}`}
+            <button
+              type="button"
+              onClick={() => setSlatesRetryNonce((n) => n + 1)}
+              className="ml-2 rounded bg-red/20 px-2 py-0.5 font-semibold uppercase tracking-wide text-red hover:bg-red/30"
+            >
+              Retry
+            </button>
+          </div>
+        )
+      )}
+      {poolError && (
         <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">
-          {SLATE_STATUS_MESSAGES[slateStatus] ?? slateReason ?? `Slate status: ${slateStatus}`}
+          {poolError}
+          {selectedSlateId && (
+            <button
+              type="button"
+              onClick={() => loadPool(selectedSlateId)}
+              className="ml-2 rounded bg-red/20 px-2 py-0.5 font-semibold uppercase tracking-wide text-red hover:bg-red/30"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
-      {poolError && <div className="rounded border border-red bg-bg-panel-raised px-3 py-2 text-xs text-red">{poolError}</div>}
       {reconcileWarnings.length > 0 && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{reconcileWarnings.join(" ")}</div>
       )}
