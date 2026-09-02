@@ -37,6 +37,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import List
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -81,8 +82,13 @@ def prefetch_future_slates(sport: str = "MLB", site: str = "draftkings", days_ah
     SHADOW ONLY: writes canonical RAW R2 -> canonical NORMALIZED R2 ->
     canonical Postgres shadow CURRENT via the exact same shared
     functions the TODAY path uses (build_normalized_from_fetch,
-    scripts.fetch_dfs_slate._run_canonical_promotion) -- never a second,
-    divergent implementation of either. NEVER calls
+    scripts.fetch_dfs_slate._run_canonical_promotion_batch) -- never a
+    second, divergent implementation of either. All of this date's
+    accepted slates are promoted in ONE `railway ssh` round trip (M4M:
+    a live natural worker cycle showed promoting each slate with its
+    own separate SSH round trip pushed total worker runtime past the
+    internal timeout once several real Classic slates existed for the
+    same date). NEVER calls
     scripts/fetch_dfs_slate.py's legacy _save_document/customer-facing
     write path -- a future date's data can therefore never land in
     today's legacy dfs_input/{date}/ namespace poolCache.ts reads from.
@@ -106,7 +112,7 @@ def prefetch_future_slates(sport: str = "MLB", site: str = "draftkings", days_ah
     returned dict so a problem here can NEVER affect this process's own
     exit code or today's already-decided result (see main(), which
     calls this AFTER today's own outcome is already final)."""
-    from scripts.fetch_dfs_slate import _run_canonical_promotion
+    from scripts.fetch_dfs_slate import _run_canonical_promotion_batch
 
     future_date = _eastern_date_offset(days_ahead)
     started = time.monotonic()
@@ -130,6 +136,11 @@ def prefetch_future_slates(sport: str = "MLB", site: str = "draftkings", days_ah
         return status
 
     status["status"] = "DISCOVERED"
+    # M4M: build EVERY slate's shadow (RAW+NORMALIZED) result first,
+    # deferring the network-bound promotion step until every key is
+    # known -- so all of them can be promoted in ONE railway ssh round
+    # trip below, rather than one round trip per slate.
+    promotable: List[tuple] = []
     for slate_info in result.slates:
         provider_players = result.players_by_slate.get(slate_info.slate_id, [])
         slate_status: dict = {"slate_id": slate_info.slate_id, "slate_name": slate_info.slate_name}
@@ -153,12 +164,16 @@ def prefetch_future_slates(sport: str = "MLB", site: str = "draftkings", days_ah
             status["slates"].append(slate_status)
             continue
 
-        try:
-            promotion = _run_canonical_promotion(shadow_result.normalized_key)
-        except Exception as exc:  # noqa: BLE001
-            promotion = {"ok": False, "error_type": type(exc).__name__, "error": str(exc)}
-        slate_status["promotion"] = promotion
         status["slates"].append(slate_status)
+        promotable.append((slate_status, shadow_result.normalized_key))
+
+    if promotable:
+        try:
+            promotions = _run_canonical_promotion_batch([key for _, key in promotable])
+        except Exception as exc:  # noqa: BLE001
+            promotions = [{"ok": False, "error_type": type(exc).__name__, "error": str(exc)} for _ in promotable]
+        for (slate_status, _key), promotion in zip(promotable, promotions):
+            slate_status["promotion"] = promotion
 
     status["duration_seconds"] = round(time.monotonic() - started, 3)
     return status

@@ -26,6 +26,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -294,41 +295,50 @@ def _run_canonical_shadow_and_promotion(date: str, sport: str, site: str, chosen
     return status
 
 
-def _run_canonical_promotion(normalized_key: str) -> dict:
-    """Automatic M3B promotion trigger -- a single subprocess call to
-    the SAME Node/TS promotion function M2's manual proof used
-    (dashboard/lib/db/canonicalPromotion.ts, via
-    dashboard/scripts/promote-canonical-slate.ts), never a second,
-    divergent promotion implementation.
+def _run_canonical_promotion_batch(normalized_keys: List[str]) -> List[dict]:
+    """M4M: promotes MULTIPLE NORMALIZED artifacts in ONE `railway ssh`
+    round trip -- a live natural worker cycle showed several real
+    Classic slates published for the same date (tomorrow's Main/Turbo/
+    Night all needing promotion in the same ~5-minute cycle) paying
+    repeated SSH connection-setup latency, once per slate via
+    _run_canonical_promotion, was enough to push total worker runtime
+    past run_dk_fetch_worker.ps1's own internal timeout (observed:
+    process killed after 150s despite every individual promotion having
+    already succeeded). This amortizes the SSH round trip only -- each
+    key is still promoted independently server-side (its own
+    transaction, its own result; see promote-canonical-slate.ts's own
+    --key-repeated loop), never a second, divergent promotion
+    implementation of dashboard/lib/db/canonicalPromotion.ts.
 
-    M3 architecture finding: this Windows worker machine can reach real
-    DraftKings endpoints but NOT Railway's private network
-    (postgres.railway.internal) -- confirmed live, a local `railway run`
-    subprocess promotion attempt failed with "getaddrinfo ENOTFOUND
-    postgres.railway.internal". `railway ssh` runs the command INSIDE
-    the actual deployed container instead, which DOES have that access
-    -- confirmed live (~14.5s typical, well inside this function's
-    timeout budget). This is the one real network round-trip this
-    function makes; never raises regardless of outcome -- a promotion
-    failure here must never affect the legacy artifact already written
-    above."""
+    Never raises; returns exactly one result dict per input key, in the
+    SAME order as `normalized_keys` -- a whole-subprocess failure (CLI
+    missing, launch exception, non-zero exit) is reported as that same
+    failure for every key, since none of them could have been attempted."""
+    if not normalized_keys:
+        return []
+
     railway_path = shutil.which("railway")
     if railway_path is None:
         print("CANONICAL PROMOTION: skipped -- railway CLI not found on PATH.", file=sys.stderr)
-        return {"ok": False, "promoted": False, "error": "railway CLI not found on PATH", "error_type": "railway_cli_not_found"}
+        failure = {"ok": False, "promoted": False, "error": "railway CLI not found on PATH", "error_type": "railway_cli_not_found"}
+        return [dict(failure) for _ in normalized_keys]
 
-    print("\n--- canonical shadow promotion (via railway ssh) ---")
+    print(f"\n--- canonical shadow promotion (via railway ssh, {len(normalized_keys)} slate(s) in one round trip) ---")
+    argv = [
+        railway_path, "ssh", "--service", CANONICAL_PROMOTION_RAILWAY_SERVICE, "--environment", CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
+        "--", "npx", "tsx", "scripts/promote-canonical-slate.ts",
+    ]
+    for key in normalized_keys:
+        argv.extend(["--key", key])
+
     try:
         proc = subprocess.run(
-            [
-                railway_path, "ssh", "--service", CANONICAL_PROMOTION_RAILWAY_SERVICE, "--environment", CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
-                "--", "npx", "tsx", "scripts/promote-canonical-slate.ts", "--key", normalized_key,
-            ],
-            capture_output=True, text=True, timeout=CANONICAL_PROMOTION_TIMEOUT_SECONDS, cwd=REPO_ROOT, check=False,
+            argv, capture_output=True, text=True, timeout=CANONICAL_PROMOTION_TIMEOUT_SECONDS, cwd=REPO_ROOT, check=False,
         )
     except Exception as exc:  # noqa: BLE001 -- M2I/M3C: report, never let this break the legacy fetch
         print(f"CANONICAL PROMOTION: could not be launched -- {type(exc).__name__}: {exc}", file=sys.stderr)
-        return {"ok": False, "promoted": False, "error": str(exc), "error_type": type(exc).__name__}
+        failure = {"ok": False, "promoted": False, "error": str(exc), "error_type": type(exc).__name__}
+        return [dict(failure) for _ in normalized_keys]
 
     print(proc.stdout)
     if proc.stderr:
@@ -336,26 +346,41 @@ def _run_canonical_promotion(normalized_key: str) -> dict:
 
     if proc.returncode != 0:
         print(f"CANONICAL PROMOTION: FAILED -- exit code {proc.returncode}", file=sys.stderr)
-        return {"ok": False, "promoted": False, "error": f"exit code {proc.returncode}", "error_type": "promotion_script_nonzero_exit", "stderr_tail": proc.stderr[-1000:]}
+        failure = {"ok": False, "promoted": False, "error": f"exit code {proc.returncode}", "error_type": "promotion_script_nonzero_exit", "stderr_tail": proc.stderr[-1000:]}
+        return [dict(failure) for _ in normalized_keys]
 
-    # M3K: parse the single-line RESULT_JSON: marker (see
-    # promote-canonical-slate.ts's own comment) to know whether this
-    # attempt actually PROMOTED -- distinct from "the script exited 0",
-    # which is also true for a legitimate no-op/rejection.
-    promoted = None
-    reason = None
+    # M3K/M4M: parse each RESULT_JSON: line (one per --key, in order --
+    # see promote-canonical-slate.ts's own comment) to know whether that
+    # SPECIFIC key actually PROMOTED -- distinct from "the script exited
+    # 0", which is also true for a legitimate no-op/rejection.
+    results: List[dict] = []
     for line in proc.stdout.splitlines():
         if line.startswith("RESULT_JSON:"):
             try:
                 parsed = json.loads(line[len("RESULT_JSON:"):])
-                promoted = parsed.get("promoted")
-                reason = parsed.get("reason")
+                results.append({"ok": True, "promoted": parsed.get("promoted"), "reason": parsed.get("reason")})
             except (ValueError, TypeError):
-                pass
-            break
+                results.append({"ok": True, "promoted": None, "reason": None})
 
-    print(f"CANONICAL PROMOTION: OK (script succeeded; promoted={promoted})")
-    return {"ok": True, "promoted": promoted, "reason": reason, "stdout_tail": proc.stdout[-1000:]}
+    # Defensive only -- should never trigger in practice (the script
+    # emits exactly one RESULT_JSON: line per --key it was given).
+    while len(results) < len(normalized_keys):
+        results.append({"ok": True, "promoted": None, "reason": "no RESULT_JSON line found for this key"})
+    results = results[: len(normalized_keys)]
+
+    promoted_count = sum(1 for r in results if r.get("promoted"))
+    print(f"CANONICAL PROMOTION: OK (script succeeded; {promoted_count}/{len(results)} promoted)")
+    return results
+
+
+def _run_canonical_promotion(normalized_key: str) -> dict:
+    """Automatic M3B promotion trigger for a SINGLE artifact -- the
+    TODAY per-slate path's own entry point, unchanged in behavior since
+    before M4M. Delegates to _run_canonical_promotion_batch (never a
+    second, divergent promotion implementation) with a one-element list,
+    which produces the exact same `railway ssh ... --key <key>` argv
+    this function always used."""
+    return _run_canonical_promotion_batch([normalized_key])[0]
 
 
 if __name__ == "__main__":

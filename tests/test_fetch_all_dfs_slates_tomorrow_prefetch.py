@@ -2,7 +2,7 @@
 prefetch_future_slates(): shadow-only canonical acquisition of tomorrow's
 (America/New_York) already-published real DK Classic slate(s). No real
 network/subprocess calls -- DraftKingsUnofficialProvider.get_slate and
-_run_canonical_promotion are monkeypatched, mirroring
+_run_canonical_promotion_batch are monkeypatched, mirroring
 tests/test_fetch_dfs_slate_shadow.py's own convention for the shared
 in-process shadow core.
 """
@@ -113,13 +113,19 @@ def test_multiple_classic_slates_all_discovered_and_promoted(monkeypatch):
     monkeypatch.setattr(fetch_all, "build_normalized_from_fetch", fake_build)
 
     import scripts.fetch_dfs_slate as fetch_dfs_slate
-    promoted_keys = []
-    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion", lambda key: promoted_keys.append(key) or {"ok": True, "promoted": True})
+    batch_calls = []
+
+    def fake_batch(keys):
+        batch_calls.append(list(keys))
+        return [{"ok": True, "promoted": True} for _ in keys]
+
+    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion_batch", fake_batch)
 
     status = fetch_all.prefetch_future_slates()
     assert status["status"] == "DISCOVERED"
     assert build_calls == ["dkunofficial-1", "dkunofficial-2"]
-    assert len(promoted_keys) == 2
+    assert len(batch_calls) == 1  # M4M: exactly ONE batch call for both slates, never one per slate
+    assert len(batch_calls[0]) == 2
     assert all(s["ok"] for s in status["slates"])
     assert all(s["promotion"]["promoted"] for s in status["slates"])
 
@@ -138,7 +144,7 @@ def test_single_discovery_call_covers_every_slate(monkeypatch):
     monkeypatch.setattr(fetch_all, "build_normalized_from_fetch", lambda **kwargs: _ok_shadow_result())
 
     import scripts.fetch_dfs_slate as fetch_dfs_slate
-    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion", lambda key: {"ok": True, "promoted": True})
+    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion_batch", lambda keys: [{"ok": True, "promoted": True} for _ in keys])
 
     fetch_all.prefetch_future_slates()
     assert len(provider.calls) == 1
@@ -161,14 +167,19 @@ def test_a_shadow_failure_on_one_slate_does_not_stop_the_others(monkeypatch):
 
     monkeypatch.setattr(fetch_all, "build_normalized_from_fetch", fake_build)
     import scripts.fetch_dfs_slate as fetch_dfs_slate
-    promoted = []
-    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion", lambda key: promoted.append(key) or {"ok": True, "promoted": True})
+    promoted_keys = []
+
+    def fake_batch(keys):
+        promoted_keys.extend(keys)
+        return [{"ok": True, "promoted": True} for _ in keys]
+
+    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion_batch", fake_batch)
 
     status = fetch_all.prefetch_future_slates()
     assert len(status["slates"]) == 2
     assert status["slates"][0]["ok"] is False
     assert status["slates"][1]["ok"] is True
-    assert promoted == ["normalized/MLB/2026-09-02/draftkings_unofficial/dkunofficial-1/x.json"]  # only the successful one promoted
+    assert promoted_keys == ["normalized/MLB/2026-09-02/draftkings_unofficial/dkunofficial-1/x.json"]  # only the successful one promoted
 
 
 def test_semantic_duplicate_on_repeat_prefetch_reported_not_treated_as_error(monkeypatch):
@@ -187,12 +198,48 @@ def test_semantic_duplicate_on_repeat_prefetch_reported_not_treated_as_error(mon
     )
     monkeypatch.setattr(fetch_all, "build_normalized_from_fetch", lambda **kwargs: dup_result)
     import scripts.fetch_dfs_slate as fetch_dfs_slate
-    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion", lambda key: {"ok": False, "promoted": False, "reason": "identical normalizedHash -- semantic no-op."})
+    monkeypatch.setattr(
+        fetch_dfs_slate, "_run_canonical_promotion_batch",
+        lambda keys: [{"ok": False, "promoted": False, "reason": "identical normalizedHash -- semantic no-op."} for _ in keys],
+    )
 
     status = fetch_all.prefetch_future_slates()
     assert status["slates"][0]["is_semantic_duplicate"] is True
     assert status["slates"][0]["promotion"]["promoted"] is False
     assert status["status"] == "DISCOVERED"  # a no-op is still a healthy cycle, not an error
+
+
+def test_m4m_multiple_future_slates_promoted_in_one_ssh_round_trip_not_one_per_slate(monkeypatch):
+    # M4M: this is the exact scenario a live natural worker cycle showed
+    # pushing total runtime past the internal timeout -- several real
+    # Classic slates for the same date, each previously requiring its
+    # own separate `railway ssh` subprocess launch.
+    slates = [_slate("dkunofficial-1", "Main"), _slate("dkunofficial-2", "Turbo"), _slate("dkunofficial-3", "Night")]
+    result = ProviderSlateResult(
+        slates=slates,
+        players_by_slate={sid: [_player(sid)] for sid in ["dkunofficial-1", "dkunofficial-2", "dkunofficial-3"]},
+        source="draftkings_unofficial", retrieved_at="2026-09-01T20:00:00Z",
+    )
+    provider = FakeProvider(result=result)
+    monkeypatch.setattr(fetch_all, "DraftKingsUnofficialProvider", lambda: provider)
+    monkeypatch.setattr(
+        fetch_all, "build_normalized_from_fetch",
+        lambda **kwargs: _ok_shadow_result(normalized_key=f"normalized/MLB/x/{kwargs['slate_info'].slate_id}.json"),
+    )
+
+    import scripts.fetch_dfs_slate as fetch_dfs_slate
+    batch_calls = []
+
+    def fake_batch(keys):
+        batch_calls.append(list(keys))
+        return [{"ok": True, "promoted": True} for _ in keys]
+
+    monkeypatch.setattr(fetch_dfs_slate, "_run_canonical_promotion_batch", fake_batch)
+
+    status = fetch_all.prefetch_future_slates()
+    assert len(batch_calls) == 1  # ONE ssh round trip total, not 3
+    assert len(batch_calls[0]) == 3
+    assert all(s["promotion"]["promoted"] for s in status["slates"])
 
 
 def test_uses_a_fresh_unshared_cache_and_direct_provider_never_get_configured_provider(monkeypatch):
