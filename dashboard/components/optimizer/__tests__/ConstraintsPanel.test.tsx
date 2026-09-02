@@ -101,6 +101,7 @@ function pool(players: PoolPlayerRow[]): OptimizerPoolResult {
     dataStatus: "fresh",
     artifactAgeSeconds: 0,
     lastUpdatedAt: "2026-01-01T00:00:00.000Z",
+    eligibilityComputedAt: null,
   };
 }
 

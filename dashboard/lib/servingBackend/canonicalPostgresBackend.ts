@@ -62,8 +62,16 @@ function parseJsonArray(json: string | null): string[] {
   }
 }
 
+// T3 Step 7: last_validated_at advances on a real, successful re-check
+// of the source (including a semantic no-op re-promotion), so an
+// actively-healthy slate whose OWN content happens to be unchanged for a
+// while is never treated as if nobody had looked at it since promoted_at
+// last moved -- see migrations/0014_canonical_slate_last_validated.sql
+// and canonicalPromotion.ts's own docstring for exactly which write
+// paths advance it. Falls back through the same chain as before for any
+// row from before this column existed.
 function mostRecentTimestamp(row: CanonicalSlateRow): string | null {
-  return row.promoted_at ?? row.last_success_at ?? row.fetched_at;
+  return row.last_validated_at ?? row.promoted_at ?? row.last_success_at ?? row.fetched_at;
 }
 
 function ageMs(timestamp: string | null): number | null {
@@ -273,9 +281,24 @@ export async function canonicalGetSlatePool(
 
   const activePlayers = players.filter((p) => p.optimizerEligible);
   const confirmedGameIds = new Set(activePlayers.filter((p) => p.playerType === "hitter" && p.gameId).map((p) => p.gameId as string));
+  // T3 Step 3/9 -- this WAS hardcoded to 0 with a comment claiming "no
+  // lineup-confirmation concept exists under canonical serving," which
+  // stopped being true once M6 added real dfs/eligibility.py-derived
+  // eligibilityStatus. Mirrors poolCache.ts's own identical formula.
+  const unconfirmedGameIds = new Set(
+    players.filter((p) => p.playerType === "hitter" && p.eligibilityStatus === "LINEUP_UNCONFIRMED" && p.gameId).map((p) => p.gameId as string),
+  );
   const unmatchedCount = playerRows.filter((p) => p.identity_status === "UNRESOLVED").length;
   const lastUpdatedAt = mostRecentTimestamp(slateRow) ?? new Date().toISOString();
   const age = ageMs(lastUpdatedAt);
+  // T3 Step 3/9 -- SLATE freshness (lastUpdatedAt/age above, from
+  // last_validated_at/promoted_at) and RESEARCH/LINEUP freshness are
+  // deliberately kept as two separate signals here (T3's own explicit
+  // instruction not to conflate them) -- the most recent real eligibility
+  // computation across this slate's players, or null if it has never
+  // been computed at all (honest, never fabricated as "now").
+  const eligibilityTimestamps = playerRows.map((p) => p.eligibility_computed_at).filter((t): t is string => t !== null);
+  const eligibilityComputedAt = eligibilityTimestamps.length > 0 ? eligibilityTimestamps.sort().at(-1)! : null;
 
   return {
     date,
@@ -290,10 +313,7 @@ export async function canonicalGetSlatePool(
     pitcherCount: activePlayers.filter((p) => p.playerType === "pitcher").length,
     hitterCount: activePlayers.filter((p) => p.playerType === "hitter").length,
     confirmedLineupGames: confirmedGameIds.size,
-    // No lineup-confirmation concept exists under canonical serving (see
-    // this module's scope-gap docstring) -- every real player is either
-    // present (active) or absent, never "unconfirmed."
-    unconfirmedLineupGames: 0,
+    unconfirmedLineupGames: unconfirmedGameIds.size,
     unmatchedCount,
     slateGames: slateRow.game_count ?? 0,
     // Structural-only: real players exist at all. NOT the legacy
@@ -318,6 +338,7 @@ export async function canonicalGetSlatePool(
     dataStatus: freshness === "stale" ? "stale" : "fresh",
     artifactAgeSeconds: age !== null ? Math.round(age / 1000) : 0,
     lastUpdatedAt,
+    eligibilityComputedAt,
   };
 }
 

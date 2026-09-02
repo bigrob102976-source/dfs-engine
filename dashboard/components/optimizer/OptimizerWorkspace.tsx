@@ -1022,6 +1022,18 @@ export function OptimizerWorkspace({
           DraftKings data last updated {formatAgeMinutes(pool.artifactAgeSeconds)} ago.
         </div>
       )}
+      {/* T3 Step 3/9: SLATE freshness (above) and RESEARCH/LINEUP
+          freshness are genuinely different things -- never conflated.
+          Admin-only detail (canonical test mode only); normal members
+          are never shown this technical distinction. */}
+      {pool && canonicalTestMode && activeServingBackend === "CANONICAL_POSTGRES" && (
+        <div className="rounded border border-purple/30 bg-bg-panel-raised px-3 py-2 text-[11px] text-text-faint">
+          Lineup/Eligibility data:{" "}
+          {pool.eligibilityComputedAt
+            ? `last computed ${formatAgeMinutes(Math.max(0, Math.round((Date.now() - new Date(pool.eligibilityComputedAt).getTime()) / 1000)))} ago`
+            : "never computed for this slate yet"}
+        </div>
+      )}
       {/* T1J/T1K: canonical Postgres testing is explicitly about slate/
           identity/eligibility data, not lineup building -- this is
           intentional, not an error, so it's styled informational

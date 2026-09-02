@@ -15,6 +15,7 @@ describe("migrations", () => {
       "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql",
       "0008_slate_change_report.sql", "0009_slate_identity_foundation.sql", "0010_canonical_slate_promotion_metadata.sql",
       "0011_canonical_shadow_status.sql", "0012_canonical_serving_backend_flag.sql", "0013_canonical_slate_player_eligibility.sql",
+      "0014_canonical_slate_last_validated.sql",
     ]);
   });
 
@@ -25,7 +26,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(13);
+    expect(rows.c).toBe(14);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {

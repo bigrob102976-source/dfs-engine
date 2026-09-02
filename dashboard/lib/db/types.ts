@@ -332,6 +332,11 @@ export interface CanonicalSlateRow {
   current_normalized_artifact_path: string | null;
   current_raw_artifact_path: string | null;
   promoted_at: string | null;
+  // T3 Step 7: advances on EVERY successful promotion attempt, including
+  // a semantic no-op (real content unchanged) -- distinct from
+  // promoted_at, which only advances when new/changed content is
+  // actually written (migrations/0014_canonical_slate_last_validated.sql).
+  last_validated_at: string | null;
   // M3E: shadow ingestion status/observability (migrations/0011_canonical_shadow_status.sql).
   last_attempt_at: string | null;
   last_success_at: string | null;

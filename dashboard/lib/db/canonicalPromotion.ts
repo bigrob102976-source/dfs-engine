@@ -258,10 +258,21 @@ async function recordRejectedAttempt(db: SqlExecutor, artifact: CanonicalSlateAr
 /** M3E: a no-op outcome (identical hash, or an older artifact refused)
  * is NOT a failure -- but is still a real attempt worth recording for
  * liveness/staleness monitoring, without touching consecutive_failures
- * or any player/identity data. */
+ * or any player/identity data.
+ *
+ * T3 Step 7: ALSO advances last_validated_at. A semantic no-op means the
+ * external worker successfully re-checked the real DraftKings source
+ * (or, for --force rehydration, re-confirmed a stored artifact) and
+ * found the content genuinely unchanged -- a real, honest revalidation
+ * event, distinct from fetched_at/promoted_at (the immutable "when was
+ * this content acquired" facts, which correctly never move for
+ * identical content). canonicalPostgresBackend.ts's freshness policy
+ * reads last_validated_at so a slate that is actively, successfully
+ * being re-checked never ages toward "stale_expired" merely because its
+ * own content happens to be stable. */
 async function recordNoOpAttempt(db: SqlExecutor, internalSlateId: string): Promise<void> {
   const now = new Date().toISOString();
-  await db.run("UPDATE slates SET last_attempt_at = ? WHERE internal_slate_id = ?", [now, internalSlateId]);
+  await db.run("UPDATE slates SET last_attempt_at = ?, last_validated_at = ? WHERE internal_slate_id = ?", [now, now, internalSlateId]);
 }
 
 export async function promoteCanonicalArtifact(
@@ -354,11 +365,11 @@ export async function promoteCanonicalArtifact(
          internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
          game_count, game_ids_json, salary_cap, roster_template_json, source_provenance, validation_state,
          validation_findings_json, schema_version, raw_hash, normalized_hash, fetched_at,
-         current_normalized_artifact_path, current_raw_artifact_path, promoted_at,
+         current_normalized_artifact_path, current_raw_artifact_path, promoted_at, last_validated_at,
          last_attempt_at, last_success_at, consecutive_failures, last_error_type, last_error_summary,
          player_count, resolved_identity_count, unresolved_identity_count, review_required_count, is_semantic_duplicate,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
          slate_name = excluded.slate_name, first_game_start_utc = excluded.first_game_start_utc,
          game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
@@ -367,6 +378,7 @@ export async function promoteCanonicalArtifact(
          schema_version = excluded.schema_version, raw_hash = excluded.raw_hash, normalized_hash = excluded.normalized_hash,
          fetched_at = excluded.fetched_at, current_normalized_artifact_path = excluded.current_normalized_artifact_path,
          current_raw_artifact_path = excluded.current_raw_artifact_path, promoted_at = excluded.promoted_at,
+         last_validated_at = excluded.last_validated_at,
          last_attempt_at = excluded.last_attempt_at, last_success_at = excluded.last_success_at,
          consecutive_failures = 0, last_error_type = NULL, last_error_summary = NULL,
          player_count = excluded.player_count, resolved_identity_count = excluded.resolved_identity_count,
@@ -377,7 +389,8 @@ export async function promoteCanonicalArtifact(
         proposedInternalSlateId, slate.sport, slate.site, slate.provider, slate.providerSlateId, slate.slateName, slate.slateDate,
         slate.firstGameStartUtc, slate.gameCount, JSON.stringify(slate.gameIds), slate.salaryCap, slate.rosterTemplate ? JSON.stringify(slate.rosterTemplate) : null,
         slate.sourceProvenance, slate.validationState, JSON.stringify(slate.validationFindings), artifact.schemaVersion, artifact.rawHash, artifact.normalizedHash,
-        slate.fetchedAt, options.normalizedArtifactPath, options.rawArtifactPath ?? null, now, now, now,
+        slate.fetchedAt, options.normalizedArtifactPath, options.rawArtifactPath ?? null, now, now,
+        now, now,
         playerCount, resolvedCount, unresolvedCount, reviewRequiredCount, isSemanticDuplicate, now, now,
       ],
     );

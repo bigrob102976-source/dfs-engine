@@ -187,6 +187,73 @@ describe("M7D: future-slate eligibility transitions naturally as research posts"
   });
 });
 
+describe("T3 Step 8: real MLB lineup changes propagate automatically on the next recompute -- never fabricated", () => {
+  it("a starter/pitcher CHANGE (Player A was starting, Player B replaces him) is reflected correctly for BOTH players, not just one", async () => {
+    insertSlate();
+    insertPlayer({ provider_player_id: "1" }); // starts as STARTING_PITCHER
+    insertPlayer({ provider_player_id: "2" }); // starts as BENCH/unconfirmed
+
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [
+        { providerPlayerId: "1", gameId: "g1", eligibilityStatus: "STARTING_PITCHER", optimizerEligible: true, battingOrder: null },
+        { providerPlayerId: "2", gameId: "g1", eligibilityStatus: "BENCH", optimizerEligible: false, battingOrder: null },
+      ],
+    });
+    await computeAndPersistEligibilityForSlate("s1");
+    const before = getDb().prepare("SELECT provider_player_id, eligibility_status, optimizer_eligible FROM slate_players WHERE internal_slate_id='s1' ORDER BY provider_player_id").all() as Array<Record<string, unknown>>;
+    expect(before).toEqual([
+      { provider_player_id: "1", eligibility_status: "STARTING_PITCHER", optimizer_eligible: 1 },
+      { provider_player_id: "2", eligibility_status: "BENCH", optimizer_eligible: 0 },
+    ]);
+
+    // A real, later research refresh discovers a pitcher change (rain
+    // delay / scratch / roster move) -- Player A is scratched, Player B
+    // is now the confirmed starter. This is REAL research data changing,
+    // never inferred or guessed by this bridge itself.
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [
+        { providerPlayerId: "1", gameId: "g1", eligibilityStatus: "SCRATCHED", optimizerEligible: false, battingOrder: null },
+        { providerPlayerId: "2", gameId: "g1", eligibilityStatus: "STARTING_PITCHER", optimizerEligible: true, battingOrder: null },
+      ],
+    });
+    await computeAndPersistEligibilityForSlate("s1");
+    const after = getDb().prepare("SELECT provider_player_id, eligibility_status, optimizer_eligible FROM slate_players WHERE internal_slate_id='s1' ORDER BY provider_player_id").all() as Array<Record<string, unknown>>;
+    expect(after).toEqual([
+      { provider_player_id: "1", eligibility_status: "SCRATCHED", optimizer_eligible: 0 },
+      { provider_player_id: "2", eligibility_status: "STARTING_PITCHER", optimizer_eligible: 1 },
+    ]);
+
+    const count = (getDb().prepare("SELECT COUNT(*) as c FROM slate_players WHERE internal_slate_id='s1'").get() as { c: number }).c;
+    expect(count).toBe(2); // never duplicated, never a third "changed" row
+  });
+
+  it("a CONFIRMED starter whose batting order changes (real lineup reshuffle) updates battingOrder without altering identity/salary", async () => {
+    insertSlate();
+    insertPlayer({ provider_player_id: "1" });
+
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [{ providerPlayerId: "1", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, battingOrder: 3 }],
+    });
+    await computeAndPersistEligibilityForSlate("s1");
+    expect((getDb().prepare("SELECT batting_order FROM slate_players WHERE internal_slate_id='s1'").get() as { batting_order: number }).batting_order).toBe(3);
+
+    // Real lineup card reshuffle -- same confirmed starter, new spot.
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [{ providerPlayerId: "1", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, battingOrder: 6 }],
+    });
+    await computeAndPersistEligibilityForSlate("s1");
+    const row = getDb().prepare("SELECT batting_order, eligibility_status, salary, team FROM slate_players WHERE internal_slate_id='s1'").get() as Record<string, unknown>;
+    expect(row.batting_order).toBe(6);
+    expect(row.eligibility_status).toBe("STARTING_HITTER"); // still confirmed, just moved
+    expect(row.salary).toBe(4500); // untouched -- this bridge never re-derives salary/identity
+    expect(row.team).toBe("BOS");
+  });
+});
+
 describe("M7L: automatic canonical eligibility refresh adds zero DraftKings calls", () => {
   it("refreshCanonicalEligibilityForDate invokes ONLY scripts/compute_canonical_eligibility.py -- never a DK fetch/discovery script -- across multiple slates", async () => {
     insertSlate();

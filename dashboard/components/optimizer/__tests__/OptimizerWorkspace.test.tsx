@@ -1074,6 +1074,33 @@ describe("OptimizerWorkspace", () => {
       expect(screen.queryByText(/admin-only test data source/)).not.toBeInTheDocument();
     });
 
+    it("T3 Step 3/9: shows the admin-only lineup/eligibility freshness line, distinct from the DK-slate-freshness banner, only in canonical test mode", async () => {
+      const computedAt = new Date(Date.now() - 12 * 60 * 1000).toISOString(); // 12 minutes ago
+      installFetchMock({
+        "/api/optimizer/pool": () =>
+          jsonResponse({ pool: { ...POOL_RESULT, servingBackend: "CANONICAL_POSTGRES", eligibilityComputedAt: computedAt }, servingBackend: "CANONICAL_POSTGRES" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByLabelText("Admin Test Mode: Canonical Slate Data")).toBeInTheDocument(), { timeout: 5000 });
+      // Not shown before canonical test mode is on.
+      expect(screen.queryByText(/Lineup\/Eligibility data/)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+      await waitFor(() => expect(screen.getByText(/Lineup\/Eligibility data/)).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByText(/last computed 12 minutes ago/)).toBeInTheDocument();
+    });
+
+    it("T3 Step 3/9: honestly shows 'never computed' rather than fabricating a timestamp", async () => {
+      installFetchMock({
+        "/api/optimizer/pool": () =>
+          jsonResponse({ pool: { ...POOL_RESULT, servingBackend: "CANONICAL_POSTGRES", eligibilityComputedAt: null }, servingBackend: "CANONICAL_POSTGRES" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByLabelText("Admin Test Mode: Canonical Slate Data")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+      await waitFor(() => expect(screen.getByText(/never computed for this slate yet/)).toBeInTheDocument(), { timeout: 5000 });
+    });
+
     it("a canonicalTestMode value persisted in localStorage while ADMIN never sticks once canUseCanonicalServing is false", async () => {
       window.localStorage.setItem(
         "mlb-dfs-optimizer-workspace-v1",

@@ -214,6 +214,16 @@ export interface OptimizerPoolResult {
   dataStatus: ProviderDataStatus;
   artifactAgeSeconds: number;
   lastUpdatedAt: string;
+  // T3 Step 3/9 -- SLATE freshness (lastUpdatedAt/dataStatus above) and
+  // RESEARCH/LINEUP freshness are two genuinely different things (T3's
+  // own explicit instruction never to conflate them): a slate can have
+  // perfectly fresh salaries/rosters while its eligibility/lineup data
+  // is old or has never been computed. null under LEGACY_R2 (no such
+  // concept exists there -- eligibility is baked into the pool build
+  // itself, not a separately-timestamped recompute) and null under
+  // CANONICAL_POSTGRES only when eligibility has genuinely never been
+  // computed for this slate at all yet -- never fabricated as "now".
+  eligibilityComputedAt: string | null;
 }
 
 export interface OptimizerBuildRequest {

@@ -399,6 +399,10 @@ async function readPoolResult(entry: CachedPool): Promise<OptimizerPoolResult> {
       return ms !== null ? Math.round(ms / 1000) : 0;
     })(),
     lastUpdatedAt: entry.lastUpdatedAt,
+    // T3 Step 3/9 -- no such concept under legacy: eligibility is baked
+    // into the pool build itself here, never a separately-timestamped
+    // recompute (see OptimizerPoolResult's own docstring).
+    eligibilityComputedAt: null,
   };
 }
 
