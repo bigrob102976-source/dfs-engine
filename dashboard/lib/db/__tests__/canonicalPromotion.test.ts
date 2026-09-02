@@ -332,6 +332,83 @@ describe("promoteCanonicalArtifact", () => {
     expect(row).toBeUndefined(); // the slates insert was rolled back too, even though it succeeded on its own
   });
 
+  describe("M7C: re-promotion preserves research-derived eligibility state", () => {
+    it("a re-promotion with genuinely changed salary data does NOT wipe an already-computed eligibility_computed_at/eligibility_status/optimizer_eligible/game_id for a player still present", async () => {
+      const db = getExecutor();
+      const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+      expect(first.promoted).toBe(true);
+
+      // Simulate the SEPARATE eligibility bridge (canonicalEligibility.ts)
+      // having already computed and persisted real research-derived state.
+      getDb()
+        .prepare(
+          "UPDATE slate_players SET eligibility_status = 'STARTING_HITTER', optimizer_eligible = 1, batting_order = 3, game_id = 'g1', eligibility_computed_at = 'x' WHERE internal_slate_id = ? AND provider_player_id = '999'",
+        )
+        .run(first.internalSlateId!);
+
+      // A real, unrelated ACQUISITION change (salary correction) re-promotes.
+      const resalaried = baseArtifact();
+      resalaried.players[0].salary = 5200;
+      resalaried.normalizedHash = "norm-hash-resalaried";
+      resalaried.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      const second = await promoteCanonicalArtifact(db, resalaried, opts());
+      expect(second.promoted).toBe(true);
+      expect(second.internalSlateId).toBe(first.internalSlateId);
+
+      const row = getDb().prepare("SELECT * FROM slate_players WHERE internal_slate_id = ? AND provider_player_id = '999'").get(first.internalSlateId!) as Record<string, unknown>;
+      expect(row.salary).toBe(5200); // acquisition truth DID update
+      expect(row.eligibility_status).toBe("STARTING_HITTER"); // research truth was PRESERVED
+      expect(row.optimizer_eligible).toBe(1);
+      expect(row.batting_order).toBe(3);
+      expect(row.game_id).toBe("g1");
+      expect(row.eligibility_computed_at).toBe("x");
+    });
+
+    it("a real player removal (no longer in the new artifact) still deletes that row, eligibility included", async () => {
+      const db = getExecutor();
+      const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+      getDb()
+        .prepare("UPDATE slate_players SET eligibility_status = 'BENCH', optimizer_eligible = 0, eligibility_computed_at = 'x' WHERE internal_slate_id = ? AND provider_player_id = '999'")
+        .run(first.internalSlateId!);
+
+      const withoutPlayer = baseArtifact();
+      withoutPlayer.players = [];
+      withoutPlayer.identityMatches = {};
+      withoutPlayer.normalizedHash = "norm-hash-no-players";
+      withoutPlayer.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      await promoteCanonicalArtifact(db, withoutPlayer, opts());
+
+      const count = (getDb().prepare("SELECT COUNT(*) as c FROM slate_players WHERE internal_slate_id = ?").get(first.internalSlateId!) as { c: number }).c;
+      expect(count).toBe(0); // genuinely removed, not orphaned
+    });
+
+    it("a genuinely NEW player added on re-promotion starts with eligibility un-computed (never inherits another player's state)", async () => {
+      const db = getExecutor();
+      const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+      getDb()
+        .prepare("UPDATE slate_players SET eligibility_status = 'STARTING_HITTER', optimizer_eligible = 1, eligibility_computed_at = 'x' WHERE internal_slate_id = ? AND provider_player_id = '999'")
+        .run(first.internalSlateId!);
+
+      const withNewPlayer = baseArtifact();
+      withNewPlayer.players.push({
+        internalSlateId: "proposed-uuid-1", internalPlayerId: null, providerPlayerId: "new-1",
+        providerDraftableIds: [], name: "New Player", team: "TOR", opponent: "BOS",
+        gameId: null, salary: 3500, positionEligibility: ["OF"], rosterSlotEligibility: [], identityStatus: "UNRESOLVED",
+      });
+      withNewPlayer.identityMatches["new-1"] = { identityStatus: "UNRESOLVED", matchMethod: null, matchConfidence: null, externalIdHints: [], candidateMlbPlayerIds: [], reason: null };
+      withNewPlayer.normalizedHash = "norm-hash-new-player";
+      withNewPlayer.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      await promoteCanonicalArtifact(db, withNewPlayer, opts());
+
+      const newRow = getDb().prepare("SELECT * FROM slate_players WHERE internal_slate_id = ? AND provider_player_id = 'new-1'").get(first.internalSlateId!) as Record<string, unknown>;
+      expect(newRow.eligibility_status).toBeNull();
+      expect(newRow.eligibility_computed_at).toBeNull();
+
+      const existingRow = getDb().prepare("SELECT eligibility_status FROM slate_players WHERE internal_slate_id = ? AND provider_player_id = '999'").get(first.internalSlateId!) as Record<string, unknown>;
+      expect(existingRow.eligibility_status).toBe("STARTING_HITTER"); // still preserved
+    });
+  });
+
   describe("M4E: slateDate immutability on reschedule", () => {
     it("a reschedule that shifts the computed slateDate does NOT move the stored slate_date", async () => {
       const db = getExecutor();

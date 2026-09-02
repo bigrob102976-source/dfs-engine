@@ -74,7 +74,7 @@ export default async function AdminCanonicalShadowPage() {
       </Card>
 
       <Card className="mt-4 overflow-x-auto p-4">
-        <table className="w-full min-w-[1150px] text-left text-xs">
+        <table className="w-full min-w-[1450px] text-left text-xs">
           <thead>
             <tr className="border-b border-border text-text-faint">
               <th className="p-2">Slate Date</th>
@@ -91,6 +91,10 @@ export default async function AdminCanonicalShadowPage() {
               <th className="p-2">Resolved</th>
               <th className="p-2">Unresolved</th>
               <th className="p-2">Review</th>
+              <th className="p-2">Elig. Eligible</th>
+              <th className="p-2">Elig. Unconfirmed</th>
+              <th className="p-2">Elig. Unmatched</th>
+              <th className="p-2">Eligibility Computed</th>
               <th className="p-2">normalizedHash</th>
               <th className="p-2">Semantic Dup</th>
               <th className="p-2">Consecutive Failures</th>
@@ -116,6 +120,10 @@ export default async function AdminCanonicalShadowPage() {
                 <td className="p-2 tabular-nums">{s.resolved_identity_count ?? "--"}</td>
                 <td className="p-2 tabular-nums">{s.unresolved_identity_count ?? "--"}</td>
                 <td className="p-2 tabular-nums">{s.review_required_count ?? "--"}</td>
+                <td className="p-2 tabular-nums">{s.eligibility?.eligibleCount ?? "--"}</td>
+                <td className="p-2 tabular-nums">{s.eligibility?.unconfirmedCount ?? "--"}</td>
+                <td className="p-2 tabular-nums">{s.eligibility?.unmatchedCount ?? "--"}</td>
+                <td className="p-2">{s.eligibility?.lastComputedAt ?? "--"}</td>
                 <td className="p-2 font-mono text-[10px]">{shortHash(s.normalized_hash)}</td>
                 <td className="p-2">{s.is_semantic_duplicate === 1 ? "yes" : s.is_semantic_duplicate === 0 ? "no" : "--"}</td>
                 <td className={`p-2 tabular-nums ${s.consecutive_failures > 0 ? "text-red" : ""}`}>{s.consecutive_failures}</td>
@@ -128,7 +136,7 @@ export default async function AdminCanonicalShadowPage() {
             ))}
             {slates.length === 0 && (
               <tr>
-                <td colSpan={20} className="p-4 text-center text-text-faint">
+                <td colSpan={24} className="p-4 text-center text-text-faint">
                   No canonical shadow ingestion attempts recorded yet.
                 </td>
               </tr>

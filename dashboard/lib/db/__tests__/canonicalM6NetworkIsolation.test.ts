@@ -29,3 +29,15 @@ describe("M6Q: canonical eligibility/build bridge makes zero DraftKings network 
     for (const forbidden of FORBIDDEN) expect(block).not.toContain(forbidden);
   });
 });
+
+describe("M7L: automatic canonical eligibility refresh wiring makes zero new DraftKings network calls (structural)", () => {
+  it("canonicalEligibility.ts's refreshCanonicalEligibilityForDate lives in the SAME file already proven DK-free above -- no new import surface", () => {
+    const block = importBlockOf(path.join(__dirname, "..", "canonicalEligibility.ts"));
+    for (const forbidden of FORBIDDEN) expect(block).not.toContain(forbidden);
+  });
+
+  it("slatePipeline.ts's own import block never imports a DK/network module directly (all provider access is via the existing runPythonScript subprocess boundary)", () => {
+    const block = importBlockOf(path.join(__dirname, "..", "..", "slatePipeline.ts"));
+    for (const forbidden of FORBIDDEN) expect(block).not.toContain(forbidden);
+  });
+});

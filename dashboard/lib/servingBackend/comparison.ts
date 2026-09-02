@@ -43,6 +43,25 @@ export interface PlayerFieldComparison {
 // compute_eligibility(). Some genuine, explainable divergence between
 // them is expected and reported honestly here, never silently folded
 // into (or hidden from) the core M5 `match` signal above.
+// M7G -- a meaningful, deterministic classification of WHY a player's
+// eligibility differs, so a real algorithm bug is never confused with
+// (or hidden behind) an ordinary identity/game-matching coverage gap.
+// Root-caused from data actually available on both sides; genuine
+// "research timing/staleness" differences would need each side's own
+// eligibility_computed_at exposed through this same comparison (not
+// yet plumbed here -- see this module's own M7 report for the honest
+// disclosure) -- MATCH/STATUS_MISMATCH below is the closest available
+// proxy: a same-identity, same-game disagreement that ISN'T explained
+// by identity/game coverage is either a real logic difference or an
+// (unmeasured) timing difference between the two independent refreshes.
+export type EligibilityMismatchRootCause =
+  | "MATCH"
+  | "IDENTITY_UNRESOLVED_IN_CANONICAL"
+  | "IDENTITY_UNRESOLVED_IN_LEGACY"
+  | "IDENTITY_UNRESOLVED_IN_BOTH"
+  | "GAME_MATCHING_DIFFERENCE"
+  | "STATUS_MISMATCH";
+
 export interface EligibilityFieldComparison {
   dkPlayerId: string;
   legacyEligibilityStatus: string | null;
@@ -53,6 +72,67 @@ export interface EligibilityFieldComparison {
   canonicalGameId: string | null;
   legacyMlbPlayerId: string | null;
   canonicalMlbPlayerId: string | null;
+  rootCause: EligibilityMismatchRootCause;
+}
+
+function classifyEligibilityRootCause(field: Omit<EligibilityFieldComparison, "rootCause">): EligibilityMismatchRootCause {
+  const legacyHasIdentity = field.legacyMlbPlayerId !== null;
+  const canonicalHasIdentity = field.canonicalMlbPlayerId !== null;
+  const eligibilityAgrees = field.legacyEligibilityStatus === field.canonicalEligibilityStatus && field.legacyOptimizerEligible === field.canonicalOptimizerEligible;
+  const gameIdAgrees = field.legacyGameId === field.canonicalGameId;
+
+  if (eligibilityAgrees && gameIdAgrees) return "MATCH";
+  if (!legacyHasIdentity && !canonicalHasIdentity) return "IDENTITY_UNRESOLVED_IN_BOTH";
+  if (!canonicalHasIdentity) return "IDENTITY_UNRESOLVED_IN_CANONICAL";
+  if (!legacyHasIdentity) return "IDENTITY_UNRESOLVED_IN_LEGACY";
+  if (!gameIdAgrees) return "GAME_MATCHING_DIFFERENCE";
+  return "STATUS_MISMATCH";
+}
+
+// M7H -- "comparable" means both systems had ENOUGH real identity/game
+// data to make a fair, apples-to-apples eligibility comparison at all.
+// A player unresolved on either side (or whose game wasn't matched on
+// either side) is EXCLUDED from the parity percentage -- counting them
+// against "eligibility parity" would mislabel an identity-coverage gap
+// as an eligibility-ALGORITHM failure (M7H's explicit concern).
+export interface ComparablePopulationParity {
+  comparablePlayers: number;
+  exactEligibilityMatches: number;
+  parityPercent: number | null; // null when comparablePlayers is 0 -- never a fabricated 100%/0%
+  nonComparableIdentityGaps: number;
+  nonComparableGameGaps: number;
+}
+
+function computeComparablePopulationParity(fields: EligibilityFieldComparison[]): ComparablePopulationParity {
+  let comparablePlayers = 0;
+  let exactEligibilityMatches = 0;
+  let nonComparableIdentityGaps = 0;
+  let nonComparableGameGaps = 0;
+
+  for (const field of fields) {
+    const legacyHasIdentity = field.legacyMlbPlayerId !== null;
+    const canonicalHasIdentity = field.canonicalMlbPlayerId !== null;
+    if (!legacyHasIdentity || !canonicalHasIdentity) {
+      nonComparableIdentityGaps += 1;
+      continue;
+    }
+    // M7H requires "same game" for comparability (not merely "both
+    // resolved SOME game") -- a genuine game-matching disagreement is a
+    // coverage gap, not a comparable eligibility disagreement.
+    if (field.legacyGameId === null || field.canonicalGameId === null || field.legacyGameId !== field.canonicalGameId) {
+      nonComparableGameGaps += 1;
+      continue;
+    }
+    comparablePlayers += 1;
+    if (field.legacyEligibilityStatus === field.canonicalEligibilityStatus && field.legacyOptimizerEligible === field.canonicalOptimizerEligible) {
+      exactEligibilityMatches += 1;
+    }
+  }
+
+  return {
+    comparablePlayers, exactEligibilityMatches, nonComparableIdentityGaps, nonComparableGameGaps,
+    parityPercent: comparablePlayers > 0 ? Math.round((exactEligibilityMatches / comparablePlayers) * 10000) / 100 : null,
+  };
 }
 
 export interface SlateComparisonResult {
@@ -88,6 +168,8 @@ export interface SlateComparisonResult {
     optimizerEligibleMismatches: EligibilityFieldComparison[];
     gameIdMismatches: EligibilityFieldComparison[];
     identityGaps: EligibilityFieldComparison[]; // one side resolved an mlbPlayerId, the other didn't
+    // M7H -- the honest, coverage-gap-excluded parity measurement.
+    comparablePopulation: ComparablePopulationParity;
   };
 }
 
@@ -121,7 +203,10 @@ export async function compareServingBackends(date: string, providerSlateId: stri
       slateNameMismatch: false, gameCountMismatch: false, playerCountMismatch: false, salaryCapMismatch: false, provenanceMismatch: false,
       missingInCanonical: [], missingInLegacy: [], salaryMismatches: [], positionMismatches: [], teamMismatches: [], opponentMismatches: [],
     },
-    eligibility: { playersCompared: 0, exactMatches: 0, statusMismatches: [], optimizerEligibleMismatches: [], gameIdMismatches: [], identityGaps: [] },
+    eligibility: {
+      playersCompared: 0, exactMatches: 0, statusMismatches: [], optimizerEligibleMismatches: [], gameIdMismatches: [], identityGaps: [],
+      comparablePopulation: { comparablePlayers: 0, exactEligibilityMatches: 0, parityPercent: null, nonComparableIdentityGaps: 0, nonComparableGameGaps: 0 },
+    },
   };
 
   if (!legacyPool || !canonicalPool) return result;
@@ -142,6 +227,8 @@ export async function compareServingBackends(date: string, providerSlateId: stri
     if (!legacyByDkId.has(dkPlayerId)) result.differences.missingInLegacy.push(dkPlayerId);
   }
 
+  const allEligibilityFields: EligibilityFieldComparison[] = [];
+
   for (const [dkPlayerId, legacyPlayer] of legacyByDkId) {
     const canonicalPlayer = canonicalByDkId.get(dkPlayerId);
     if (!canonicalPlayer) continue;
@@ -157,15 +244,18 @@ export async function compareServingBackends(date: string, providerSlateId: stri
     if (legacyPlayer.team !== canonicalPlayer.team) result.differences.teamMismatches.push(field);
     if (legacyPlayer.opponent !== canonicalPlayer.opponent) result.differences.opponentMismatches.push(field);
 
-    // M6O: eligibility parity, for players present on both sides only.
+    // M6O/M7G: eligibility parity, for players present on both sides only.
     result.eligibility.playersCompared += 1;
-    const eligField: EligibilityFieldComparison = {
+    const baseField = {
       dkPlayerId,
       legacyEligibilityStatus: legacyPlayer.eligibilityStatus, canonicalEligibilityStatus: canonicalPlayer.eligibilityStatus,
       legacyOptimizerEligible: legacyPlayer.optimizerEligible, canonicalOptimizerEligible: canonicalPlayer.optimizerEligible,
       legacyGameId: legacyPlayer.gameId, canonicalGameId: canonicalPlayer.gameId,
       legacyMlbPlayerId: legacyPlayer.mlbPlayerId, canonicalMlbPlayerId: canonicalPlayer.mlbPlayerId,
     };
+    const eligField: EligibilityFieldComparison = { ...baseField, rootCause: classifyEligibilityRootCause(baseField) };
+    allEligibilityFields.push(eligField);
+
     let eligExact = true;
     if (legacyPlayer.eligibilityStatus !== canonicalPlayer.eligibilityStatus) {
       result.eligibility.statusMismatches.push(eligField);
@@ -185,6 +275,8 @@ export async function compareServingBackends(date: string, providerSlateId: stri
     }
     if (eligExact) result.eligibility.exactMatches += 1;
   }
+
+  result.eligibility.comparablePopulation = computeComparablePopulationParity(allEligibilityFields);
 
   const d = result.differences;
   result.match =
@@ -214,6 +306,11 @@ export interface ParityReport {
   eligibilityOptimizerEligibleMismatches: number;
   eligibilityGameIdMismatches: number;
   eligibilityIdentityGaps: number;
+  // M7H -- the SAME honest, coverage-gap-excluded parity measurement as
+  // SlateComparisonResult.eligibility.comparablePopulation, rolled up
+  // across every slate on `date` (aggregate parityPercent recomputed
+  // from the summed counts, never averaged-of-percentages).
+  comparablePopulation: ComparablePopulationParity;
   perSlate: SlateComparisonResult[];
   errors: string[];
 }
@@ -233,6 +330,9 @@ export async function compareAllServingBackendsForDate(date: string): Promise<Pa
     perSlate.push(await compareServingBackends(date, slate.slateId));
   }
 
+  const comparablePlayers = perSlate.reduce((sum, c) => sum + c.eligibility.comparablePopulation.comparablePlayers, 0);
+  const exactEligibilityMatches = perSlate.reduce((sum, c) => sum + c.eligibility.comparablePopulation.exactEligibilityMatches, 0);
+
   return {
     date,
     slatesCompared: perSlate.length,
@@ -247,6 +347,13 @@ export async function compareAllServingBackendsForDate(date: string): Promise<Pa
     eligibilityOptimizerEligibleMismatches: perSlate.reduce((sum, c) => sum + c.eligibility.optimizerEligibleMismatches.length, 0),
     eligibilityGameIdMismatches: perSlate.reduce((sum, c) => sum + c.eligibility.gameIdMismatches.length, 0),
     eligibilityIdentityGaps: perSlate.reduce((sum, c) => sum + c.eligibility.identityGaps.length, 0),
+    comparablePopulation: {
+      comparablePlayers,
+      exactEligibilityMatches,
+      nonComparableIdentityGaps: perSlate.reduce((sum, c) => sum + c.eligibility.comparablePopulation.nonComparableIdentityGaps, 0),
+      nonComparableGameGaps: perSlate.reduce((sum, c) => sum + c.eligibility.comparablePopulation.nonComparableGameGaps, 0),
+      parityPercent: comparablePlayers > 0 ? Math.round((exactEligibilityMatches / comparablePlayers) * 10000) / 100 : null,
+    },
     perSlate,
     errors,
   };

@@ -47,9 +47,63 @@ function classifyPrefetchState(slateDate: string, todayEastern: string): Prefetc
   return "PAST";
 }
 
+// M7K -- read-only eligibility observability, extending this SAME
+// read-only admin monitor with the M6/M7 eligibility state (never an
+// edit control -- this module's own M3J scope boundary above still
+// applies). "unconfirmedCount" covers both LINEUP_UNCONFIRMED (real
+// research package, lineup just not posted yet -- M7D) and NULL
+// (eligibility never computed for this player at all) -- both are
+// honest "not yet known" states, never conflated with UNMATCHED (a
+// real, negative identity/game-matching result).
+export interface EligibilitySummary {
+  totalPlayers: number;
+  eligibleCount: number;
+  unconfirmedCount: number;
+  unmatchedCount: number;
+  lastComputedAt: string | null;
+}
+
+interface EligibilitySummaryRow {
+  internal_slate_id: string;
+  total_players: number;
+  eligible_count: number;
+  unconfirmed_count: number;
+  unmatched_count: number;
+  last_computed_at: string | null;
+}
+
+/** One aggregate GROUP BY query for every slate at once -- never N+1,
+ * mirroring this module's own read-only, no-new-table design. */
+export async function getEligibilitySummariesBySlate(): Promise<Map<string, EligibilitySummary>> {
+  const db = getExecutor();
+  const rows = await db.all<EligibilitySummaryRow>(
+    `SELECT
+       internal_slate_id,
+       COUNT(*) as total_players,
+       SUM(CASE WHEN optimizer_eligible = 1 THEN 1 ELSE 0 END) as eligible_count,
+       SUM(CASE WHEN eligibility_status IS NULL OR eligibility_status = 'LINEUP_UNCONFIRMED' THEN 1 ELSE 0 END) as unconfirmed_count,
+       SUM(CASE WHEN eligibility_status = 'UNMATCHED' THEN 1 ELSE 0 END) as unmatched_count,
+       MAX(eligibility_computed_at) as last_computed_at
+     FROM slate_players
+     GROUP BY internal_slate_id`,
+  );
+  const bySlate = new Map<string, EligibilitySummary>();
+  for (const row of rows) {
+    bySlate.set(row.internal_slate_id, {
+      totalPlayers: Number(row.total_players),
+      eligibleCount: Number(row.eligible_count),
+      unconfirmedCount: Number(row.unconfirmed_count),
+      unmatchedCount: Number(row.unmatched_count),
+      lastComputedAt: row.last_computed_at,
+    });
+  }
+  return bySlate;
+}
+
 export interface ShadowSlateStatusView extends CanonicalSlateRow {
   ageSeconds: number | null;
   prefetchState: PrefetchState;
+  eligibility: EligibilitySummary | null;
 }
 
 /** All canonical slates, most recently attempted first. `sport` is an
@@ -63,6 +117,7 @@ export async function listShadowSlateStatuses(sport?: string): Promise<ShadowSla
 
   const now = Date.now();
   const todayEastern = easternDateOffset(0);
+  const eligibilityBySlate = await getEligibilitySummariesBySlate();
   return rows.map((row) => {
     const reference = row.last_attempt_at ?? row.updated_at;
     const referenceMs = reference ? new Date(reference).getTime() : NaN;
@@ -70,6 +125,7 @@ export async function listShadowSlateStatuses(sport?: string): Promise<ShadowSla
       ...row,
       ageSeconds: Number.isNaN(referenceMs) ? null : Math.max(0, Math.round((now - referenceMs) / 1000)),
       prefetchState: classifyPrefetchState(row.slate_date, todayEastern),
+      eligibility: eligibilityBySlate.get(row.internal_slate_id) ?? null,
     };
   });
 }

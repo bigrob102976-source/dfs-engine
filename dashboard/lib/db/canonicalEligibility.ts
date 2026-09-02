@@ -62,6 +62,57 @@ function parseResultJson(stdout: string): { status: string; reason?: string; res
  * bridge, and ALWAYS cleans up in a finally block, mirroring
  * buildRunner.ts's own writeProjectionOverridesFile/
  * cleanupProjectionOverridesFile convention exactly. */
+export interface EligibilityRefreshForDateResult {
+  date: string;
+  slatesFound: number;
+  slatesUpdated: number;
+  slatesFailed: number;
+  perSlate: Array<{ internalSlateId: string; providerSlateId: string } & EligibilityComputeResult>;
+}
+
+/** M7A/M7B -- the ONE function the existing research-refresh path
+ * (lib/slatePipeline.ts::runSlatePipeline, the same "Process Slate"/
+ * "Refresh Data" admin action that already re-runs
+ * scripts/build_research_package.py on every call -- see that
+ * function's own M32.7 comment) calls after a research refresh, so
+ * canonical eligibility recomputes automatically with NO separate
+ * scheduler/polling loop and NO second research fetch (M7 rules #5/#6).
+ * Recomputes EVERY real, currently-VALID canonical slate for `date`
+ * (M7B: a research refresh may cover several real Classic slates) --
+ * one slate's failure is caught and reported per-slate, never stopping
+ * the others (M7B) and never thrown to the caller (M7A/M7J: the legacy
+ * research-refresh/pipeline success must never depend on this). */
+export async function refreshCanonicalEligibilityForDate(date: string, sport: string = "MLB"): Promise<EligibilityRefreshForDateResult> {
+  const db = getExecutor();
+  const slates = await db.all<{ internal_slate_id: string; provider_slate_id: string }>(
+    "SELECT internal_slate_id, provider_slate_id FROM slates WHERE sport = ? AND slate_date = ? AND validation_state = 'VALID'",
+    [sport, date],
+  );
+
+  const perSlate: EligibilityRefreshForDateResult["perSlate"] = [];
+  for (const slate of slates) {
+    let result: EligibilityComputeResult;
+    try {
+      result = await computeAndPersistEligibilityForSlate(slate.internal_slate_id);
+    } catch (err) {
+      // Belt-and-suspenders: computeAndPersistEligibilityForSlate is
+      // already designed to never throw for an honest NO_RESEARCH_PACKAGE/
+      // subprocess failure, but this loop must survive even a genuinely
+      // unexpected exception from one slate without ever stopping the rest.
+      result = { status: "ERROR", reason: err instanceof Error ? err.message : String(err), playersUpdated: 0 };
+    }
+    perSlate.push({ internalSlateId: slate.internal_slate_id, providerSlateId: slate.provider_slate_id, ...result });
+  }
+
+  return {
+    date,
+    slatesFound: slates.length,
+    slatesUpdated: perSlate.filter((s) => s.status === "OK").length,
+    slatesFailed: perSlate.filter((s) => s.status !== "OK").length,
+    perSlate,
+  };
+}
+
 export async function computeAndPersistEligibilityForSlate(internalSlateId: string): Promise<EligibilityComputeResult> {
   const db = getExecutor();
   const slate = await db.get<CanonicalSlateRow>("SELECT * FROM slates WHERE internal_slate_id = ?", [internalSlateId]);

@@ -248,3 +248,184 @@ describe("M6O: eligibility parity", () => {
     );
   });
 });
+
+/** M7G/M7H fixtures need full control over mlb_player_id/game_id/
+ * eligibility_status/optimizer_eligible on the LEGACY side (the shared
+ * fakePythonRunnerFor() above always hardcodes these to
+ * null/null/UNMATCHED/false), so this local variant accepts them per
+ * player. */
+function fakeEligibilityPythonRunner(
+  players: Array<{ dkPlayerId: string; name: string; team: string; salary: number; positions: string[]; mlbPlayerId?: string | null; gameId?: string | null; eligibilityStatus?: string | null; optimizerEligible?: boolean }>,
+) {
+  return async (script: string) => {
+    if (script === "scripts/build_dfs_pool_from_provider.py") {
+      const ts = nextTs();
+      writeJson(`dfs_input/${DATE}/dk_player_pool_${ts}.json`, {
+        roster_feasibility_pass: true,
+        player_count: players.length,
+        players: players.map((p) => ({
+          dk_player_id: p.dkPlayerId, mlb_player_id: p.mlbPlayerId ?? null, name: p.name, team: p.team, player_type: "hitter",
+          dk_positions: p.positions, salary: p.salary, projection: null, ceiling: null, risk_score: null, confidence: null,
+          batting_order: null, game_id: p.gameId ?? null, opponent: "TOR", lineup_status: "active", match_status: "unmatched",
+          eligibility_status: p.eligibilityStatus ?? "UNMATCHED", optimizer_eligible: p.optimizerEligible ?? false,
+        })),
+      });
+      writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, {
+        dk_entries: players.length, matched_to_mlb: 0, unmatched_count: players.length, dk_games_total: 8,
+      });
+      return { exitCode: 0, stdout: "ok", stderr: "", command: [] };
+    }
+    if (script === "scripts/project_dk_ownership.py") {
+      return { exitCode: 1, stdout: "", stderr: "no ownership in this test", command: [] };
+    }
+    throw new Error(`Unexpected script invocation in this test: ${script}`);
+  };
+}
+
+async function setEligibilityFakeRunner(players: Parameters<typeof fakeEligibilityPythonRunner>[0]) {
+  const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+  __setPythonRunnerForTests(fakeEligibilityPythonRunner(players));
+}
+
+function seedCanonicalPlayerFull(overrides: { providerPlayerId?: string; name?: string; gameId?: string | null; eligibilityStatus?: string | null; optimizerEligible?: boolean } = {}) {
+  getDb()
+    .prepare(
+      `INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, game_id, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+       VALUES ('s1', ?, ?, 'BOS', 'TOR', ?, 4500, '["OF"]', 'UNRESOLVED', ?, ?, 'x', 'x', 'x')`,
+    )
+    .run(overrides.providerPlayerId ?? "1", overrides.name ?? "Flex Player", overrides.gameId ?? null, overrides.eligibilityStatus ?? null, overrides.optimizerEligible ? 1 : 0);
+}
+
+describe("M7G: eligibility mismatch root-cause classification", () => {
+  it("classifies a genuine MATCH when status/optimizerEligible/gameId all agree, regardless of identity resolution", async () => {
+    seedLegacyArtifact();
+    await setEligibilityFakeRunner([{ ...ONE_PLAYER[0], gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true }]);
+    seedCanonicalSlate();
+    seedCanonicalPlayerFull({ gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true });
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    expect(result.eligibility.exactMatches).toBe(1);
+    expect(result.eligibility.comparablePopulation.nonComparableIdentityGaps).toBe(1); // neither side resolved mlbPlayerId here
+  });
+
+  it("classifies IDENTITY_UNRESOLVED_IN_CANONICAL when legacy resolved an mlbPlayerId but canonical did not", async () => {
+    seedLegacyArtifact();
+    await setEligibilityFakeRunner([{ ...ONE_PLAYER[0], mlbPlayerId: "660271", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true }]);
+    seedCanonicalSlate();
+    seedCanonicalPlayerFull({ gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true });
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    // Status agrees but identity does not -- reported as an honest identityGap, never silently folded into "match".
+    expect(result.eligibility.identityGaps).toHaveLength(1);
+    expect(result.eligibility.comparablePopulation.nonComparableIdentityGaps).toBe(1);
+    expect(result.eligibility.comparablePopulation.comparablePlayers).toBe(0);
+  });
+
+  it("classifies GAME_MATCHING_DIFFERENCE when both sides resolved identity but disagree on game_id", async () => {
+    seedLegacyArtifact();
+    await setEligibilityFakeRunner([{ ...ONE_PLAYER[0], mlbPlayerId: "660271", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true }]);
+    seedCanonicalSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO players (internal_player_id, sport, canonical_name, normalized_name, active, created_at, updated_at) VALUES ('ip-1', 'MLB', 'A', 'a', 1, 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO player_external_ids (id, internal_player_id, sport, provider, external_id, external_id_type, match_method, match_confidence, is_current, valid_from, created_at, updated_at)
+         VALUES ('e1', 'ip-1', 'MLB', 'mlbam', '660271', 'mlbam_id', 'exact_deterministic_source_mapping', 1.0, 1, 'x', 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, internal_player_id, name, team, opponent, game_id, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+         VALUES ('s1', '1', 'ip-1', 'Flex Player', 'BOS', 'TOR', 'g2', 4500, '["OF"]', 'RESOLVED', 'STARTING_HITTER', 1, 'x', 'x', 'x')`,
+      )
+      .run();
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    expect(result.eligibility.comparablePopulation.nonComparableGameGaps).toBe(1);
+    expect(result.eligibility.gameIdMismatches).toHaveLength(1);
+    // Status/optimizerEligible AGREE here -- so this is purely a game-matching
+    // difference, never mislabeled as a status/algorithm bug.
+    expect(result.eligibility.statusMismatches).toEqual([]);
+  });
+
+  it("classifies STATUS_MISMATCH as a real, comparable disagreement once both identity and game_id agree", async () => {
+    seedLegacyArtifact();
+    await setEligibilityFakeRunner([{ ...ONE_PLAYER[0], mlbPlayerId: "660271", gameId: "g1", eligibilityStatus: "BENCH", optimizerEligible: false }]);
+    seedCanonicalSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO players (internal_player_id, sport, canonical_name, normalized_name, active, created_at, updated_at) VALUES ('ip-1', 'MLB', 'A', 'a', 1, 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO player_external_ids (id, internal_player_id, sport, provider, external_id, external_id_type, match_method, match_confidence, is_current, valid_from, created_at, updated_at)
+         VALUES ('e1', 'ip-1', 'MLB', 'mlbam', '660271', 'mlbam_id', 'exact_deterministic_source_mapping', 1.0, 1, 'x', 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, internal_player_id, name, team, opponent, game_id, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+         VALUES ('s1', '1', 'ip-1', 'Flex Player', 'BOS', 'TOR', 'g1', 4500, '["OF"]', 'RESOLVED', 'STARTING_HITTER', 1, 'x', 'x', 'x')`,
+      )
+      .run();
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    expect(result.eligibility.comparablePopulation.comparablePlayers).toBe(1);
+    expect(result.eligibility.comparablePopulation.exactEligibilityMatches).toBe(0);
+    expect(result.eligibility.statusMismatches).toHaveLength(1);
+  });
+});
+
+describe("M7H: comparable-population parity percentage", () => {
+  it("returns null parityPercent when there are zero comparable players (identity gaps everywhere)", async () => {
+    seedLegacyArtifact();
+    await setEligibilityFakeRunner([{ ...ONE_PLAYER[0], eligibilityStatus: "UNMATCHED", optimizerEligible: false }]);
+    seedCanonicalSlate();
+    seedCanonicalPlayerFull({ eligibilityStatus: "UNMATCHED", optimizerEligible: false });
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    expect(result.eligibility.comparablePopulation.comparablePlayers).toBe(0);
+    expect(result.eligibility.comparablePopulation.parityPercent).toBeNull();
+  });
+
+  it("computes an honest parityPercent over only the comparable population -- never counting identity/game gaps as failures", async () => {
+    seedLegacyArtifact({ extraPlayer: true });
+    await setEligibilityFakeRunner([
+      { ...ONE_PLAYER[0], mlbPlayerId: "660271", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true },
+      { dkPlayerId: "2", name: "Legacy Only Player", team: "TOR", salary: 4000, positions: ["1B"], mlbPlayerId: "660272", gameId: "g2", eligibilityStatus: "BENCH", optimizerEligible: false },
+    ]);
+    seedCanonicalSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO players (internal_player_id, sport, canonical_name, normalized_name, active, created_at, updated_at) VALUES ('ip-1', 'MLB', 'A', 'a', 1, 'x', 'x'), ('ip-2', 'MLB', 'B', 'b', 1, 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO player_external_ids (id, internal_player_id, sport, provider, external_id, external_id_type, match_method, match_confidence, is_current, valid_from, created_at, updated_at)
+         VALUES ('e1', 'ip-1', 'MLB', 'mlbam', '660271', 'mlbam_id', 'exact_deterministic_source_mapping', 1.0, 1, 'x', 'x', 'x'),
+                ('e2', 'ip-2', 'MLB', 'mlbam', '660272', 'mlbam_id', 'exact_deterministic_source_mapping', 1.0, 1, 'x', 'x', 'x')`,
+      )
+      .run();
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, internal_player_id, name, team, opponent, game_id, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+         VALUES
+           ('s1', '1', 'ip-1', 'Flex Player', 'BOS', 'TOR', 'g1', 4500, '["OF"]', 'RESOLVED', 'STARTING_HITTER', 1, 'x', 'x', 'x'),
+           ('s1', '2', 'ip-2', 'Legacy Only Player', 'TOR', 'BOS', 'g2', 4000, '["1B"]', 'RESOLVED', 'STARTING_HITTER', 1, 'x', 'x', 'x')`,
+      )
+      .run();
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    // Player 1: full match. Player 2: identity+game agree, status disagrees (legacy BENCH vs canonical STARTING_HITTER).
+    expect(result.eligibility.comparablePopulation.comparablePlayers).toBe(2);
+    expect(result.eligibility.comparablePopulation.exactEligibilityMatches).toBe(1);
+    expect(result.eligibility.comparablePopulation.parityPercent).toBe(50);
+    expect(result.eligibility.comparablePopulation.nonComparableIdentityGaps).toBe(0);
+    expect(result.eligibility.comparablePopulation.nonComparableGameGaps).toBe(0);
+  });
+});

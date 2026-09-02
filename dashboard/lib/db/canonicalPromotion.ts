@@ -363,14 +363,51 @@ export async function promoteCanonicalArtifact(
     // Postgres to achieve the same guarantee.
     const internalSlateId = upserted!.internal_slate_id;
 
-    await tx.run("DELETE FROM slate_players WHERE internal_slate_id = ?", [internalSlateId]);
+    // M7C: UPSERT per player (never a blanket DELETE-then-reinsert-all)
+    // so a re-promotion driven by a genuine ACQUISITION change (salary/
+    // roster/identity) does NOT wipe out RESEARCH-derived state
+    // (eligibility_status/optimizer_eligible/batting_order/
+    // eligibility_computed_at, and any game_id already resolved by
+    // scripts/compute_canonical_eligibility.py) that a separate,
+    // independent process already persisted on this exact row -- see
+    // canonicalEligibility.ts's own docstring. Confirmed live in
+    // production during M6: a natural re-promotion of a still-being-
+    // refreshed tomorrow slate silently reset a real, just-computed
+    // eligibility_computed_at back to null, exactly because the OLD
+    // DELETE+reinsert-all pattern below discarded it. `game_id` is only
+    // overwritten when the incoming artifact actually supplies one
+    // (COALESCE onto the existing value) -- acquisition does not
+    // resolve game_id today (M6B did that ONLY inside the eligibility
+    // bridge), so this keeps a real, already-resolved game_id from
+    // being reset to null by an unrelated salary refresh, while still
+    // allowing a FUTURE acquisition-time game_id resolution to take
+    // effect once/if it exists. Eligibility/batting_order columns are
+    // NEVER included in this SET clause at all -- only
+    // canonicalEligibility.ts ever writes them.
+    const incomingProviderPlayerIds = resolvedPlayers.map(({ player }) => player.providerPlayerId);
+    if (incomingProviderPlayerIds.length > 0) {
+      const placeholders = incomingProviderPlayerIds.map(() => "?").join(", ");
+      await tx.run(
+        `DELETE FROM slate_players WHERE internal_slate_id = ? AND provider_player_id NOT IN (${placeholders})`,
+        [internalSlateId, ...incomingProviderPlayerIds],
+      );
+    } else {
+      await tx.run("DELETE FROM slate_players WHERE internal_slate_id = ?", [internalSlateId]);
+    }
 
     for (const { player, internalPlayerId, identityStatus } of resolvedPlayers) {
       await tx.run(
         `INSERT INTO slate_players
           (internal_slate_id, provider_player_id, internal_player_id, provider_draftable_ids_json, name, team, opponent, game_id, salary,
            position_eligibility_json, roster_slot_eligibility_json, identity_status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (internal_slate_id, provider_player_id) DO UPDATE SET
+           internal_player_id = excluded.internal_player_id, provider_draftable_ids_json = excluded.provider_draftable_ids_json,
+           name = excluded.name, team = excluded.team, opponent = excluded.opponent,
+           game_id = COALESCE(excluded.game_id, slate_players.game_id),
+           salary = excluded.salary, position_eligibility_json = excluded.position_eligibility_json,
+           roster_slot_eligibility_json = excluded.roster_slot_eligibility_json, identity_status = excluded.identity_status,
+           updated_at = excluded.updated_at`,
         [
           internalSlateId, player.providerPlayerId, internalPlayerId, JSON.stringify(player.providerDraftableIds), player.name, player.team,
           player.opponent, player.gameId, player.salary, JSON.stringify(player.positionEligibility), JSON.stringify(player.rosterSlotEligibility),

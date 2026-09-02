@@ -17,6 +17,7 @@
 
 import { ARTIFACT_DIRS, artifactPath, toArtifactKey } from "./artifactRoot";
 import type { SlateLifecycleStatus } from "./db/types";
+import { refreshCanonicalEligibilityForDate, type EligibilityRefreshForDateResult } from "./db/canonicalEligibility";
 import { upsertSlateStatus } from "./db/slateStatus";
 import { findLatestFile } from "./discovery";
 import { loadLatestDkMatchReport, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot } from "./loaders";
@@ -33,6 +34,13 @@ export interface SlatePipelineResult {
   // diff of already-persisted state (see lib/slateChangeReport.ts).
   // Never recomputes eligibility/projections itself.
   changeReport: SlateChangeReport;
+  // M7A/M7J: observability ONLY -- a canonical-eligibility-refresh
+  // problem is NEVER folded into `errors`/`status` above (this is the
+  // LEGACY, customer-facing pipeline outcome; canonical Postgres is
+  // shadow-only, ADMIN_ONLY -- see lib/servingBackend/config.ts). null
+  // when refreshCanonicalEligibilityForDate itself threw unexpectedly
+  // (belt-and-suspenders; it's designed never to).
+  canonicalEligibilityRefresh: EligibilityRefreshForDateResult | null;
 }
 
 async function nativeSnapshotPath(date: string): Promise<string | null> {
@@ -110,6 +118,29 @@ export async function runSlatePipeline(
     errors.push(`Research package refresh failed: ${tail(researchResult.stdout + researchResult.stderr, 800)}`);
   }
 
+  // M7A -- automatic canonical eligibility refresh, reusing THIS exact
+  // research-refresh event (never a second research fetch, never a new
+  // scheduler/polling loop -- M7 rules #5/#6). Runs regardless of
+  // researchResult's own exit code: scripts/compute_canonical_eligibility.py
+  // honestly reports NO_RESEARCH_PACKAGE if nothing usable exists, rather
+  // than needing this call site to special-case that. Deliberately
+  // isolated from `errors`/`status` above -- canonical Postgres is
+  // shadow-only/ADMIN_ONLY, so a canonical-side problem must NEVER make
+  // this LEGACY, customer-facing pipeline look like it failed (M7A/M7J).
+  // Logged for visibility (M7K), never thrown.
+  let canonicalEligibilityRefresh: EligibilityRefreshForDateResult | null = null;
+  try {
+    canonicalEligibilityRefresh = await refreshCanonicalEligibilityForDate(date);
+    if (canonicalEligibilityRefresh.slatesFailed > 0) {
+      console.error(
+        `[M7A] canonical eligibility refresh for ${date}: ${canonicalEligibilityRefresh.slatesFailed}/${canonicalEligibilityRefresh.slatesFound} slate(s) failed`,
+        canonicalEligibilityRefresh.perSlate.filter((s) => s.status !== "OK"),
+      );
+    }
+  } catch (err) {
+    console.error(`[M7A] canonical eligibility refresh for ${date} threw unexpectedly (isolated -- legacy pipeline unaffected):`, err);
+  }
+
   // M32.7 AUTOMATIC PROMOTION: re-score the Pitcher/Batter Agents FIRST,
   // before the player pool is (re)built below -- confirmed live gap
   // this milestone's own validation surfaced: "Building player pool"
@@ -169,7 +200,7 @@ export async function runSlatePipeline(
     // Nothing progressed -- an honest self-diff (no change) rather than
     // comparing against a state the pipeline never actually reached.
     errors.push(`Player pool build failed: ${message}`);
-    return { status: "ERROR", errors, changeReport: diffSlateState(stateBefore, stateBefore) };
+    return { status: "ERROR", errors, changeReport: diffSlateState(stateBefore, stateBefore), canonicalEligibilityRefresh };
   }
 
   // Canonical MLB Player Identity Foundation: refreshes the roster-
@@ -338,5 +369,5 @@ export async function runSlatePipeline(
     lastRefreshedAt: now,
   });
 
-  return { status, errors, changeReport };
+  return { status, errors, changeReport, canonicalEligibilityRefresh };
 }

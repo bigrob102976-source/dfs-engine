@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { __resetDbForTests, getDb } from "../client";
 import { __resetExecutorForTests, getExecutor } from "../executor";
-import { easternDateOffset, getTomorrowPrefetchSummary, listShadowSlateStatuses } from "../canonicalShadowStatus";
+import { easternDateOffset, getEligibilitySummariesBySlate, getTomorrowPrefetchSummary, listShadowSlateStatuses } from "../canonicalShadowStatus";
 
 beforeEach(() => {
   __resetDbForTests();
@@ -76,5 +76,48 @@ describe("M4H/M4L: getTomorrowPrefetchSummary", () => {
     const summary = await getTomorrowPrefetchSummary();
     expect(summary.status).toBe("FUTURE_PREFETCHED");
     expect(summary.slates.map((s) => s.internal_slate_id).sort()).toEqual(["s1", "s2"]);
+  });
+});
+
+function insertPlayer(overrides: Partial<{ internal_slate_id: string; provider_player_id: string; eligibility_status: string | null; optimizer_eligible: number; eligibility_computed_at: string | null }> = {}) {
+  const row = {
+    internal_slate_id: "s1", provider_player_id: "1", eligibility_status: null, optimizer_eligible: 0, eligibility_computed_at: null,
+    ...overrides,
+  };
+  getDb()
+    .prepare(
+      `INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+       VALUES (?, ?, 'Player', 'BOS', 'TOR', 4500, '["OF"]', 'UNRESOLVED', ?, ?, ?, 'x', 'x')`,
+    )
+    .run(row.internal_slate_id, row.provider_player_id, row.eligibility_status, row.optimizer_eligible, row.eligibility_computed_at);
+}
+
+describe("M7K: eligibility observability", () => {
+  it("getEligibilitySummariesBySlate aggregates eligible/unconfirmed/unmatched counts and the latest computed_at per slate", async () => {
+    insertSlate({ internal_slate_id: "s1" });
+    insertPlayer({ provider_player_id: "1", eligibility_status: "STARTING_HITTER", optimizer_eligible: 1, eligibility_computed_at: "2026-08-31T10:00:00Z" });
+    insertPlayer({ provider_player_id: "2", eligibility_status: "LINEUP_UNCONFIRMED", optimizer_eligible: 0, eligibility_computed_at: "2026-08-31T10:00:00Z" });
+    insertPlayer({ provider_player_id: "3", eligibility_status: "UNMATCHED", optimizer_eligible: 0, eligibility_computed_at: "2026-08-31T11:00:00Z" });
+    insertPlayer({ provider_player_id: "4" }); // never computed at all -- honest "unconfirmed", not "unmatched"
+
+    const summaries = await getEligibilitySummariesBySlate();
+    const s1 = summaries.get("s1")!;
+    expect(s1.totalPlayers).toBe(4);
+    expect(s1.eligibleCount).toBe(1);
+    expect(s1.unconfirmedCount).toBe(2); // LINEUP_UNCONFIRMED + never-computed
+    expect(s1.unmatchedCount).toBe(1);
+    expect(s1.lastComputedAt).toBe("2026-08-31T11:00:00Z");
+  });
+
+  it("listShadowSlateStatuses wires the real eligibility summary onto each slate row, and null when a slate has zero players", async () => {
+    insertSlate({ internal_slate_id: "s1" });
+    insertPlayer({ provider_player_id: "1", eligibility_status: "STARTING_HITTER", optimizer_eligible: 1 });
+    insertSlate({ internal_slate_id: "s2", provider_slate_id: "2" }); // zero players promoted yet
+
+    const rows = await listShadowSlateStatuses();
+    const s1 = rows.find((r) => r.internal_slate_id === "s1")!;
+    const s2 = rows.find((r) => r.internal_slate_id === "s2")!;
+    expect(s1.eligibility).toEqual(expect.objectContaining({ totalPlayers: 1, eligibleCount: 1 }));
+    expect(s2.eligibility).toBeNull();
   });
 });

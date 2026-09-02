@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { __resetDbForTests, getDb } from "../client";
 import { __resetExecutorForTests } from "../executor";
-import { computeAndPersistEligibilityForSlate } from "../canonicalEligibility";
+import { computeAndPersistEligibilityForSlate, refreshCanonicalEligibilityForDate } from "../canonicalEligibility";
 
 function insertSlate(overrides: Partial<{ internal_slate_id: string; slate_date: string }> = {}) {
   const row = { internal_slate_id: "s1", slate_date: "2026-08-31", ...overrides };
@@ -130,5 +130,88 @@ describe("M6D: computeAndPersistEligibilityForSlate", () => {
     const byId = new Map(capturedPayload!.players.map((p) => [p.providerPlayerId, p.mlbPlayerId]));
     expect(byId.get("1")).toBe("660271");
     expect(byId.get("2")).toBeNull();
+  });
+});
+
+describe("M7D: future-slate eligibility transitions naturally as research posts", () => {
+  it("LINEUP_UNCONFIRMED -> STARTING_HITTER across two recompute calls, once a lineup posts -- no manual intervention required beyond the recompute call itself", async () => {
+    insertSlate();
+    insertPlayer({ provider_player_id: "1" });
+
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [{ providerPlayerId: "1", gameId: "g1", eligibilityStatus: "LINEUP_UNCONFIRMED", optimizerEligible: false, battingOrder: null }],
+    });
+    const before = await computeAndPersistEligibilityForSlate("s1");
+    expect(before.status).toBe("OK");
+    const rowBefore = getDb().prepare("SELECT eligibility_status, optimizer_eligible, eligibility_computed_at FROM slate_players WHERE internal_slate_id='s1'").get() as Record<string, unknown>;
+    expect(rowBefore.eligibility_status).toBe("LINEUP_UNCONFIRMED");
+    const computedAtBefore = rowBefore.eligibility_computed_at as string;
+
+    // Real lineup posts -- a later research refresh recomputes the SAME
+    // player, transitioning them naturally (never a duplicate row, same
+    // internalSlateId/providerPlayerId).
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await setFakeRunner({
+      status: "OK", date: "2026-08-31",
+      results: [{ providerPlayerId: "1", gameId: "g1", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, battingOrder: 5 }],
+    });
+    const after = await computeAndPersistEligibilityForSlate("s1");
+    expect(after.status).toBe("OK");
+
+    const rowAfter = getDb().prepare("SELECT eligibility_status, optimizer_eligible, batting_order, eligibility_computed_at FROM slate_players WHERE internal_slate_id='s1'").get() as Record<string, unknown>;
+    expect(rowAfter.eligibility_status).toBe("STARTING_HITTER");
+    expect(rowAfter.optimizer_eligible).toBe(1);
+    expect(rowAfter.batting_order).toBe(5);
+    expect(rowAfter.eligibility_computed_at).not.toBe(computedAtBefore); // timestamp genuinely advanced
+
+    const count = (getDb().prepare("SELECT COUNT(*) as c FROM slate_players WHERE internal_slate_id='s1'").get() as { c: number }).c;
+    expect(count).toBe(1); // never duplicated
+  });
+
+  it("a tomorrow-prefetched slate with zero posted lineups is honestly OK (not a failure) with everyone LINEUP_UNCONFIRMED/UNMATCHED", async () => {
+    insertSlate({ slate_date: "2026-09-02" });
+    insertPlayer({ provider_player_id: "1" });
+    insertPlayer({ provider_player_id: "2" });
+
+    await setFakeRunner({
+      status: "OK", date: "2026-09-02",
+      results: [
+        { providerPlayerId: "1", gameId: "g1", eligibilityStatus: "LINEUP_UNCONFIRMED", optimizerEligible: false, battingOrder: null },
+        { providerPlayerId: "2", gameId: null, eligibilityStatus: "UNMATCHED", optimizerEligible: false, battingOrder: null },
+      ],
+    });
+    const result = await computeAndPersistEligibilityForSlate("s1");
+    expect(result.status).toBe("OK");
+    expect(result.playersUpdated).toBe(2);
+  });
+});
+
+describe("M7L: automatic canonical eligibility refresh adds zero DraftKings calls", () => {
+  it("refreshCanonicalEligibilityForDate invokes ONLY scripts/compute_canonical_eligibility.py -- never a DK fetch/discovery script -- across multiple slates", async () => {
+    insertSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO slates (internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc, schema_version, validation_state, source_provenance, created_at, updated_at)
+         VALUES ('s2', 'MLB', 'draftkings', 'draftkings_unofficial', 'dkunofficial-2', 'Showdown', '2026-08-31', '2026-08-31T23:05:00Z', 'slate_normalized_v1', 'VALID', 'DRAFTKINGS_UNOFFICIAL_LIVE', 'x', 'x')`,
+      )
+      .run();
+
+    const FORBIDDEN_SCRIPTS = ["scripts/fetch_dfs_slate.py", "scripts/fetch_all_dfs_slates.py", "scripts/list_dfs_slates.py", "scripts/build_dfs_pool_from_provider.py"];
+    const invokedScripts: string[] = [];
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(async (script) => {
+      invokedScripts.push(script);
+      if (FORBIDDEN_SCRIPTS.includes(script)) {
+        throw new Error(`Automatic canonical eligibility refresh must never invoke a DraftKings-network script, but invoked: ${script}`);
+      }
+      return { exitCode: 0, stdout: 'RESULT_JSON:{"status":"OK","date":"2026-08-31","results":[]}', stderr: "", command: [] };
+    });
+
+    const result = await refreshCanonicalEligibilityForDate("2026-08-31");
+    expect(result.slatesFound).toBe(2);
+    expect(result.slatesFailed).toBe(0);
+    expect(invokedScripts.length).toBeGreaterThan(0);
+    for (const script of invokedScripts) expect(script).toBe("scripts/compute_canonical_eligibility.py");
   });
 });

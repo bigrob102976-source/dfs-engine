@@ -636,3 +636,145 @@ describe("runSlatePipeline", () => {
     expect(result.changeReport.aiGenerated).toBe(1);
   });
 });
+
+describe("M7A/M7B/M7I/M7J: automatic canonical eligibility refresh", () => {
+  async function insertCanonicalSlate(internalSlateId: string, providerSlateId: string) {
+    const { getDb } = await import("../db/client");
+    getDb()
+      .prepare(
+        `INSERT INTO slates (
+           internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
+           schema_version, validation_state, source_provenance, created_at, updated_at
+         ) VALUES (?, 'MLB', 'draftkings', 'draftkings_unofficial', ?, 'Main', ?, ?, 'slate_normalized_v1', 'VALID', 'DRAFTKINGS_UNOFFICIAL_LIVE', 'x', 'x')`,
+      )
+      .run(internalSlateId, providerSlateId, DATE, `${DATE}T23:05:00Z`);
+  }
+
+  async function insertCanonicalPlayer(internalSlateId: string, providerPlayerId: string) {
+    const { getDb } = await import("../db/client");
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at)
+         VALUES (?, ?, 'Canonical Player', 'BOS', 'TOR', 4500, '["OF"]', 'UNRESOLVED', 'x', 'x')`,
+      )
+      .run(internalSlateId, providerPlayerId);
+  }
+
+  it("a research refresh automatically recomputes canonical eligibility -- no manual canonical-eligibility endpoint call needed", async () => {
+    await insertCanonicalSlate("canon-1", "dkunofficial-canon-1");
+    await insertCanonicalPlayer("canon-1", "cp-1");
+
+    const calls: Array<{ script: string; args: string[] }> = [];
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      "scripts/compute_canonical_eligibility.py": () => ok('RESULT_JSON:{"status":"OK","date":"' + DATE + '","results":[{"providerPlayerId":"cp-1","gameId":"g1","eligibilityStatus":"STARTING_HITTER","optimizerEligible":true,"battingOrder":2}]}'),
+    };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, calls));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    // The legacy pipeline outcome is unaffected either way (M7A) --
+    // the real proof is that eligibility recomputed with NO manual call.
+    expect(calls.map((c) => c.script)).toContain("scripts/compute_canonical_eligibility.py");
+    expect(result.canonicalEligibilityRefresh).toEqual(
+      expect.objectContaining({ date: DATE, slatesFound: 1, slatesUpdated: 1, slatesFailed: 0 }),
+    );
+
+    const { getDb } = await import("../db/client");
+    const row = getDb().prepare("SELECT eligibility_status, optimizer_eligible, batting_order, game_id, eligibility_computed_at FROM slate_players WHERE internal_slate_id = 'canon-1'").get() as Record<string, unknown>;
+    expect(row.eligibility_status).toBe("STARTING_HITTER");
+    expect(row.optimizer_eligible).toBe(1);
+    expect(row.batting_order).toBe(2);
+    expect(row.game_id).toBe("g1");
+    expect(row.eligibility_computed_at).toBeTruthy(); // set automatically, no admin action taken
+  });
+
+  it("M7B: multiple canonical Classic slates on the same date all get recomputed, and one failure does not stop the others", async () => {
+    await insertCanonicalSlate("canon-1", "dkunofficial-canon-1");
+    await insertCanonicalPlayer("canon-1", "cp-1");
+    await insertCanonicalSlate("canon-2", "dkunofficial-canon-2");
+    await insertCanonicalPlayer("canon-2", "cp-2");
+
+    let callCount = 0;
+    const handlers: Record<string, Handler> = {
+      ...defaultHandlers(),
+      "scripts/compute_canonical_eligibility.py": (args) => {
+        callCount += 1;
+        const inputPath = args[args.indexOf("--input") + 1];
+        const fsSync = require("node:fs");
+        const payload = JSON.parse(fsSync.readFileSync(inputPath, "utf-8"));
+        // Fail specifically for the slate containing cp-2, succeed for the other.
+        if (payload.players.some((p: { providerPlayerId: string }) => p.providerPlayerId === "cp-2")) {
+          return fail("simulated research-matching crash for this one slate");
+        }
+        return ok('RESULT_JSON:{"status":"OK","date":"' + DATE + '","results":[{"providerPlayerId":"cp-1","gameId":null,"eligibilityStatus":"UNMATCHED","optimizerEligible":false,"battingOrder":null}]}');
+      },
+    };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(callCount).toBe(2); // BOTH slates were attempted
+    expect(result.canonicalEligibilityRefresh).toEqual(
+      expect.objectContaining({ slatesFound: 2, slatesUpdated: 1, slatesFailed: 1 }),
+    );
+    // The legacy pipeline itself is never affected by this partial canonical failure.
+    expect(result.status).not.toBe("ERROR");
+  });
+
+  it("M7J: canonical eligibility recompute throwing unexpectedly never breaks the legacy pipeline's own success", async () => {
+    await insertCanonicalSlate("canon-1", "dkunofficial-canon-1");
+    await insertCanonicalPlayer("canon-1", "cp-1");
+
+    const handlers: Record<string, Handler> = { ...defaultHandlers() };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    // Force a GENUINE, unexpected exception inside
+    // refreshCanonicalEligibilityForDate's own top-level query (not
+    // merely a subprocess non-zero exit, and not the ALREADY-isolated
+    // per-slate try/catch inside it -- see the M7B test above for that
+    // layer): drop the `slates` table its initial SELECT depends on
+    // (child tables first -- SQLite enforces the real foreign key).
+    const { getDb } = await import("../db/client");
+    getDb().exec("DROP TABLE slate_players");
+    getDb().exec("DROP TABLE slates");
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    // The legacy pipeline's own status/errors are architecturally
+    // independent of canonicalEligibilityRefresh -- a real thrown
+    // exception there is caught and isolated by slatePipeline.ts's own
+    // try/catch, never propagated into the customer-facing pipeline
+    // outcome.
+    expect(result.status).not.toBe("ERROR");
+    expect(result.errors).toEqual([]);
+    expect(result.canonicalEligibilityRefresh).toBeNull(); // slatePipeline.ts's own outer try/catch caught it
+  });
+
+  it("M7B (inner layer): a per-slate query exception is ALSO isolated one level down, inside refreshCanonicalEligibilityForDate itself", async () => {
+    await insertCanonicalSlate("canon-1", "dkunofficial-canon-1");
+    await insertCanonicalPlayer("canon-1", "cp-1");
+
+    const handlers: Record<string, Handler> = { ...defaultHandlers() };
+    const { __setPythonRunnerForTests } = await import("../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(makeFakeRunner(handlers, []));
+
+    const { getDb } = await import("../db/client");
+    getDb().exec("DROP TABLE slate_players"); // slates table itself is untouched -- the outer query still succeeds
+
+    const { runSlatePipeline } = await import("../slatePipeline");
+    const result = await runSlatePipeline(DATE, SLATE_ID, "Main");
+
+    expect(result.status).not.toBe("ERROR");
+    expect(result.canonicalEligibilityRefresh).toEqual(
+      expect.objectContaining({ slatesFound: 1, slatesUpdated: 0, slatesFailed: 1 }),
+    );
+    expect(result.canonicalEligibilityRefresh!.perSlate[0].status).toBe("ERROR");
+  });
+});
