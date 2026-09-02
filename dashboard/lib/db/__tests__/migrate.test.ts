@@ -14,7 +14,7 @@ describe("migrations", () => {
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
       "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql",
       "0008_slate_change_report.sql", "0009_slate_identity_foundation.sql", "0010_canonical_slate_promotion_metadata.sql",
-      "0011_canonical_shadow_status.sql",
+      "0011_canonical_shadow_status.sql", "0012_canonical_serving_backend_flag.sql",
     ]);
   });
 
@@ -25,7 +25,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(11);
+    expect(rows.c).toBe(12);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {
@@ -59,15 +59,20 @@ describe("migrations", () => {
     expect(entitlementKeys).toContain("mlb.bluecollar_optimizer");
   });
 
-  it("every 0002-seeded (page-level) feature flag starts PRODUCTION; the Big Money ML and BlueCollar optimizer capabilities start ADMIN_ONLY", () => {
+  it("every 0002-seeded (page-level) feature flag starts PRODUCTION; the Big Money ML, BlueCollar, and canonical-serving capabilities start ADMIN_ONLY", () => {
     const db = getDb();
-    const states = db.prepare("SELECT DISTINCT state FROM feature_flags WHERE key NOT IN ('mlb.big_money_ml_optimizer', 'mlb.bluecollar_optimizer')").all() as Array<{ state: string }>;
+    const states = db
+      .prepare("SELECT DISTINCT state FROM feature_flags WHERE key NOT IN ('mlb.big_money_ml_optimizer', 'mlb.bluecollar_optimizer', 'mlb.canonical_postgres_serving')")
+      .all() as Array<{ state: string }>;
     expect(states).toEqual([{ state: "PRODUCTION" }]);
 
     const mlFlag = db.prepare("SELECT state FROM feature_flags WHERE key = 'mlb.big_money_ml_optimizer'").get() as { state: string };
     expect(mlFlag.state).toBe("ADMIN_ONLY");
     const bcFlag = db.prepare("SELECT state FROM feature_flags WHERE key = 'mlb.bluecollar_optimizer'").get() as { state: string };
     expect(bcFlag.state).toBe("ADMIN_ONLY");
+    // M5C: seeded ADMIN_ONLY -- see migrations/0012_canonical_serving_backend_flag.sql's own docstring for why.
+    const servingFlag = db.prepare("SELECT state FROM feature_flags WHERE key = 'mlb.canonical_postgres_serving'").get() as { state: string };
+    expect(servingFlag.state).toBe("ADMIN_ONLY");
   });
 
   it("enforces foreign keys (rejects an orphaned subscription)", () => {
