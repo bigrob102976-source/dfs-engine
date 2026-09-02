@@ -1,4 +1,5 @@
 import { getExecutor } from "../db/executor";
+import { resolveMlbPlayerIds } from "../db/canonicalPlayerIdentity";
 import type { CanonicalSlatePlayerRow, CanonicalSlateRow } from "../db/types";
 import { computeBlueCollarCoverage } from "../blueCollarProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
@@ -12,25 +13,28 @@ import type { SlateServingBackend } from "./types";
 // players/player_external_ids) -- never a live DraftKings call, never
 // mock/CSV data (M5 rule #2/#3). Unresolved identity is servable, never
 // blocking (mlbPlayerId is simply null for an unresolved player -- see
-// resolveMlbPlayerIds below).
+// resolveMlbPlayerIds in ../db/canonicalPlayerIdentity.ts).
 //
-// HONEST SCOPE GAP, disclosed here and in the M5 final report: this
-// backend produces the SAME OptimizerPoolResult/PoolPlayerRow shapes the
-// legacy pipeline does, but canonical Postgres (as built by M1-M4) only
-// tracks the CORE DraftKings identity/salary/roster facts -- it has NO
-// lineup-confirmation data (dfs/eligibility.py requires a separate MLB
-// research package join this backend does not perform), and NO
-// projection/ownership/AI/ML/BlueCollar/Vegas enrichment (those are all
-// separate file-based artifacts keyed by mlbPlayerId, entirely
-// independent of which salary/roster source is used, and are simply
-// absent here -- never fabricated, per M5 rule #4). Every canonical
-// player is marked eligibilityStatus="CANONICAL_UNCONFIRMED" (a value
-// distinct from every real dfs/eligibility.py status) and
-// optimizerEligible=true (a real, valid DK draftable -- but NOT a
-// lineup-confirmed starter claim) so the optimizer has a real, non-empty
-// pool to build against during the M5I/M5J admin canary. This is
-// EXPLICITLY NOT full feature parity and must remain a documented
-// blocker for the M5M cutover gate.
+// M6A/M6H: eligibilityStatus/optimizerEligible/gameId/battingOrder now
+// come from REAL dfs/eligibility.py computation results, persisted on
+// slate_players by scripts/compute_canonical_eligibility.py via
+// lib/db/canonicalEligibility.ts (see that module's own docstring for
+// the full Python<->Postgres bridge). A player whose eligibility has
+// never been computed yet reports eligibilityStatus=null,
+// optimizerEligible=false -- an honest "not yet computed" state, NEVER
+// an assumed-eligible default (M6 rule #9: do not mark every DK
+// draftable optimizerEligible=true).
+//
+// REMAINING HONEST SCOPE GAP, disclosed here and in the M6 final report:
+// canonical Postgres still has NO projection/ownership/AI/ML/BlueCollar
+// enrichment (those are all separate file-based artifacts keyed by
+// mlbPlayerId, entirely independent of which salary/roster source is
+// used, and are simply absent here -- never fabricated, per M5/M6 rule
+// #4). A canonical-served pool can therefore have real, non-fabricated
+// eligibility now, but still cannot run a real projection-objective
+// optimizer build (see dashboard/lib/optimizerWorkspace/buildRunner.ts's
+// own M6I/M6M docstring) -- this remains a documented blocker for the
+// M5M/M6 cutover gate.
 
 const DEFAULT_SPORT = "MLB";
 const DEFAULT_SITE = "draftkings";
@@ -166,21 +170,6 @@ export async function canonicalListSlates(date: string, sport: string = DEFAULT_
   };
 }
 
-async function resolveMlbPlayerIds(internalPlayerIds: string[]): Promise<Map<string, string>> {
-  const distinct = [...new Set(internalPlayerIds)];
-  if (distinct.length === 0) return new Map();
-  const db = getExecutor();
-  const placeholders = distinct.map(() => "?").join(", ");
-  const rows = await db.all<{ internal_player_id: string; external_id: string }>(
-    `SELECT internal_player_id, external_id FROM player_external_ids
-     WHERE provider = 'mlbam' AND is_current = 1 AND internal_player_id IN (${placeholders})`,
-    distinct,
-  );
-  const map = new Map<string, string>();
-  for (const row of rows) map.set(row.internal_player_id, row.external_id);
-  return map;
-}
-
 function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: string | null): PoolPlayerRow {
   const positions = parseJsonArray(row.position_eligibility_json);
   return {
@@ -192,7 +181,7 @@ function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: s
     gameId: row.game_id,
     playerType: inferPlayerType(positions),
     positions,
-    battingOrder: null,
+    battingOrder: row.batting_order,
     salary: row.salary,
     projection: null,
     ceiling: null,
@@ -201,12 +190,16 @@ function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: s
     leverage: null,
     risk: null,
     confidence: null,
-    lineupStatus: "CANONICAL_UNCONFIRMED",
+    // M6A: real dfs/eligibility.py status when computed
+    // (STARTING_PITCHER/STARTING_HITTER/LINEUP_UNCONFIRMED/BENCH/
+    // RELIEF_PITCHER/SCRATCHED/UNMATCHED/AMBIGUOUS); "PENDING_ELIGIBILITY"
+    // -- a value distinct from every real eligibility.py status -- when
+    // eligibility_computed_at is still null (never computed yet for this
+    // player). Never optimizerEligible=true merely because a row exists.
+    lineupStatus: row.eligibility_status ?? "PENDING_ELIGIBILITY",
     matchStatus: row.identity_status === "RESOLVED" ? "matched" : row.identity_status === "REVIEW_REQUIRED" ? "ambiguous" : "unmatched",
-    // Distinct from every real dfs/eligibility.py status on purpose --
-    // see this module's own top-of-file scope-gap docstring.
-    eligibilityStatus: "CANONICAL_UNCONFIRMED",
-    optimizerEligible: true,
+    eligibilityStatus: row.eligibility_status ?? "PENDING_ELIGIBILITY",
+    optimizerEligible: row.optimizer_eligible === 1,
     externalProjection: null,
     adjustedProjection: null,
     adjustmentDelta: null,

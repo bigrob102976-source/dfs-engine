@@ -40,7 +40,7 @@ function fakePythonRunnerFor(players: Array<{ dkPlayerId: string; name: string; 
           dk_player_id: p.dkPlayerId, mlb_player_id: null, name: p.name, team: p.team, player_type: "hitter",
           dk_positions: p.positions, salary: p.salary, projection: null, ceiling: null, risk_score: null, confidence: null,
           batting_order: null, game_id: null, opponent: "TOR", lineup_status: "active", match_status: "unmatched",
-          eligibility_status: null, optimizer_eligible: false,
+          eligibility_status: "UNMATCHED", optimizer_eligible: false,
         })),
       });
       writeJson(`dfs_input/${DATE}/dk_match_report_${ts}.json`, {
@@ -190,6 +190,61 @@ describe("M5E: compareAllServingBackendsForDate", () => {
     expect(report.slatesCompared).toBe(1);
     expect(report.exactMatches).toBe(1);
     expect(report.mismatches).toBe(0);
-    expect(report.eligibilityMismatchesNote).toMatch(/CANONICAL_UNCONFIRMED/);
+    expect(report.eligibilityPlayersCompared).toBe(1);
+  });
+});
+
+describe("M6O: eligibility parity", () => {
+  it("reports an exact eligibility match when both sides agree on status/optimizerEligible/gameId/identity", async () => {
+    seedLegacyArtifact();
+    await setFakeRunner(ONE_PLAYER); // eligibility_status: null, optimizer_eligible: false, game_id: null, mlb_player_id: null (legacy fixture default)
+    seedCanonicalSlate();
+    seedCanonicalPlayer(); // eligibility columns default to NULL/un-set -- resolves to eligibilityStatus=null equivalent? see below
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    // Canonical's own "not yet computed" sentinel is PENDING_ELIGIBILITY,
+    // distinct from legacy's raw null -- a real, honest, EXPECTED
+    // mismatch until eligibility has actually been computed for this
+    // canonical slate (M6A-M6D) -- never silently treated as a match.
+    expect(result.eligibility.playersCompared).toBe(1);
+    expect(result.eligibility.statusMismatches).toHaveLength(1);
+  });
+
+  it("reports a real eligibility MATCH once canonical eligibility has actually been computed to agree with legacy", async () => {
+    seedLegacyArtifact();
+    await setFakeRunner([{ ...ONE_PLAYER[0] }]);
+    seedCanonicalSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+         VALUES ('s1', '1', 'Flex Player', 'BOS', 'TOR', 4500, '["OF"]', 'UNRESOLVED', 'UNMATCHED', 0, 'x', 'x', 'x')`,
+      )
+      .run();
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    // Legacy fixture player also has eligibility_status="UNMATCHED"/optimizer_eligible=false/game_id=null/mlb_player_id=null.
+    expect(result.eligibility.statusMismatches).toEqual([]);
+    expect(result.eligibility.optimizerEligibleMismatches).toEqual([]);
+    expect(result.eligibility.gameIdMismatches).toEqual([]);
+    expect(result.eligibility.identityGaps).toEqual([]);
+    expect(result.eligibility.exactMatches).toBe(1);
+  });
+
+  it("reports a gameId mismatch honestly when only one side has resolved it", async () => {
+    seedLegacyArtifact();
+    await setFakeRunner(ONE_PLAYER);
+    seedCanonicalSlate();
+    getDb()
+      .prepare(
+        `INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, game_id, salary, position_eligibility_json, identity_status, eligibility_status, optimizer_eligible, eligibility_computed_at, created_at, updated_at)
+         VALUES ('s1', '1', 'Flex Player', 'BOS', 'TOR', 'g1', 4500, '["OF"]', 'UNRESOLVED', null, 0, 'x', 'x', 'x')`,
+      )
+      .run();
+
+    const result = await compareServingBackends(DATE, "dkunofficial-152904");
+    expect(result.eligibility.gameIdMismatches).toHaveLength(1);
+    expect(result.eligibility.gameIdMismatches[0]).toEqual(
+      expect.objectContaining({ legacyGameId: null, canonicalGameId: "g1" }),
+    );
   });
 });

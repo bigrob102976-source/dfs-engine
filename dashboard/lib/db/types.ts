@@ -363,6 +363,14 @@ export interface CanonicalSlatePlayerRow {
   position_eligibility_json: string | null;
   roster_slot_eligibility_json: string | null;
   identity_status: SlatePlayerIdentityStatus;
+  // M6D: additive real-MLB-lineup-eligibility columns (migrations/
+  // 0013_canonical_slate_player_eligibility.sql). NULL/null means "not
+  // yet computed" -- a distinct, honest state from any real
+  // dfs/eligibility.py status; never treated as assumed-eligible.
+  eligibility_status: string | null;
+  optimizer_eligible: number | null;
+  batting_order: number | null;
+  eligibility_computed_at: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -12,11 +12,48 @@ import { getBigMoneyMlProvenance, getMlProjectionByPlayerId } from "../mlProject
 import { getNativeProjectionByPlayerId } from "../nativeProjections";
 import { fingerprintChanged, lineupSetFingerprint } from "../orchestrator/artifacts";
 import { runPythonScript, tail } from "../orchestrator/pythonRunner";
+import { CanonicalPostgresServingBackend } from "../servingBackend/canonicalPostgresBackend";
 import { getStorage } from "../storage/getStorage";
 import type { LineupSet } from "../types";
+import { cleanupCanonicalPoolFile, materializeCanonicalPoolFile } from "./canonicalPoolMaterialization";
 import { parseLastJsonLine } from "./jsonLine";
 import { getCachedPoolPath } from "./poolCache";
 import type { OptimizerBuildRequest, OptimizerBuildResult, OptimizerCoverageSummary, OptimizerValidationResult } from "./types";
+
+interface ResolvedPoolSource {
+  poolPath: string;
+  ownershipPath: string | null;
+  cleanup: () => void;
+}
+
+/** M6I -- the ONE place that decides where a build's --pool file comes
+ * from. LEGACY_R2 (the default, and every pre-M6 request): unchanged --
+ * the existing in-process poolCache.ts Map, populated only by
+ * poolCache.ts::loadPool(). CANONICAL_POSTGRES (M6K: only ever reached
+ * for a request app/api/optimizer/build/route.ts has already
+ * authorized via resolveServingBackend() -- this function does not
+ * re-check authorization itself): re-loads the real canonical pool and
+ * materializes it into a temp dk_player_pool_<ts>.json-shaped file
+ * (M6J) so the SAME, unmodified scripts/optimize_dk_lineups.py can read
+ * it -- never a forked optimizer algorithm. Returns null when nothing
+ * is available (mirrors getCachedPoolPath's own "not loaded yet"
+ * contract exactly). The returned cleanup() is a no-op for LEGACY_R2
+ * (that pool file is the durable, already-persisted dk_player_pool_*.json
+ * artifact -- never deleted by a build) and removes the temp
+ * materialization directory for CANONICAL_POSTGRES. */
+async function resolvePoolSource(request: OptimizerBuildRequest): Promise<ResolvedPoolSource | null> {
+  if (request.servingBackend === "CANONICAL_POSTGRES") {
+    try {
+      const pool = await CanonicalPostgresServingBackend.getSlatePool(request.date, request.slateId);
+      const poolPath = materializeCanonicalPoolFile(pool);
+      return { poolPath, ownershipPath: null, cleanup: () => cleanupCanonicalPoolFile(poolPath) };
+    } catch {
+      return null;
+    }
+  }
+  const cached = getCachedPoolPath(request.date, request.slateId);
+  return cached ? { poolPath: cached.poolPath, ownershipPath: cached.ownershipPath, cleanup: () => {} } : null;
+}
 
 function parseCoverage(doc: Record<string, unknown> | null): OptimizerCoverageSummary | null {
   const raw = doc?.coverage as Record<string, unknown> | undefined;
@@ -203,13 +240,13 @@ function extractConfigurationError(stdout: string): string | null {
  * the CP-SAT solver. Returns [] when nothing was found wrong -- not a
  * feasibility guarantee, just the absence of a cheaply-detectable blocker. */
 export async function validateBuildRequest(request: OptimizerBuildRequest): Promise<OptimizerValidationResult> {
-  const cached = getCachedPoolPath(request.date, request.slateId);
-  if (!cached) {
+  const resolved = await resolvePoolSource(request);
+  if (!resolved) {
     return { errors: ["No player pool loaded for this slate yet -- select a slate first."], coverage: null };
   }
   const overridesPath = await writeProjectionOverridesFile(request);
   try {
-    const args = await buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, ["--validate-only"]);
+    const args = await buildArgv(request, resolved.poolPath, resolved.ownershipPath, overridesPath, ["--validate-only"]);
     const result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
     const doc = parseLastJsonLine(result.stdout);
     if (!doc) {
@@ -218,6 +255,7 @@ export async function validateBuildRequest(request: OptimizerBuildRequest): Prom
     return { errors: Array.isArray(doc.errors) ? (doc.errors as string[]) : [], coverage: parseCoverage(doc) };
   } finally {
     cleanupProjectionOverridesFile(overridesPath);
+    resolved.cleanup();
   }
 }
 
@@ -229,8 +267,8 @@ export async function validateBuildRequest(request: OptimizerBuildRequest): Prom
  * bypasses that. */
 export async function buildLineups(request: OptimizerBuildRequest): Promise<OptimizerBuildResult> {
   const startedAt = Date.now();
-  const cached = getCachedPoolPath(request.date, request.slateId);
-  if (!cached) {
+  const resolved = await resolvePoolSource(request);
+  if (!resolved) {
     return {
       ok: false,
       errors: ["No player pool loaded for this slate yet -- select a slate first."],
@@ -248,6 +286,7 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
 
   const pre = await validateBuildRequest(request);
   if (pre.errors.length > 0) {
+    resolved.cleanup();
     return {
       ok: false,
       errors: pre.errors,
@@ -267,10 +306,11 @@ export async function buildLineups(request: OptimizerBuildRequest): Promise<Opti
   const overridesPath = await writeProjectionOverridesFile(request);
   let result;
   try {
-    const args = await buildArgv(request, cached.poolPath, cached.ownershipPath, overridesPath, []);
+    const args = await buildArgv(request, resolved.poolPath, resolved.ownershipPath, overridesPath, []);
     result = await runPythonScript("scripts/optimize_dk_lineups.py", args);
   } finally {
     cleanupProjectionOverridesFile(overridesPath);
+    resolved.cleanup();
   }
   const after = await lineupSetFingerprint(request.date);
   const elapsedMs = Date.now() - startedAt;

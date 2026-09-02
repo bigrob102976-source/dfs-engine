@@ -232,6 +232,14 @@ export interface OptimizerBuildRequest {
   minConfidence: number | null;
   maxPlayerRisk: number | null;
   projectionSource: ProjectionSource;
+  // M6I/M6K: which serving backend produced (and must be used to
+  // re-resolve) this slate's pool. parseBuildRequest.ts only validates
+  // the SHAPE of this field -- app/api/optimizer/build/route.ts is
+  // where server-side authorization actually happens (same
+  // never-trust-the-client pattern as projectionSource's admin-only
+  // sources) -- never trust this field alone to mean the request is
+  // authorized for canonical serving.
+  servingBackend?: "LEGACY_R2" | "CANONICAL_POSTGRES";
 }
 
 /** Milestone 32.6 Part 2/3: how much of the pool actually made it into

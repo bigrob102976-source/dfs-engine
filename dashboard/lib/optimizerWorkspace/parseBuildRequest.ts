@@ -103,6 +103,15 @@ export function parseBuildRequest(body: unknown): ParseResult {
     return { ok: false, error: `"projectionSource" must be one of ${[...PROJECTION_SOURCES].join(", ")}.` };
   }
 
+  // M6I/M6K: shape-only validation -- authorization (is this USER
+  // allowed to build against CANONICAL_POSTGRES) happens server-side in
+  // app/api/optimizer/build/route.ts via resolveServingBackend(), the
+  // exact same gate list/pool already use. Never trust this field alone.
+  const servingBackend = b.servingBackend === undefined ? undefined : b.servingBackend;
+  if (servingBackend !== undefined && servingBackend !== "LEGACY_R2" && servingBackend !== "CANONICAL_POSTGRES") {
+    return { ok: false, error: "\"servingBackend\" must be \"LEGACY_R2\" or \"CANONICAL_POSTGRES\"." };
+  }
+
   return {
     ok: true,
     request: {
@@ -121,6 +130,7 @@ export function parseBuildRequest(body: unknown): ParseResult {
       minConfidence,
       maxPlayerRisk,
       projectionSource: projectionSource as OptimizerBuildRequest["projectionSource"],
+      servingBackend: servingBackend as OptimizerBuildRequest["servingBackend"],
     },
   };
 }

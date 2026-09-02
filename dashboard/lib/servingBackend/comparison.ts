@@ -33,6 +33,28 @@ export interface PlayerFieldComparison {
   canonicalPositions: string[];
 }
 
+// M6O -- eligibility parity is a SEPARATE comparison from M5D/M5E's own
+// core identity/salary/roster `match`/`differences` (kept unchanged
+// above for backward compatibility): legacy's eligibility comes from
+// dfs/player_resolver.py's own research-package name+team matching,
+// while canonical's comes from the player_identity/ crosswalk bridge
+// (canonical_ingestion/identity_bridge.py) -- two INDEPENDENT identity
+// systems that both eventually feed the SAME dfs/eligibility.py::
+// compute_eligibility(). Some genuine, explainable divergence between
+// them is expected and reported honestly here, never silently folded
+// into (or hidden from) the core M5 `match` signal above.
+export interface EligibilityFieldComparison {
+  dkPlayerId: string;
+  legacyEligibilityStatus: string | null;
+  canonicalEligibilityStatus: string | null;
+  legacyOptimizerEligible: boolean;
+  canonicalOptimizerEligible: boolean;
+  legacyGameId: string | null;
+  canonicalGameId: string | null;
+  legacyMlbPlayerId: string | null;
+  canonicalMlbPlayerId: string | null;
+}
+
 export interface SlateComparisonResult {
   date: string;
   slateId: string;
@@ -55,6 +77,17 @@ export interface SlateComparisonResult {
     positionMismatches: PlayerFieldComparison[];
     teamMismatches: PlayerFieldComparison[];
     opponentMismatches: PlayerFieldComparison[];
+  };
+  // M6O -- eligibility parity report, computed only for players present
+  // on BOTH sides (the M5-level missingInCanonical/missingInLegacy sets
+  // above already report identity gaps at the roster level).
+  eligibility: {
+    playersCompared: number;
+    exactMatches: number;
+    statusMismatches: EligibilityFieldComparison[];
+    optimizerEligibleMismatches: EligibilityFieldComparison[];
+    gameIdMismatches: EligibilityFieldComparison[];
+    identityGaps: EligibilityFieldComparison[]; // one side resolved an mlbPlayerId, the other didn't
   };
 }
 
@@ -88,6 +121,7 @@ export async function compareServingBackends(date: string, providerSlateId: stri
       slateNameMismatch: false, gameCountMismatch: false, playerCountMismatch: false, salaryCapMismatch: false, provenanceMismatch: false,
       missingInCanonical: [], missingInLegacy: [], salaryMismatches: [], positionMismatches: [], teamMismatches: [], opponentMismatches: [],
     },
+    eligibility: { playersCompared: 0, exactMatches: 0, statusMismatches: [], optimizerEligibleMismatches: [], gameIdMismatches: [], identityGaps: [] },
   };
 
   if (!legacyPool || !canonicalPool) return result;
@@ -122,6 +156,34 @@ export async function compareServingBackends(date: string, providerSlateId: stri
     if (sortedPositions(legacyPlayer.positions) !== sortedPositions(canonicalPlayer.positions)) result.differences.positionMismatches.push(field);
     if (legacyPlayer.team !== canonicalPlayer.team) result.differences.teamMismatches.push(field);
     if (legacyPlayer.opponent !== canonicalPlayer.opponent) result.differences.opponentMismatches.push(field);
+
+    // M6O: eligibility parity, for players present on both sides only.
+    result.eligibility.playersCompared += 1;
+    const eligField: EligibilityFieldComparison = {
+      dkPlayerId,
+      legacyEligibilityStatus: legacyPlayer.eligibilityStatus, canonicalEligibilityStatus: canonicalPlayer.eligibilityStatus,
+      legacyOptimizerEligible: legacyPlayer.optimizerEligible, canonicalOptimizerEligible: canonicalPlayer.optimizerEligible,
+      legacyGameId: legacyPlayer.gameId, canonicalGameId: canonicalPlayer.gameId,
+      legacyMlbPlayerId: legacyPlayer.mlbPlayerId, canonicalMlbPlayerId: canonicalPlayer.mlbPlayerId,
+    };
+    let eligExact = true;
+    if (legacyPlayer.eligibilityStatus !== canonicalPlayer.eligibilityStatus) {
+      result.eligibility.statusMismatches.push(eligField);
+      eligExact = false;
+    }
+    if (legacyPlayer.optimizerEligible !== canonicalPlayer.optimizerEligible) {
+      result.eligibility.optimizerEligibleMismatches.push(eligField);
+      eligExact = false;
+    }
+    if (legacyPlayer.gameId !== canonicalPlayer.gameId) {
+      result.eligibility.gameIdMismatches.push(eligField);
+      eligExact = false;
+    }
+    if ((legacyPlayer.mlbPlayerId === null) !== (canonicalPlayer.mlbPlayerId === null)) {
+      result.eligibility.identityGaps.push(eligField);
+      eligExact = false;
+    }
+    if (eligExact) result.eligibility.exactMatches += 1;
   }
 
   const d = result.differences;
@@ -141,22 +203,26 @@ export interface ParityReport {
   missingPlayers: number; // sum of missingInCanonical across all slates
   extraPlayers: number; // sum of missingInLegacy across all slates
   salaryMismatches: number;
-  eligibilityMismatchesNote: string;
+  // M6O: real eligibility parity aggregates (previously a fixed
+  // "not compared" note pre-M6 -- see EligibilityFieldComparison's own
+  // docstring for why some divergence between the two INDEPENDENT
+  // identity systems feeding eligibility is expected and honest, not
+  // necessarily a bug).
+  eligibilityPlayersCompared: number;
+  eligibilityExactMatches: number;
+  eligibilityStatusMismatches: number;
+  eligibilityOptimizerEligibleMismatches: number;
+  eligibilityGameIdMismatches: number;
+  eligibilityIdentityGaps: number;
   perSlate: SlateComparisonResult[];
   errors: string[];
 }
 
-/** M5E -- parity across every real, currently-listed Classic slate for
- * `date`. Compared against LEGACY's own slate list (the side with the
- * richer, already-customer-serving history) so a slate canonical hasn't
- * promoted yet shows up as a real, visible mismatch rather than being
- * silently skipped. "Eligibility mismatches" (asked for by M5E) is
- * reported as a fixed, EXPECTED, non-fatal note rather than a per-slate
- * count: canonical Postgres carries no lineup-confirmation data at all
- * in this milestone (see canonicalPostgresBackend.ts's scope-gap
- * docstring), so 100% of canonical players are, by construction, always
- * eligibilityStatus="CANONICAL_UNCONFIRMED" -- this is a disclosed,
- * out-of-scope-for-M5-parity gap, never counted toward `mismatches`. */
+/** M5E/M6O -- parity across every real, currently-listed Classic slate
+ * for `date`. Compared against LEGACY's own slate list (the side with
+ * the richer, already-customer-serving history) so a slate canonical
+ * hasn't promoted yet shows up as a real, visible mismatch rather than
+ * being silently skipped. */
 export async function compareAllServingBackendsForDate(date: string): Promise<ParityReport> {
   const legacyList = await LegacyR2ServingBackend.listSlates(date);
   const errors: string[] = [];
@@ -175,8 +241,12 @@ export async function compareAllServingBackendsForDate(date: string): Promise<Pa
     missingPlayers: perSlate.reduce((sum, c) => sum + c.differences.missingInCanonical.length, 0),
     extraPlayers: perSlate.reduce((sum, c) => sum + c.differences.missingInLegacy.length, 0),
     salaryMismatches: perSlate.reduce((sum, c) => sum + c.differences.salaryMismatches.length, 0),
-    eligibilityMismatchesNote:
-      "Not compared -- canonical Postgres carries no lineup-confirmation data in this milestone; every canonical player is CANONICAL_UNCONFIRMED by design (see canonicalPostgresBackend.ts). This is a disclosed M5M cutover-gate blocker, not counted as a mismatch.",
+    eligibilityPlayersCompared: perSlate.reduce((sum, c) => sum + c.eligibility.playersCompared, 0),
+    eligibilityExactMatches: perSlate.reduce((sum, c) => sum + c.eligibility.exactMatches, 0),
+    eligibilityStatusMismatches: perSlate.reduce((sum, c) => sum + c.eligibility.statusMismatches.length, 0),
+    eligibilityOptimizerEligibleMismatches: perSlate.reduce((sum, c) => sum + c.eligibility.optimizerEligibleMismatches.length, 0),
+    eligibilityGameIdMismatches: perSlate.reduce((sum, c) => sum + c.eligibility.gameIdMismatches.length, 0),
+    eligibilityIdentityGaps: perSlate.reduce((sum, c) => sum + c.eligibility.identityGaps.length, 0),
     perSlate,
     errors,
   };

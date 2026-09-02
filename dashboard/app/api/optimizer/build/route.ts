@@ -4,6 +4,7 @@ import { requireAuthApi } from "@/lib/auth/guards";
 import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { buildLineups } from "@/lib/optimizerWorkspace/buildRunner";
 import { parseBuildRequest } from "@/lib/optimizerWorkspace/parseBuildRequest";
+import { resolveServingBackend } from "@/lib/servingBackend/config";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,19 @@ export const dynamic = "force-dynamic";
  * successful build persists an immutable lineup set via the same
  * optimizer/persistence.py every other optimizer run in this project
  * uses. Milestone 29: any logged-in user (member or admin) may use the
- * optimizer -- "use optimizer" is explicitly a MEMBER-permitted action. */
+ * optimizer -- "use optimizer" is explicitly a MEMBER-permitted action.
+ *
+ * M6K: `servingBackend` is re-resolved server-side via the EXACT same
+ * resolveServingBackend() gate /api/optimizer/pool and /api/optimizer/
+ * slates already use, never trusting the client's own value -- a
+ * MEMBER's `servingBackend: "CANONICAL_POSTGRES"` is silently
+ * downgraded to "LEGACY_R2" here (the same silent-downgrade behavior
+ * those two routes already have, not a 403 -- consistent, not a new
+ * privilege-escalation surface either way). */
 export async function POST(request: Request) {
   const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
+  const user = userOrRes;
 
   let body: unknown;
   try {
@@ -47,6 +57,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "BlueCollar is an ADMIN/OWNER-only optimizer projection source." }, { status: 403 });
   }
 
-  const result = await buildLineups(parsed.request);
-  return NextResponse.json({ result }, { status: result.ok ? 200 : 422 });
+  const authorizedBackend = await resolveServingBackend(user, parsed.request.servingBackend ?? null);
+  const authorizedRequest = { ...parsed.request, servingBackend: authorizedBackend.kind };
+
+  const result = await buildLineups(authorizedRequest);
+  return NextResponse.json({ result, servingBackend: authorizedBackend.kind }, { status: result.ok ? 200 : 422 });
 }
