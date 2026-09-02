@@ -184,8 +184,8 @@ describe("PoolTable", () => {
     renderTable();
     const row = screen.getByText("Ace Pitcher").closest("tr")!;
     const cells = Array.from(row.querySelectorAll("td")).map((td) => td.textContent);
-    // Ord column is the 7th cell (Lock, Exclude, Pos, Name, Team, Opp, Ord, ...)
-    expect(cells[6]).toBe("");
+    // Ord column is the 8th cell (Lock, Exclude, Pos, Name, Team, Opp, Status, Ord, ...)
+    expect(cells[7]).toBe("");
   });
 
   it("does not show projection comparison columns by default", () => {
@@ -322,5 +322,50 @@ describe("PoolTable", () => {
     renderTable();
     fireEvent.click(screen.getByRole("button", { name: "Bravo Hitter" }));
     expect(screen.getByText(/No AI Projection generated yet/)).toBeInTheDocument();
+  });
+
+  describe("T1F: eligibility status column shows readable labels, never raw backend strings", () => {
+    const statusPlayers = [
+      player({ dkPlayerId: "d1", name: "Starter Hitter", eligibilityStatus: "STARTING_HITTER" }),
+      player({ dkPlayerId: "d2", name: "Starter Pitcher", eligibilityStatus: "STARTING_PITCHER" }),
+      player({ dkPlayerId: "d3", name: "Bench Guy", eligibilityStatus: "BENCH" }),
+      player({ dkPlayerId: "d4", name: "Reliever Guy", eligibilityStatus: "RELIEF_PITCHER" }),
+      player({ dkPlayerId: "d5", name: "Unconfirmed Guy", eligibilityStatus: "LINEUP_UNCONFIRMED" }),
+      player({ dkPlayerId: "d6", name: "Unmatched Guy", eligibilityStatus: "UNMATCHED" }),
+      player({ dkPlayerId: "d7", name: "No Status Guy", eligibilityStatus: null }),
+    ];
+
+    it("renders every real eligibility status as its readable label", () => {
+      render(
+        <PoolTable players={statusPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+      );
+      expect(screen.getByText("Starting")).toBeInTheDocument();
+      expect(screen.getByText("Starting Pitcher")).toBeInTheDocument();
+      expect(screen.getByText("Bench")).toBeInTheDocument();
+      expect(screen.getByText("Relief")).toBeInTheDocument();
+      expect(screen.getByText("Lineup Not Confirmed")).toBeInTheDocument();
+      expect(screen.getByText("Identity Unresolved")).toBeInTheDocument();
+      // Never the raw backend string anywhere in the table.
+      expect(screen.queryByText("STARTING_HITTER")).not.toBeInTheDocument();
+      expect(screen.queryByText("LINEUP_UNCONFIRMED")).not.toBeInTheDocument();
+      expect(screen.queryByText("UNMATCHED")).not.toBeInTheDocument();
+    });
+
+    it("never calls an unconfirmed player a starter", () => {
+      render(
+        <PoolTable players={statusPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+      );
+      const row = screen.getByText("Unconfirmed Guy").closest("tr")!;
+      expect(row.textContent).toContain("Lineup Not Confirmed");
+      expect(row.textContent).not.toContain("Starting");
+    });
+
+    it("a null eligibilityStatus (never computed) shows honestly, never fabricated as a real status", () => {
+      render(
+        <PoolTable players={statusPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+      );
+      const row = screen.getByText("No Status Guy").closest("tr")!;
+      expect(row.textContent).toContain("Not Computed");
+    });
   });
 });

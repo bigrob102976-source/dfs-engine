@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { POSITION_TABS, type PositionTab } from "@/lib/dkRosterRules";
+import { formatEligibilityStatus } from "@/lib/eligibilityLabels";
 import { sortRows, type SortDirection } from "@/lib/sortFilter";
 import type { PoolPlayerRow } from "@/lib/optimizerWorkspace/types";
 
@@ -22,6 +23,7 @@ const COLUMNS: Column[] = [
   { key: "name", label: "Name", sortKey: "name" },
   { key: "team", label: "Team", sortKey: "team" },
   { key: "opponent", label: "Opp", sortKey: "opponent" },
+  { key: "eligibilityStatus", label: "Status", sortKey: "eligibilityStatus" },
   { key: "battingOrder", label: "Ord", sortKey: "battingOrder", align: "right" },
   { key: "salary", label: "Salary", sortKey: "salary", align: "right" },
   { key: "projection", label: "Legacy", sortKey: "projection", align: "right" },
@@ -201,6 +203,17 @@ export function PoolTable({
                   </td>
                   <td className="px-2 py-1 text-text-muted">{p.team}</td>
                   <td className="px-2 py-1 text-text-muted">{p.opponent ?? "--"}</td>
+                  <td className="px-2 py-1">
+                    {(() => {
+                      const elig = formatEligibilityStatus(p.eligibilityStatus);
+                      const toneClass =
+                        elig.tone === "starting" ? "bg-green/15 text-green"
+                        : elig.tone === "bench" ? "bg-bg-panel-raised text-text-muted"
+                        : elig.tone === "unconfirmed" ? "bg-yellow/15 text-yellow"
+                        : "bg-red/10 text-red";
+                      return <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${toneClass}`}>{elig.label}</span>;
+                    })()}
+                  </td>
                   <td className="px-2 py-1 text-right text-text-muted">{p.playerType === "pitcher" ? "" : (p.battingOrder ?? "--")}</td>
                   <td className="px-2 py-1 text-right text-text">${p.salary.toLocaleString()}</td>
                   <td className="px-2 py-1 text-right text-text">{fmt(p.projection)}</td>

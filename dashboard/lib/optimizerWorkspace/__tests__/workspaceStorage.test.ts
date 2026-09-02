@@ -44,3 +44,15 @@ describe("workspaceStorage -- Milestone 31.2C selectedDate persistence", () => {
     expect(loaded?.selectedDate).toBeNull();
   });
 });
+
+describe("T1C: canonicalTestMode persistence", () => {
+  it("round-trips canonicalTestMode", () => {
+    saveWorkspaceState({ ...BASE, canonicalTestMode: true });
+    expect(loadWorkspaceState()?.canonicalTestMode).toBe(true);
+  });
+
+  it("is optional -- state persisted before T1 still loads cleanly (absent means legacy, unchanged from before)", () => {
+    window.localStorage.setItem("mlb-dfs-optimizer-workspace-v1", JSON.stringify(BASE));
+    expect(loadWorkspaceState()?.canonicalTestMode).toBeUndefined();
+  });
+});

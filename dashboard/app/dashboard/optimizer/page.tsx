@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getTodayChicagoDate } from "@/lib/currentDate";
 import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { listLineupSets } from "@/lib/loaders";
+import { userCanUseCanonicalServing } from "@/lib/servingBackend/config";
 import { isValidSlateDateString } from "@/lib/slateDate";
 import type { LineupSet } from "@/lib/types";
 
@@ -47,13 +48,25 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
   // BlueCollar Live Projection Integration: same ADMIN/OWNER-only
   // server-side gate ('mlb.bluecollar_optimizer', default ADMIN_ONLY).
   const canUseBlueCollar = await userCanSelectBlueCollarOptimizerSource(user);
+  // T1B/T1C: same pattern, gated by the EXISTING 'mlb.canonical_postgres_serving'
+  // ADMIN_ONLY flag (built in M5, never wired into any UI until now).
+  // This prop only controls whether the toggle is OFFERED; the three
+  // /api/optimizer/* routes already re-authorize every request
+  // server-side via resolveServingBackend() regardless of what a client
+  // sends.
+  const canUseCanonicalServing = await userCanUseCanonicalServing(user);
 
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold text-text">Optimizer</h1>
       <p className="mb-4 text-xs text-text-faint">Select a DFS slate date, configure constraints, and build lineups.</p>
 
-      <OptimizerWorkspace initialDate={initialDate} canUseBigMoneyMl={canUseBigMoneyMl} canUseBlueCollar={canUseBlueCollar} />
+      <OptimizerWorkspace
+        initialDate={initialDate}
+        canUseBigMoneyMl={canUseBigMoneyMl}
+        canUseBlueCollar={canUseBlueCollar}
+        canUseCanonicalServing={canUseCanonicalServing}
+      />
 
       {runs.length > 0 && (
         <div className="mt-8">

@@ -28,6 +28,14 @@ export interface PersistedWorkspaceState {
   // loads cleanly -- callers must default both when absent.
   projectionSource?: ProjectionSource;
   showProjectionComparison?: boolean;
+  // T1C -- ADMIN-only "Canonical Postgres Test" mode. Optional so state
+  // persisted before this milestone still loads cleanly (absent means
+  // legacy, exactly like before). Restoring `true` for a user who is no
+  // longer authorized (flag flipped, or a MEMBER somehow had it in
+  // localStorage) is harmless: the server re-checks authorization on
+  // every request (see lib/servingBackend/config.ts) and silently
+  // downgrades, it never trusts this persisted value alone.
+  canonicalTestMode?: boolean;
 }
 
 export function loadWorkspaceState(): PersistedWorkspaceState | null {

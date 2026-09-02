@@ -943,4 +943,102 @@ describe("OptimizerWorkspace", () => {
       expect(screen.queryByText(/applied from Stacks/)).not.toBeInTheDocument();
     });
   });
+
+  describe("T1B/T1C: Canonical Postgres admin test mode", () => {
+    it("never renders the toggle when canUseCanonicalServing is false (the default)", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.queryByText("Admin Test Mode: Canonical Slate Data")).not.toBeInTheDocument();
+    });
+
+    it("renders the toggle, off by default, when canUseCanonicalServing is true", async () => {
+      installFetchMock();
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      const toggle = screen.getByLabelText("Admin Test Mode: Canonical Slate Data") as HTMLInputElement;
+      expect(toggle).not.toBeChecked();
+      expect(screen.queryByText("Canonical Postgres (Admin Test)")).not.toBeInTheDocument();
+    });
+
+    it("checking the toggle sends servingBackend=CANONICAL_POSTGRES on the slates request and in the pool request body", async () => {
+      const { calls } = installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_RESULT, servingBackend: "CANONICAL_POSTGRES" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+
+      await waitFor(() => {
+        const slatesCall = calls.filter((c) => c.url.startsWith("/api/optimizer/slates")).at(-1);
+        expect(slatesCall).toBeDefined();
+        expect(slatesCall!.url).toContain("servingBackend=CANONICAL_POSTGRES");
+      });
+      await waitFor(() => {
+        const poolCall = calls.filter((c) => c.url === "/api/optimizer/pool").at(-1);
+        expect(poolCall).toBeDefined();
+        const body = JSON.parse(poolCall!.init!.body as string);
+        expect(body.servingBackend).toBe("CANONICAL_POSTGRES");
+      });
+      await waitFor(() => {
+        const validateCall = calls.filter((c) => c.url === "/api/optimizer/validate").at(-1);
+        expect(validateCall).toBeDefined();
+        const body = JSON.parse(validateCall!.init!.body as string);
+        expect(body.servingBackend).toBe("CANONICAL_POSTGRES");
+      });
+    });
+
+    it("shows the Canonical Postgres badge and disables Build with a clear message once the server confirms canonical is active", async () => {
+      installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_RESULT, servingBackend: "CANONICAL_POSTGRES" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+
+      await waitFor(() => expect(screen.getByText("Canonical Postgres (Admin Test)")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByText(/Big Money Native projections are not available for this slate yet/)).toBeInTheDocument();
+      expect(screen.getByText("Build Lineups")).toBeDisabled();
+      // Player data itself is NOT blocked -- Robert can still browse the pool.
+      expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument();
+      expect(screen.getByText("$4,000")).toBeInTheDocument();
+    });
+
+    it("a MEMBER-manipulated or stale request silently downgraded server-side to LEGACY_R2 is reflected honestly -- no canonical badge shown", async () => {
+      // Simulates the server authorizing LEGACY_R2 even though the client
+      // asked for CANONICAL_POSTGRES (e.g. the flag flipped mid-session) --
+      // resolveServingBackend() itself is unit-tested elsewhere; this only
+      // verifies the UI never claims canonical is active when it isn't.
+      installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_RESULT, servingBackend: "LEGACY_R2" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.queryByText("Canonical Postgres (Admin Test)")).not.toBeInTheDocument();
+      expect(screen.getByText("Build Lineups")).not.toBeDisabled();
+    });
+
+    it("a canonicalTestMode value persisted in localStorage while ADMIN never sticks once canUseCanonicalServing is false", async () => {
+      window.localStorage.setItem(
+        "mlb-dfs-optimizer-workspace-v1",
+        JSON.stringify({
+          selectedSlateId: "mock-main", locks: [], exclusions: [], maxExposure: {}, stackSize: null, stackTeam: null,
+          allowPitcherVsHitter: false, minSalary: null, minUnique: 2, lineups: 20, objective: "projection",
+          canonicalTestMode: true,
+        }),
+      );
+      const { calls } = installFetchMock();
+      render(<OptimizerWorkspace canUseCanonicalServing={false} />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.queryByText("Admin Test Mode: Canonical Slate Data")).not.toBeInTheDocument();
+      const poolCall = calls.filter((c) => c.url === "/api/optimizer/pool").at(-1);
+      const body = JSON.parse(poolCall!.init!.body as string);
+      expect(body.servingBackend).toBeUndefined();
+    });
+  });
 });

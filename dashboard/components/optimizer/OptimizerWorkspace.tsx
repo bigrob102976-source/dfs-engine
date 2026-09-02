@@ -86,10 +86,20 @@ function formatAgeMinutes(ageSeconds: number): string {
  * a stale/tampered client value here can never bypass it.
  *
  * BlueCollar Live Projection Integration: `canUseBlueCollar` is the same
- * pattern, resolved from 'mlb.bluecollar_optimizer' (default ADMIN_ONLY). */
+ * pattern, resolved from 'mlb.bluecollar_optimizer' (default ADMIN_ONLY).
+ *
+ * T1B/T1C: `canUseCanonicalServing` is the same pattern, resolved from
+ * the EXISTING 'mlb.canonical_postgres_serving' feature flag (default
+ * ADMIN_ONLY, built in M5). This prop only controls whether the "Admin
+ * Test Mode: Canonical Slate Data" toggle is OFFERED -- the three
+ * /api/optimizer/* routes already re-authorize `servingBackend` on
+ * every single request via resolveServingBackend(), so a MEMBER
+ * manipulating a request by hand (or a stale localStorage value from
+ * before a flag flip) can never actually reach canonical data; the
+ * server silently serves LEGACY_R2 instead. */
 export function OptimizerWorkspace({
-  initialDate = null, canUseBigMoneyMl = false, canUseBlueCollar = false,
-}: { initialDate?: string | null; canUseBigMoneyMl?: boolean; canUseBlueCollar?: boolean }) {
+  initialDate = null, canUseBigMoneyMl = false, canUseBlueCollar = false, canUseCanonicalServing = false,
+}: { initialDate?: string | null; canUseBigMoneyMl?: boolean; canUseBlueCollar?: boolean; canUseCanonicalServing?: boolean }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
@@ -141,6 +151,15 @@ export function OptimizerWorkspace({
   // a slate has no native snapshot yet, so this is never a silent trap.
   const [projectionSource, setProjectionSource] = useState<ProjectionSource>("native");
   const [showProjectionComparison, setShowProjectionComparison] = useState(false);
+  // T1B/T1C: ADMIN-only "Canonical Postgres Test" mode. `undefined` is
+  // sent (never "LEGACY_R2") when off, matching every existing caller's
+  // default/legacy behavior exactly.
+  const [canonicalTestMode, setCanonicalTestMode] = useState(false);
+  // T1L: reflects the backend the SERVER actually authorized and served
+  // for the most recent slates/pool response -- never just an echo of
+  // what was requested, so a silent server-side downgrade (flag flipped
+  // mid-session, session no longer admin) is visible rather than hidden.
+  const [activeServingBackend, setActiveServingBackend] = useState<"LEGACY_R2" | "CANONICAL_POSTGRES" | null>(null);
   // Milestone 32.4: BIG MONEY ML COVERAGE gate -- fetched only for ADMIN,
   // only once a pool is loaded, never blocks build/validate on its own.
   const [mlCoverage, setMlCoverage] = useState<BigMoneyMlCoverage | null>(null);
@@ -196,6 +215,10 @@ export function OptimizerWorkspace({
           (persistedSource === "big_money_ml" && !canUseBigMoneyMl) || (persistedSource === "bluecollar" && !canUseBlueCollar);
         setProjectionSource(persistedSourceUnreachable ? "native" : persistedSource);
         setShowProjectionComparison(persisted.showProjectionComparison ?? false);
+        // T1C: same "unreachable persisted value" guard as projectionSource
+        // above -- a MEMBER (or a flag flip since the last session) must
+        // never silently keep canonical test mode on.
+        setCanonicalTestMode(Boolean(persisted.canonicalTestMode) && canUseCanonicalServing);
       }
       setHydrated(true);
     });
@@ -290,10 +313,11 @@ export function OptimizerWorkspace({
       objective,
       projectionSource,
       showProjectionComparison,
+      canonicalTestMode,
     });
   }, [
     hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique,
-    lineups, objective, projectionSource, showProjectionComparison,
+    lineups, objective, projectionSource, showProjectionComparison, canonicalTestMode,
   ]);
 
   // 3. Discover the selected date's slates (Chicago-today when
@@ -308,14 +332,22 @@ export function OptimizerWorkspace({
         setSlatesLoading(true);
         setSlateUnavailableMessage(null);
         setSlatesValidated(false);
-        const url = selectedDate ? `/api/optimizer/slates?date=${encodeURIComponent(selectedDate)}` : "/api/optimizer/slates";
-        return fetch(url);
+        const params = new URLSearchParams();
+        if (selectedDate) params.set("date", selectedDate);
+        // T1B/T1C: only ever sent when the admin has explicitly turned
+        // canonical test mode on -- every other caller (the overwhelming
+        // majority of requests) omits this param entirely, identical to
+        // pre-T1 behavior.
+        if (canonicalTestMode) params.set("servingBackend", "CANONICAL_POSTGRES");
+        const qs = params.toString();
+        return fetch(`/api/optimizer/slates${qs ? `?${qs}` : ""}`);
       })
       .then((res) => res.json())
       .then((data) => {
         setSlateStatus(data.status ?? null);
         setSlateReason(data.reason ?? null);
         setProviderIsMock(Boolean(data.isMock));
+        setActiveServingBackend(data.servingBackend ?? null);
         const list: SlateOption[] = data.slates ?? [];
         setSlates(list);
         setSlatesLoading(false);
@@ -352,10 +384,13 @@ export function OptimizerWorkspace({
         setSlateStatus("unavailable");
         setSlatesValidated(true);
       });
-    // Runs right after hydration, and again whenever selectedDate changes
-    // -- deliberately not re-run on every selectedSlateId change (that's
-    // handled by the selectedSlateId effect below).
-  }, [hydrated, selectedDate]);
+    // Runs right after hydration, and again whenever selectedDate OR
+    // canonicalTestMode changes (T1C: toggling the backend must reload
+    // the slate list, since canonical/legacy can have different
+    // available DraftGroups) -- deliberately not re-run on every
+    // selectedSlateId change (that's handled by the selectedSlateId
+    // effect below).
+  }, [hydrated, selectedDate, canonicalTestMode]);
 
   // 4. Load the selected slate's player pool. Reconciles existing
   // locks/exclusions/exposures/stackTeam against the new pool (Milestone
@@ -373,12 +408,13 @@ export function OptimizerWorkspace({
         return fetch("/api/optimizer/pool", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slateId, date: selectedDate }),
+          body: JSON.stringify({ slateId, date: selectedDate, servingBackend: canonicalTestMode ? "CANONICAL_POSTGRES" : undefined }),
         });
       })
       .then((res) => res.json())
       .then((data) => {
         setPoolLoading(false);
+        setActiveServingBackend(data.servingBackend ?? null);
         if (data.error) {
           setPoolError(data.error);
           setPool(null);
@@ -429,18 +465,20 @@ export function OptimizerWorkspace({
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
-  }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam]);
+  }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam, canonicalTestMode]);
 
   useEffect(() => {
     // slatesValidated: never load a pool for a selectedSlateId that
     // hasn't been confirmed present in a freshly-fetched slate list yet
     // -- a persisted-from-localStorage ID restored at hydration is not
     // trustworthy until this component has actually checked it (see
-    // setSlatesValidated's own comment above).
+    // setSlatesValidated's own comment above). Also reloads on
+    // canonicalTestMode changing (T1C) so flipping the toggle re-fetches
+    // this exact same slate through the newly-selected backend.
     if (!hydrated || !selectedSlateId || !slatesValidated) return;
     loadPool(selectedSlateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, selectedSlateId, selectedDate, slatesValidated]);
+  }, [hydrated, selectedSlateId, selectedDate, slatesValidated, canonicalTestMode]);
 
   const buildRequestBody = useCallback(() => {
     const byId = new Map((pool?.players ?? []).map((p) => [p.dkPlayerId, p]));
@@ -465,10 +503,11 @@ export function OptimizerWorkspace({
       minSalary,
       minUnique,
       projectionSource,
+      servingBackend: canonicalTestMode ? ("CANONICAL_POSTGRES" as const) : undefined,
     };
   }, [
     pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary,
-    minUnique, projectionSource,
+    minUnique, projectionSource, canonicalTestMode,
   ]);
 
   // Milestone 17/20/23: if the newly-selected slate has no data for the
@@ -559,6 +598,7 @@ export function OptimizerWorkspace({
       .then((res) => res.json())
       .then((data) => {
         setBuilding(false);
+        setActiveServingBackend(data.servingBackend ?? null);
         const result: OptimizerBuildResult | undefined = data.result;
         if (!result || !result.ok) {
           setBuildErrors(result?.errors ?? [data.error ?? "Build failed."]);
@@ -594,6 +634,13 @@ export function OptimizerWorkspace({
 
   const selectedSlate = slates.find((s) => s.slateId === selectedSlateId) ?? null;
   const externalSourceLabel = resolveExternalSourceLabel(pool?.externalProviderName ?? null);
+  // T1K: canonical Postgres carries zero projections/ownership today (a
+  // disclosed, honest scope gap -- see M6/M8's own reports), so a real
+  // projection-based build can never succeed against it yet. Gated on
+  // the SERVER-confirmed active backend, never the client-side toggle
+  // alone, so this stays correct even if canonicalTestMode were somehow
+  // silently downgraded server-side.
+  const canonicalProjectionsUnavailable = activeServingBackend === "CANONICAL_POSTGRES";
 
   // Milestone 31.2C, Part 4/7: committing a date navigates to
   // ?date=... (persists across a page refresh, Part 7) -- 1c above then
@@ -652,6 +699,25 @@ export function OptimizerWorkspace({
           </select>
         </label>
 
+        {/* T1B/T1C: ADMIN-only. Never rendered at all for a non-admin --
+            the underlying capability is enforced server-side regardless,
+            but there is no reason to even show the control to anyone
+            who could never use it. */}
+        {canUseCanonicalServing && (
+          <label
+            className="flex items-center gap-1.5 rounded border border-purple/40 bg-purple/10 px-2 py-1 text-xs text-purple"
+            title="Admin-only: load this slate from the canonical Postgres data source instead of the normal legacy source. Members are never affected by this toggle."
+          >
+            <input type="checkbox" checked={canonicalTestMode} onChange={(e) => setCanonicalTestMode(e.target.checked)} />
+            Admin Test Mode: Canonical Slate Data
+          </label>
+        )}
+        {activeServingBackend === "CANONICAL_POSTGRES" && (
+          <span className="rounded bg-purple/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-purple">
+            Canonical Postgres (Admin Test)
+          </span>
+        )}
+
         {providerIsMock && <span className="rounded bg-yellow/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow">DEV / MOCK DATA</span>}
 
         {pool && pool.vegasCoverage.dkGames > 0 && (
@@ -695,7 +761,12 @@ export function OptimizerWorkspace({
             </select>
           </label>
 
-          <PrimaryButton onClick={handleBuild} disabled={!pool || building || validationErrors.length > 0} className="uppercase tracking-wide">
+          <PrimaryButton
+            onClick={handleBuild}
+            disabled={!pool || building || validationErrors.length > 0 || canonicalProjectionsUnavailable}
+            title={canonicalProjectionsUnavailable ? "Big Money Native projections are not available for this slate yet." : undefined}
+            className="uppercase tracking-wide"
+          >
             {building ? "Solving..." : "Build Lineups"}
           </PrimaryButton>
         </div>
@@ -899,6 +970,17 @@ export function OptimizerWorkspace({
       {pool && pool.dataStatus === "stale" && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">
           DraftKings data last updated {formatAgeMinutes(pool.artifactAgeSeconds)} ago.
+        </div>
+      )}
+      {/* T1J/T1K: canonical Postgres testing is explicitly about slate/
+          identity/eligibility data, not lineup building -- this is
+          intentional, not an error, so it's styled informational
+          (purple, matching the toggle above) rather than as a red
+          failure banner. */}
+      {pool && canonicalProjectionsUnavailable && (
+        <div className="rounded border border-purple/40 bg-purple/5 px-3 py-2 text-xs text-purple">
+          Big Money Native projections are not available for this slate yet. You can still browse players, salaries, positions, teams,
+          opponents, and eligibility -- Build Lineups is disabled in Canonical Postgres Test mode.
         </div>
       )}
 
