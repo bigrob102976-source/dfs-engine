@@ -50,8 +50,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from canonical.models import IDENTITY_STATUS_RESOLVED, IDENTITY_STATUS_REVIEW_REQUIRED, IDENTITY_STATUS_UNRESOLVED
+from canonical.slate_date import InvalidGameStartError, compute_slate_date_from_game_starts
 from canonical_ingestion.identity_bridge import load_name_team_index
-from canonical_ingestion.normalize import build_canonical_artifact
+from canonical_ingestion.normalize import NormalizationError, build_canonical_artifact
 from canonical_ingestion.normalized_storage import write_normalized_artifact
 from canonical_ingestion.raw_capture import RawCaptureRecorder, write_raw_capture
 from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
@@ -83,7 +84,7 @@ class ShadowIngestionResult:
 
 def build_normalized_from_fetch(
     *, sport: str, site: str, provider_name: str, slate_info, provider_players: List, recorder: RawCaptureRecorder,
-    date: str, fetched_at: Optional[str] = None,
+    fetched_at: Optional[str] = None,
 ) -> ShadowIngestionResult:
     """The shared core: RAW capture (from an ALREADY-POPULATED
     `recorder` -- no fetching happens here) through NORMALIZED R2
@@ -92,14 +93,39 @@ def build_normalized_from_fetch(
     scripts/fetch_dfs_slate.py (which populates `recorder` from the ONE
     real fetch it already performs for the legacy path -- see this
     module's own M3 REDESIGN docstring for why avoiding a second fetch
-    here matters). Never raises."""
+    here matters). Never raises.
+
+    M4A: the canonical RAW R2 partition is always the REAL,
+    independently computed America/New_York slateDate
+    (canonical/slate_date.py), derived from the actual fetched
+    game-start instants -- exactly like
+    canonical_ingestion.normalize.build_canonical_artifact's own
+    CanonicalSlate.slate_date already was. There used to be a `date`
+    parameter here that callers threaded through from their own
+    fetch-trigger date (Chicago, for fetch_dfs_slate.py's legacy
+    customer-facing path) and RAW's namespace used it directly, which
+    could diverge from the NORMALIZED artifact's slateDate during the
+    Chicago/Eastern rollover window (the same ~1-hour mismatch M0's
+    audit first identified). That parameter is gone -- RAW and
+    NORMALIZED now always agree, independent of whatever date the
+    caller used to trigger the fetch."""
     try:
         storage = resolve_artifact_storage(ARTIFACT_ROOT)
         provider_slate_id = slate_info.slate_id
         fetched_at = fetched_at or datetime.now(timezone.utc).isoformat()
 
+        game_start_instants = [p.start_time for p in provider_players if p.start_time]
+        if not game_start_instants:
+            raise NormalizationError(
+                f"No game-start instants available for {provider_name}:{provider_slate_id} -- refusing to fabricate a slateDate."
+            )
+        try:
+            canonical_slate_date = compute_slate_date_from_game_starts(game_start_instants)
+        except InvalidGameStartError as exc:
+            raise NormalizationError(str(exc)) from exc
+
         raw_result = write_raw_capture(
-            storage, sport=sport, slate_date=date, provider=provider_name, provider_slate_id=provider_slate_id,
+            storage, sport=sport, slate_date=canonical_slate_date, provider=provider_name, provider_slate_id=provider_slate_id,
             recorder=recorder, fetched_at=fetched_at,
         )
 
@@ -162,7 +188,7 @@ def ingest_slate_shadow(*, date: str, provider_slate_id: str, sport: str = "MLB"
         provider_players = fetch_result.players_by_slate.get(slate_info.slate_id, [])
         return build_normalized_from_fetch(
             sport=sport, site=site, provider_name=provider.name, slate_info=slate_info, provider_players=provider_players,
-            recorder=recorder, date=date,
+            recorder=recorder,
         )
     except Exception as exc:  # noqa: BLE001 -- M2I/M3C: report, never let a shadow-path failure propagate
         return ShadowIngestionResult(

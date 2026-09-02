@@ -77,6 +77,46 @@ def test_slate_not_found_reported_not_raised(monkeypatch, patched_storage):
     assert result.error_type == "slate_not_found"
 
 
+def _fake_get_slate_chicago_eastern_mismatch(self, *args, **kwargs):
+    # 2026-08-21T04:30:00Z = 00:30 ET on 2026-08-21 (already "tomorrow"
+    # in Eastern) but still 23:30 CT on 2026-08-20 in Chicago -- the
+    # same ~1-hour rollover window canonical/slate_date.py's own
+    # test_eastern_chicago_one_hour_rollover_window covers at the pure
+    # function level. Here the caller's own fetch-trigger `date` is
+    # deliberately the CHICAGO-computed "2026-08-20" (what
+    # fetch_dfs_slate.py's wrapper would pass near this exact window),
+    # to prove RAW's own R2 namespace no longer follows it.
+    slate = ProviderSlateInfo(
+        slate_id="dkunofficial-999001", slate_name="Main", site="draftkings", sport="MLB",
+        start_time="2026-08-21T04:30:00Z", game_count=1, game_ids=["g1"], player_count=1,
+        source_provenance=DRAFTKINGS_UNOFFICIAL_LIVE,
+    )
+    player = ProviderPlayer(
+        external_player_id="1", name="Late Game Player", team="LAD", opponent="SD", game="SD@LAD",
+        salary=4000, position_eligibility=["OF"], slate_id="dkunofficial-999001", slate_name="Main",
+        start_time="2026-08-21T04:30:00Z", source="draftkings_unofficial", retrieved_at="2026-08-20T23:30:00Z",
+    )
+    capture = kwargs.get("capture")
+    if capture is not None:
+        capture("https://api.draftkings.com/draftgroups/v1/draftgroups/999001/draftables", '{"draftables":[{"id":1}]}')
+    return ProviderSlateResult(slates=[slate], players_by_slate={"dkunofficial-999001": [player]}, source="draftkings_unofficial", retrieved_at="2026-08-20T23:30:00.000Z")
+
+
+def test_m4a_raw_namespace_follows_eastern_slate_date_not_the_callers_chicago_date(monkeypatch, patched_storage):
+    monkeypatch.setattr(DraftKingsUnofficialProvider, "get_slate", _fake_get_slate_chicago_eastern_mismatch)
+    monkeypatch.setattr(pipeline_module, "load_name_team_index", lambda: {})
+
+    # The caller passes "2026-08-20" -- its own Chicago-computed "today"
+    # for this fetch-trigger window -- but the real first-game-start
+    # instant is already 2026-08-21 in America/New_York.
+    result = pipeline_module.ingest_slate_shadow(date="2026-08-20", provider_slate_id="dkunofficial-999001")
+
+    assert result.ok is True
+    assert "2026-08-21" in result.raw_manifest_key  # RAW follows the REAL Eastern slateDate
+    assert "2026-08-20" not in result.raw_manifest_key  # never the caller's own Chicago-tainted date
+    assert "2026-08-21" in result.normalized_key  # NORMALIZED already agreed before this fix -- still does
+
+
 def test_repeated_ingestion_of_unchanged_slate_is_semantic_duplicate(monkeypatch, patched_storage):
     monkeypatch.setattr(DraftKingsUnofficialProvider, "get_slate", _fake_get_slate)
     monkeypatch.setattr(pipeline_module, "load_name_team_index", lambda: {})

@@ -332,6 +332,70 @@ describe("promoteCanonicalArtifact", () => {
     expect(row).toBeUndefined(); // the slates insert was rolled back too, even though it succeeded on its own
   });
 
+  describe("M4E: slateDate immutability on reschedule", () => {
+    it("a reschedule that shifts the computed slateDate does NOT move the stored slate_date", async () => {
+      const db = getExecutor();
+      const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+      expect(first.promoted).toBe(true);
+      expect(first.slateDateImmutabilityHeld).toBeUndefined(); // brand-new row -- nothing to hold against
+
+      const rescheduled = baseArtifact();
+      rescheduled.slate.firstGameStartUtc = "2026-09-02T03:05:00Z"; // now the earliest EASTERN calendar date is 2026-09-01, not 2026-08-31
+      rescheduled.slate.slateDate = "2026-09-01"; // as a real caller's own compute_slate_date_from_game_starts() would newly compute
+      rescheduled.normalizedHash = "norm-hash-rescheduled";
+      rescheduled.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      const second = await promoteCanonicalArtifact(db, rescheduled, opts());
+
+      expect(second.promoted).toBe(true);
+      expect(second.internalSlateId).toBe(first.internalSlateId); // same canonical identity, never re-minted
+      expect(second.slateDateImmutabilityHeld).toEqual({ storedSlateDate: "2026-08-31", incomingSlateDate: "2026-09-01" });
+
+      const slateRow = getDb().prepare("SELECT slate_date FROM slates WHERE internal_slate_id = ?").get(first.internalSlateId!) as { slate_date: string };
+      expect(slateRow.slate_date).toBe("2026-08-31"); // pinned to the FIRST assignment, never repartitioned
+
+      const rows = getDb().prepare("SELECT COUNT(*) as c FROM slates WHERE provider_slate_id = '152904'").get() as { c: number };
+      expect(rows.c).toBe(1); // no duplicate canonical slate created for the "new" date
+    });
+
+    it("a same-date time change (no calendar-day shift) reports no immutability event", async () => {
+      const db = getExecutor();
+      await promoteCanonicalArtifact(db, baseArtifact(), opts());
+
+      const laterSameDay = baseArtifact();
+      laterSameDay.slate.firstGameStartUtc = "2026-09-01T01:05:00Z"; // still 2026-08-31 Eastern
+      laterSameDay.normalizedHash = "norm-hash-later-same-day";
+      laterSameDay.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      const result = await promoteCanonicalArtifact(db, laterSameDay, opts());
+
+      expect(result.promoted).toBe(true);
+      expect(result.slateDateImmutabilityHeld).toBeUndefined();
+    });
+
+    it("immutability is held even for a semantic-duplicate no-op re-ingestion after a reschedule was already recorded", async () => {
+      const db = getExecutor();
+      const first = await promoteCanonicalArtifact(db, baseArtifact(), opts());
+
+      const rescheduled = baseArtifact();
+      rescheduled.slate.slateDate = "2026-09-01";
+      rescheduled.normalizedHash = "norm-hash-rescheduled";
+      rescheduled.slate.fetchedAt = "2026-08-31T22:00:00.000Z";
+      await promoteCanonicalArtifact(db, rescheduled, opts());
+
+      // A repeat ingestion of the SAME rescheduled content (identical
+      // normalizedHash) is a semantic no-op, but must still surface the
+      // held immutability against the ORIGINAL stored slate_date.
+      const repeat = baseArtifact();
+      repeat.slate.slateDate = "2026-09-01";
+      repeat.normalizedHash = "norm-hash-rescheduled";
+      const result = await promoteCanonicalArtifact(db, repeat, opts());
+
+      expect(result.promoted).toBe(false);
+      expect(result.reason).toMatch(/no-op/);
+      expect(result.slateDateImmutabilityHeld).toEqual({ storedSlateDate: "2026-08-31", incomingSlateDate: "2026-09-01" });
+      expect(result.internalSlateId).toBe(first.internalSlateId);
+    });
+  });
+
   describe("M3I: verifyNormalizedHash (rehydration hardening)", () => {
     it("accepts a valid, untampered artifact", async () => {
       const db = getExecutor();

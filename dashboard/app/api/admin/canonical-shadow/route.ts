@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/auth/guards";
-import { listIdentityReviewQueue, listShadowSlateStatuses } from "@/lib/db/canonicalShadowStatus";
+import { getTomorrowPrefetchSummary, listIdentityReviewQueue, listShadowSlateStatuses } from "@/lib/db/canonicalShadowStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +16,11 @@ export async function GET() {
   const userOrRes = await requireAdminApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
-  const [slates, reviewQueue] = await Promise.all([
+  const [slates, reviewQueue, tomorrowPrefetch] = await Promise.all([
     listShadowSlateStatuses(),
     listIdentityReviewQueue("PENDING"),
+    getTomorrowPrefetchSummary(),
   ]);
 
-  return NextResponse.json({ slates, reviewQueue });
+  return NextResponse.json({ slates, reviewQueue, tomorrowPrefetch });
 }

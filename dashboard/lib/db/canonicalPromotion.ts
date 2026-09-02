@@ -67,6 +67,16 @@ export interface PromotionResult {
   reason: string;
   internalSlateId?: string;
   reviewQueueEntriesCreated?: number;
+  /** M4E: set when this canonical slate already existed AND the
+   * incoming artifact's own computed slateDate differs from the
+   * slateDate already stored for it (e.g. a game postponement/
+   * reschedule shifted the true first-game-start instant across a
+   * calendar boundary). The stored slateDate is NEVER overwritten --
+   * see the ON CONFLICT clauses below, which deliberately omit
+   * slate_date -- this field exists purely so a caller can observe and
+   * report the mismatch (M4G "report what changed if practical")
+   * without it ever being treated as a promotion failure. */
+  slateDateImmutabilityHeld?: { storedSlateDate: string; incomingSlateDate: string };
 }
 
 /** Denormalized, informational index column only -- NOT used for any
@@ -201,7 +211,7 @@ async function recordRejectedAttempt(db: SqlExecutor, artifact: CanonicalSlateAr
        created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, 1, ?, ?, ?, ?)
      ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
-       slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
+       slate_name = excluded.slate_name, first_game_start_utc = excluded.first_game_start_utc,
        game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
        roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
        validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
@@ -253,19 +263,28 @@ export async function promoteCanonicalArtifact(
 
   return db.transaction(async (tx) => {
     const slate = artifact.slate;
-    const existing = await tx.get<{ internal_slate_id: string; fetched_at: string | null; normalized_hash: string | null }>(
-      "SELECT internal_slate_id, fetched_at, normalized_hash FROM slates WHERE sport = ? AND site = ? AND provider = ? AND provider_slate_id = ?",
+    const existing = await tx.get<{ internal_slate_id: string; fetched_at: string | null; normalized_hash: string | null; slate_date: string }>(
+      "SELECT internal_slate_id, fetched_at, normalized_hash, slate_date FROM slates WHERE sport = ? AND site = ? AND provider = ? AND provider_slate_id = ?",
       [slate.sport, slate.site, slate.provider, slate.providerSlateId],
     );
+    // M4E: providerSlateId identity is looked up (immediately above)
+    // BEFORE any slateDate decision is made, and the stored slate_date
+    // is never included in the ON CONFLICT DO UPDATE SET clause below --
+    // a game reschedule/postponement that shifts the newly computed
+    // slateDate is recorded here for observability only, never applied.
+    const slateDateImmutabilityHeld =
+      existing && existing.slate_date !== slate.slateDate
+        ? { storedSlateDate: existing.slate_date, incomingSlateDate: slate.slateDate }
+        : undefined;
 
     if (existing && !options.force) {
       if (existing.normalized_hash != null && existing.normalized_hash === artifact.normalizedHash) {
         await recordNoOpAttempt(tx, existing.internal_slate_id);
-        return { promoted: false, reason: "identical normalizedHash to the currently-promoted version -- semantic no-op.", internalSlateId: existing.internal_slate_id };
+        return { promoted: false, reason: "identical normalizedHash to the currently-promoted version -- semantic no-op.", internalSlateId: existing.internal_slate_id, slateDateImmutabilityHeld };
       }
       if (existing.fetched_at && slate.fetchedAt && existing.fetched_at > slate.fetchedAt) {
         await recordNoOpAttempt(tx, existing.internal_slate_id);
-        return { promoted: false, reason: "incoming artifact is older than the currently-promoted version -- CURRENT not moved backward.", internalSlateId: existing.internal_slate_id };
+        return { promoted: false, reason: "incoming artifact is older than the currently-promoted version -- CURRENT not moved backward.", internalSlateId: existing.internal_slate_id, slateDateImmutabilityHeld };
       }
     }
 
@@ -315,7 +334,7 @@ export async function promoteCanonicalArtifact(
          created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (sport, site, provider, provider_slate_id) DO UPDATE SET
-         slate_name = excluded.slate_name, slate_date = excluded.slate_date, first_game_start_utc = excluded.first_game_start_utc,
+         slate_name = excluded.slate_name, first_game_start_utc = excluded.first_game_start_utc,
          game_count = excluded.game_count, game_ids_json = excluded.game_ids_json, salary_cap = excluded.salary_cap,
          roster_template_json = excluded.roster_template_json, source_provenance = excluded.source_provenance,
          validation_state = excluded.validation_state, validation_findings_json = excluded.validation_findings_json,
@@ -365,6 +384,7 @@ export async function promoteCanonicalArtifact(
       reason: existing ? "Updated existing canonical slate." : "Created new canonical slate.",
       internalSlateId,
       reviewQueueEntriesCreated,
+      slateDateImmutabilityHeld,
     };
   });
 }

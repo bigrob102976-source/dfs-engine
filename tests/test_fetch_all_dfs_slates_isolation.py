@@ -36,6 +36,11 @@ def _run_main(monkeypatch, slate_ids, run_side_effect):
 
     monkeypatch.setattr(fetch_all, "get_configured_provider", lambda date: (FakeProvider(), None, "explicit"))
     monkeypatch.setattr(fetch_all.subprocess, "run", run_side_effect)
+    # M4: this file's own scope is TODAY's per-slate isolation only --
+    # tomorrow-prefetch has its own dedicated test file
+    # (test_fetch_all_dfs_slates_tomorrow_prefetch.py). Stub it out here
+    # so these tests never make a real network call.
+    monkeypatch.setattr(fetch_all, "prefetch_future_slates", lambda **kwargs: {"date": "2026-09-02", "status": "NOT_YET_PUBLISHED", "slates": []})
     monkeypatch.setattr("sys.argv", ["fetch_all_dfs_slates.py", "--date", "2026-09-01"])
 
 

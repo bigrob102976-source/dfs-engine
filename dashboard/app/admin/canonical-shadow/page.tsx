@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/ui/Header";
 import { Card } from "@/components/ui/Card";
-import { listIdentityReviewQueue, listShadowSlateStatuses } from "@/lib/db/canonicalShadowStatus";
+import { getTomorrowPrefetchSummary, listIdentityReviewQueue, listShadowSlateStatuses, type PrefetchState } from "@/lib/db/canonicalShadowStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +10,12 @@ function fmtAge(seconds: number | null): string {
   const minutes = Math.round(seconds / 60);
   if (minutes < 90) return `${minutes}m`;
   return `${Math.round(minutes / 60)}h`;
+}
+
+function prefetchBadgeClass(state: PrefetchState): string {
+  if (state === "FUTURE_PREFETCHED") return "text-yellow";
+  if (state === "TODAY_CURRENT") return "text-green";
+  return "text-text-faint";
 }
 
 function shortHash(hash: string | null): string {
@@ -25,23 +31,54 @@ function shortHash(hash: string | null): string {
  * touches a database URL, Railway variable, API key, or storage
  * credential. */
 export default async function AdminCanonicalShadowPage() {
-  const [slates, reviewQueue] = await Promise.all([
+  const [slates, reviewQueue, tomorrowPrefetch] = await Promise.all([
     listShadowSlateStatuses(),
     listIdentityReviewQueue("PENDING"),
+    getTomorrowPrefetchSummary(),
   ]);
 
   return (
     <div>
       <PageHeader
         title="Canonical Shadow Ingestion"
-        description="Read-only observability over the M2/M3 shadow pipeline (RAW/NORMALIZED R2 -> Postgres shadow CURRENT). Never affects the customer-facing legacy R2 serving path."
+        description="Read-only observability over the M2/M3/M4 shadow pipeline (RAW/NORMALIZED R2 -> Postgres shadow CURRENT). Never affects the customer-facing legacy R2 serving path."
       />
 
-      <Card className="overflow-x-auto p-4">
-        <table className="w-full min-w-[1100px] text-left text-xs">
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-text-faint">Tomorrow Prefetch (America/New_York)</div>
+            <div className="mt-1 text-sm">
+              <span className="tabular-nums">{tomorrowPrefetch.date}</span> --{" "}
+              <span className={tomorrowPrefetch.status === "FUTURE_PREFETCHED" ? "font-semibold text-yellow" : "text-text-faint"}>
+                {tomorrowPrefetch.status}
+              </span>
+            </div>
+          </div>
+          <div className="text-xs text-text-faint">{tomorrowPrefetch.slates.length} slate(s) prefetched</div>
+        </div>
+        {tomorrowPrefetch.slates.length > 0 && (
+          <ul className="mt-3 space-y-1 text-xs">
+            {tomorrowPrefetch.slates.map((s) => (
+              <li key={s.internal_slate_id} className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>{s.slate_name ?? s.provider_slate_id}</span>
+                <span className="text-text-faint">DraftGroup {s.provider_slate_id}</span>
+                <span className="text-text-faint">first game {s.first_game_start_utc}</span>
+                <span className="text-text-faint">{s.player_count ?? "--"} players</span>
+                <span className="text-text-faint">age {fmtAge(s.ageSeconds)}</span>
+                <span className="font-mono text-text-faint">{shortHash(s.normalized_hash)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card className="mt-4 overflow-x-auto p-4">
+        <table className="w-full min-w-[1150px] text-left text-xs">
           <thead>
             <tr className="border-b border-border text-text-faint">
               <th className="p-2">Slate Date</th>
+              <th className="p-2">Prefetch</th>
               <th className="p-2">Sport</th>
               <th className="p-2">Provider</th>
               <th className="p-2">DraftGroup</th>
@@ -66,6 +103,7 @@ export default async function AdminCanonicalShadowPage() {
             {slates.map((s) => (
               <tr key={s.internal_slate_id} className="border-b border-border/50 align-top">
                 <td className="p-2 tabular-nums">{s.slate_date}</td>
+                <td className={`p-2 font-semibold ${prefetchBadgeClass(s.prefetchState)}`}>{s.prefetchState}</td>
                 <td className="p-2">{s.sport}</td>
                 <td className="p-2">{s.provider}</td>
                 <td className="p-2">{s.provider_slate_id}</td>
@@ -90,7 +128,7 @@ export default async function AdminCanonicalShadowPage() {
             ))}
             {slates.length === 0 && (
               <tr>
-                <td colSpan={19} className="p-4 text-center text-text-faint">
+                <td colSpan={20} className="p-4 text-center text-text-faint">
                   No canonical shadow ingestion attempts recorded yet.
                 </td>
               </tr>

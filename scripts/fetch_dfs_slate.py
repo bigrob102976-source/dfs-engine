@@ -257,12 +257,13 @@ def _run_canonical_shadow_and_promotion(date: str, sport: str, site: str, chosen
     provider_players = fetch_result.players_by_slate.get(chosen_slate_info.slate_id, [])
     shadow_result = build_normalized_from_fetch(
         sport=sport, site=site, provider_name="draftkings_unofficial", slate_info=chosen_slate_info,
-        provider_players=provider_players, recorder=recorder, date=date,
+        provider_players=provider_players, recorder=recorder,
     )
     print("\n--- canonical shadow ingestion ---")
     print(json.dumps(shadow_result.to_dict(), indent=2, default=str))
 
     status = shadow_result.to_dict()
+    status["collection_date"] = date  # M4: the caller's own fetch-trigger date/window (e.g. "today" vs "tomorrow"), for observability only -- never used for RAW/NORMALIZED partitioning
     status["promotion"] = None
 
     if not shadow_result.ok:
