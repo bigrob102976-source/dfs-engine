@@ -11,23 +11,32 @@ import type { OptimizerPoolResult, PoolPlayerRow } from "./types";
 // to_dict() produces, so scripts/optimize_dk_lineups.py (unmodified,
 // same CP-SAT solver every legacy build already uses) can read it via
 // its existing --pool <path> flag -- never a forked/divergent optimizer
-// algorithm (M6I). projection/ceiling/floor are ALWAYS null here --
-// canonical Postgres has no projection source in this milestone, and
-// this bridge must never fabricate one (M6M) -- scripts/
-// optimize_dk_lineups.py's own _build_optimizer_players() correctly
-// (and honestly) excludes every such player from the solver.
-
+// algorithm (M6I).
+//
+// MLB FINISH MODE Phase B/D: projection/ceiling/floor were ALWAYS null
+// here through M6-M8 (canonical Postgres had no projection source in
+// those milestones) -- now that canonicalPostgresBackend.ts's own
+// poolPlayerRowFromCanonical() populates real Big Money Native values
+// (via canonicalProjections.ts), this function simply passes those real
+// values through unchanged. Still never fabricates: a player with no
+// persisted projection row (unresolved identity, or the Native engine
+// genuinely has no coverage for them) keeps null here exactly as
+// before, and scripts/optimize_dk_lineups.py's own
+// _build_optimizer_players() continues to correctly (and honestly)
+// exclude any such player from the solver -- same real, unmodified
+// exclusion behavior, just now with real data feeding it instead of an
+// always-empty pool.
 function dfsPlayerDict(p: PoolPlayerRow): Record<string, unknown> {
   return {
     dk_player_id: p.dkPlayerId, name: p.name, team: p.team, player_type: p.playerType,
     dk_positions: p.positions, salary: p.salary,
     mlb_player_id: p.mlbPlayerId, opponent: p.opponent, game_id: p.gameId,
     batting_order: p.battingOrder, throwing_hand: null, batting_hand: null,
-    projection: null, ceiling: null, floor: null,
-    overall_score: null, risk_score: null, confidence: null,
-    tags: [], reasons: [],
+    projection: p.projection, ceiling: p.ceiling, floor: p.nativeFloor,
+    overall_score: null, risk_score: null, confidence: p.nativeConfidence,
+    tags: [], reasons: p.nativeReasons ?? [],
     season_sample_size: null, recent_sample_size: null,
-    source_model_type: null, source_model_version: null,
+    source_model_type: p.playerType, source_model_version: null,
     prediction_generated_at_utc: null, prediction_generated_at_local: null, prediction_snapshot_path: null,
     lineup_status: p.lineupStatus, match_status: p.matchStatus, match_confidence: null,
     eligibility_status: p.eligibilityStatus, optimizer_eligible: p.optimizerEligible,

@@ -1,5 +1,7 @@
 import { getExecutor } from "../db/executor";
+import { getCanonicalOwnershipForSlate, type CanonicalOwnershipRow } from "../db/canonicalOwnership";
 import { resolveMlbPlayerIds } from "../db/canonicalPlayerIdentity";
+import { getCanonicalProjectionsForSlate, type CanonicalProjectionRow } from "../db/canonicalProjections";
 import type { CanonicalSlatePlayerRow, CanonicalSlateRow } from "../db/types";
 import { computeBlueCollarCoverage } from "../blueCollarProjections";
 import { DK_CLASSIC_SALARY_CAP } from "../dkRosterRules";
@@ -25,16 +27,16 @@ import type { SlateServingBackend } from "./types";
 // an assumed-eligible default (M6 rule #9: do not mark every DK
 // draftable optimizerEligible=true).
 //
-// REMAINING HONEST SCOPE GAP, disclosed here and in the M6 final report:
-// canonical Postgres still has NO projection/ownership/AI/ML/BlueCollar
-// enrichment (those are all separate file-based artifacts keyed by
-// mlbPlayerId, entirely independent of which salary/roster source is
-// used, and are simply absent here -- never fabricated, per M5/M6 rule
-// #4). A canonical-served pool can therefore have real, non-fabricated
-// eligibility now, but still cannot run a real projection-objective
-// optimizer build (see dashboard/lib/optimizerWorkspace/buildRunner.ts's
-// own M6I/M6M docstring) -- this remains a documented blocker for the
-// M5M/M6 cutover gate.
+// MLB FINISH MODE Phase B/D: `projection`/`ceiling`/`ownership`/`leverage`
+// (and their native* mirrors) now come from REAL, persisted Big Money
+// Native / ownership computations (lib/db/canonicalProjections.ts,
+// lib/db/canonicalOwnership.ts) -- both bridges reuse the real,
+// unmodified Python models exactly like eligibility already does, keyed
+// by provider_player_id (DK id) so a player is never excluded here just
+// because their historical identity hasn't resolved. AI/FantasyPros/
+// BlueCollar/ML remain intentionally absent (rule #2: never an automatic
+// customer fallback source) -- their fields stay honestly null/false,
+// never fabricated.
 
 const DEFAULT_SPORT = "MLB";
 const DEFAULT_SITE = "draftkings";
@@ -178,8 +180,24 @@ export async function canonicalListSlates(date: string, sport: string = DEFAULT_
   };
 }
 
-function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: string | null): PoolPlayerRow {
+// MLB FINISH MODE Phase B/D -- `projection`/`ceiling` below (and the
+// mirrored `nativeProjection`/`nativeCeiling`/`nativeFloor` fields) come
+// from a REAL, persisted Big Money Native computation (canonicalProjections.ts)
+// keyed by provider_player_id (DK id) -- Big Money Native IS this
+// codebase's public/default projection source (rule #1), so `projection`
+// is populated from it directly rather than staying a separate
+// "Independent" baseline concept canonical never had. A player with no
+// persisted row here (unresolved identity, or genuinely outside the
+// Native engine's coverage) still gets `null`, never a fabricated value
+// -- the exact same honest-absence contract every other field on this
+// row already uses.
+function poolPlayerRowFromCanonical(
+  row: CanonicalSlatePlayerRow, mlbPlayerId: string | null,
+  projectionRow: CanonicalProjectionRow | undefined, ownershipRow: CanonicalOwnershipRow | undefined,
+): PoolPlayerRow {
   const positions = parseJsonArray(row.position_eligibility_json);
+  const projection = projectionRow?.projection ?? null;
+  const ceiling = projectionRow?.ceiling ?? null;
   return {
     dkPlayerId: row.provider_player_id,
     mlbPlayerId,
@@ -191,11 +209,11 @@ function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: s
     positions,
     battingOrder: row.batting_order,
     salary: row.salary,
-    projection: null,
-    ceiling: null,
-    value: null,
-    ownership: null,
-    leverage: null,
+    projection,
+    ceiling,
+    value: projection !== null && row.salary > 0 ? Math.round((projection / (row.salary / 1000)) * 100) / 100 : null,
+    ownership: ownershipRow?.projected_ownership ?? null,
+    leverage: ownershipRow?.leverage_score ?? null,
     risk: null,
     confidence: null,
     // M6A: real dfs/eligibility.py status when computed
@@ -224,10 +242,17 @@ function poolPlayerRowFromCanonical(row: CanonicalSlatePlayerRow, mlbPlayerId: s
     aiSignals: [],
     aiReasons: [],
     aiSummary: null,
-    nativeProjection: null,
-    nativeCeiling: null,
-    nativeFloor: null,
-    nativeDelta: null,
+    // `projection`/`ceiling` above ARE the Native values (rule #1: Native
+    // is the default projection source, not a separate comparison
+    // column, under canonical serving) -- these native* fields mirror
+    // them so the UI's existing "Show comparison columns" / BM Native
+    // column continues to work unchanged, and nativeDelta is honestly 0
+    // rather than fabricated since there is no separate baseline to
+    // diff against here.
+    nativeProjection: projection,
+    nativeCeiling: ceiling,
+    nativeFloor: projectionRow?.floor ?? null,
+    nativeDelta: projection !== null ? 0 : null,
     nativeConfidence: null,
     nativeReasons: [],
     nativeExpectedPa: null,
@@ -273,10 +298,17 @@ export async function canonicalGetSlatePool(
     [slateRow.internal_slate_id],
   );
   const resolvedInternalPlayerIds = playerRows.map((p) => p.internal_player_id).filter((id): id is string => id !== null);
-  const mlbPlayerIdByInternalPlayerId = await resolveMlbPlayerIds(resolvedInternalPlayerIds);
+  const [mlbPlayerIdByInternalPlayerId, projectionsByDkId, ownershipByDkId] = await Promise.all([
+    resolveMlbPlayerIds(resolvedInternalPlayerIds),
+    getCanonicalProjectionsForSlate(slateRow.internal_slate_id),
+    getCanonicalOwnershipForSlate(slateRow.internal_slate_id),
+  ]);
 
   const players = playerRows.map((row) =>
-    poolPlayerRowFromCanonical(row, row.internal_player_id ? (mlbPlayerIdByInternalPlayerId.get(row.internal_player_id) ?? null) : null),
+    poolPlayerRowFromCanonical(
+      row, row.internal_player_id ? (mlbPlayerIdByInternalPlayerId.get(row.internal_player_id) ?? null) : null,
+      projectionsByDkId.get(row.provider_player_id), ownershipByDkId.get(row.provider_player_id),
+    ),
   );
 
   const activePlayers = players.filter((p) => p.optimizerEligible);
@@ -322,11 +354,11 @@ export async function canonicalGetSlatePool(
     // lineup-confirmation data -- see this module's scope-gap docstring.
     rosterFeasibilityPass: players.length > 0,
     salaryCap: slateRow.salary_cap ?? DK_CLASSIC_SALARY_CAP,
-    hasOwnership: false,
+    hasOwnership: ownershipByDkId.size > 0,
     hasExternalProjections: false,
     externalProviderName: null,
     hasAiProjections: false,
-    hasNativeProjections: false,
+    hasNativeProjections: projectionsByDkId.size > 0,
     hasFantasyProsProjections: false,
     hasMlProjections: false,
     hasBlueCollarProjections: false,

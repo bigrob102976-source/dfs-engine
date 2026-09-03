@@ -1005,6 +1005,27 @@ describe("OptimizerWorkspace", () => {
       expect(screen.getByText("$4,000")).toBeInTheDocument();
     });
 
+    it("MLB FINISH MODE Phase F: Build Lineups is ENABLED in canonical mode once the pool has real Native projection coverage -- no longer a blanket restriction", async () => {
+      const POOL_WITH_REAL_CANONICAL_PROJECTIONS = {
+        ...POOL_RESULT,
+        hasNativeProjections: true,
+        players: [
+          { ...POOL_RESULT.players[0], projection: 10.2, ceiling: 16.4, nativeProjection: 10.2, nativeCeiling: 16.4 },
+          { ...POOL_RESULT.players[1], projection: 18.1, ceiling: 27.3, nativeProjection: 18.1, nativeCeiling: 27.3 },
+        ],
+      };
+      installFetchMock({
+        "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_REAL_CANONICAL_PROJECTIONS, servingBackend: "CANONICAL_POSTGRES" }),
+      });
+      render(<OptimizerWorkspace canUseCanonicalServing />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+      fireEvent.click(screen.getByLabelText("Admin Test Mode: Canonical Slate Data"));
+
+      await waitFor(() => expect(screen.getByText("Canonical Postgres (Admin Test)")).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.queryByText(/Big Money Native projections are not available/)).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Build Lineups")).not.toBeDisabled(), { timeout: 5000 });
+    });
+
     it("a MEMBER-manipulated or stale request silently downgraded server-side to LEGACY_R2 is reflected honestly -- no canonical badge shown", async () => {
       // Simulates the server authorizing LEGACY_R2 even though the client
       // asked for CANONICAL_POSTGRES (e.g. the flag flipped mid-session) --

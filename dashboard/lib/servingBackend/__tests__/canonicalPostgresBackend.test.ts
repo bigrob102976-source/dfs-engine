@@ -276,6 +276,77 @@ describe("M5B: canonicalGetSlatePool", () => {
     });
   });
 
+  describe("MLB FINISH MODE Phase B/D: real projection/ownership flow into the served pool", () => {
+    function insertProjection(overrides: Partial<{ provider_player_id: string; projection: number; ceiling: number; floor: number; model_version: string }> = {}) {
+      const row = { provider_player_id: "1", projection: 12.4, ceiling: 20.1, floor: 3.2, model_version: "1.0.0", ...overrides };
+      getDb()
+        .prepare(
+          `INSERT INTO canonical_slate_player_projections (id, internal_slate_id, provider_player_id, source, model_version, projection, ceiling, floor, generated_at, created_at, updated_at)
+           VALUES (?, 's1', ?, 'native', ?, ?, ?, ?, 'x', 'x', 'x')`,
+        )
+        .run(`proj-${row.provider_player_id}`, row.provider_player_id, row.model_version, row.projection, row.ceiling, row.floor);
+    }
+    function insertOwnership(overrides: Partial<{ provider_player_id: string; projected_ownership: number; leverage_score: number }> = {}) {
+      const row = { provider_player_id: "1", projected_ownership: 24.5, leverage_score: -2.1, ...overrides };
+      getDb()
+        .prepare(
+          `INSERT INTO canonical_slate_player_ownership (id, internal_slate_id, provider_player_id, model_version, projected_ownership, ownership_tier, leverage_score, chalk_score, generated_at, created_at, updated_at)
+           VALUES (?, 's1', ?, '0.1.0', ?, 'chalk', ?, 80, 'x', 'x', 'x')`,
+        )
+        .run(`own-${row.provider_player_id}`, row.provider_player_id, row.projected_ownership, row.leverage_score);
+    }
+
+    it("a player with real persisted projection/ownership rows shows real, non-null values -- never fabricated", async () => {
+      insertSlate();
+      insertPlayer({ provider_player_id: "1", salary: 5000 });
+      insertProjection();
+      insertOwnership();
+
+      const pool = await canonicalGetSlatePool("2026-08-31", "dkunofficial-152904");
+      const p = pool.players[0];
+      expect(p.projection).toBe(12.4);
+      expect(p.ceiling).toBe(20.1);
+      expect(p.nativeProjection).toBe(12.4);
+      expect(p.nativeCeiling).toBe(20.1);
+      expect(p.nativeFloor).toBe(3.2);
+      expect(p.ownership).toBe(24.5);
+      expect(p.leverage).toBe(-2.1);
+      expect(pool.hasNativeProjections).toBe(true);
+      expect(pool.hasOwnership).toBe(true);
+      // value = projection per $1,000 salary, computed honestly from real inputs.
+      expect(p.value).toBe(Math.round((12.4 / 5) * 100) / 100);
+    });
+
+    it("a player with NO persisted projection/ownership row stays honestly null -- never 0, never fabricated", async () => {
+      insertSlate();
+      insertPlayer({ provider_player_id: "1" });
+      // No projection/ownership rows inserted at all.
+
+      const pool = await canonicalGetSlatePool("2026-08-31", "dkunofficial-152904");
+      const p = pool.players[0];
+      expect(p.projection).toBeNull();
+      expect(p.ceiling).toBeNull();
+      expect(p.ownership).toBeNull();
+      expect(p.value).toBeNull();
+      expect(pool.hasNativeProjections).toBe(false);
+      expect(pool.hasOwnership).toBe(false);
+    });
+
+    it("in a multi-player slate, only the players with real coverage show real values -- never leaking one player's data onto another", async () => {
+      insertSlate();
+      insertPlayer({ provider_player_id: "1" });
+      insertPlayer({ provider_player_id: "2" });
+      insertProjection({ provider_player_id: "1", projection: 9.9 });
+      // Player 2 gets no projection row at all.
+
+      const pool = await canonicalGetSlatePool("2026-08-31", "dkunofficial-152904");
+      const p1 = pool.players.find((p) => p.dkPlayerId === "1")!;
+      const p2 = pool.players.find((p) => p.dkPlayerId === "2")!;
+      expect(p1.projection).toBe(9.9);
+      expect(p2.projection).toBeNull();
+    });
+  });
+
   it("refuses to serve pool data that has aged past the safe reuse ceiling", async () => {
     insertSlate({ promoted_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() });
     insertPlayer();

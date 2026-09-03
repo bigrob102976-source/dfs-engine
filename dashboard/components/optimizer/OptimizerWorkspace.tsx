@@ -640,13 +640,17 @@ export function OptimizerWorkspace({
 
   const selectedSlate = slates.find((s) => s.slateId === selectedSlateId) ?? null;
   const externalSourceLabel = resolveExternalSourceLabel(pool?.externalProviderName ?? null);
-  // T1K: canonical Postgres carries zero projections/ownership today (a
-  // disclosed, honest scope gap -- see M6/M8's own reports), so a real
-  // projection-based build can never succeed against it yet. Gated on
-  // the SERVER-confirmed active backend, never the client-side toggle
-  // alone, so this stays correct even if canonicalTestMode were somehow
-  // silently downgraded server-side.
-  const canonicalProjectionsUnavailable = activeServingBackend === "CANONICAL_POSTGRES";
+  // MLB FINISH MODE Phase F: canonical Postgres now has REAL Big Money
+  // Native projections (lib/db/canonicalProjections.ts) -- the T1K-era
+  // blanket "always disabled for canonical" restriction is removed.
+  // Whether a build can actually succeed is now decided the SAME way it
+  // always has been for legacy: the real --validate-only call
+  // (poolCoverage/validationErrors below) honestly reports 0 usable
+  // players if this specific slate genuinely has no coverage yet (e.g.
+  // a future-prefetched slate the Native engine hasn't reached), and
+  // Build Lineups is disabled by that SAME existing validationErrors
+  // check a few lines below -- never a canonical-specific fake gate.
+  const canonicalProjectionsUnavailable = activeServingBackend === "CANONICAL_POSTGRES" && pool !== null && !pool.hasNativeProjections;
 
   // Milestone 31.2C, Part 4/7: committing a date navigates to
   // ?date=... (persists across a page refresh, Part 7) -- 1c above then
@@ -1034,15 +1038,17 @@ export function OptimizerWorkspace({
             : "never computed for this slate yet"}
         </div>
       )}
-      {/* T1J/T1K: canonical Postgres testing is explicitly about slate/
-          identity/eligibility data, not lineup building -- this is
-          intentional, not an error, so it's styled informational
-          (purple, matching the toggle above) rather than as a red
-          failure banner. */}
+      {/* MLB FINISH MODE Phase F/J: this now reflects a REAL, honest
+          per-slate coverage gap (the Native engine genuinely has no
+          projections yet for this specific slate -- e.g. a
+          future-prefetched slate, or the automatic refresh hasn't
+          reached it yet) rather than a blanket canonical-mode
+          restriction. Still informational (purple), not a red failure
+          banner -- this is an expected, temporary state, not a bug. */}
       {pool && canonicalProjectionsUnavailable && (
         <div className="rounded border border-purple/40 bg-purple/5 px-3 py-2 text-xs text-purple">
-          Big Money Native projections are not available for this slate yet. You can still browse players, salaries, positions, teams,
-          opponents, and eligibility -- Build Lineups is disabled in Canonical Postgres Test mode.
+          Big Money Native projections are not available for this slate yet (the automatic refresh may not have reached it). You can still
+          browse players, salaries, positions, teams, opponents, and eligibility -- Build Lineups is disabled until projections are ready.
         </div>
       )}
 

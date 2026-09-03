@@ -38,7 +38,7 @@ describe("listPostgresMigrationFiles", () => {
       "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql", "0009_ordering_sequence_columns.sql",
       "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql", "0012_canonical_shadow_status.sql",
       "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
-      "0015_canonical_slate_last_validated.sql",
+      "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql",
     ]);
   });
 });
@@ -66,7 +66,7 @@ describe("runPostgresMigrations", () => {
       "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql",
       "0009_ordering_sequence_columns.sql", "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql",
       "0012_canonical_shadow_status.sql", "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
-      "0015_canonical_slate_last_validated.sql",
+      "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql",
     ]);
   });
 
