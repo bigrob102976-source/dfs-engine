@@ -50,8 +50,22 @@ joblib==1.5.3
 pyarrow==25.0.1
 
 # -- Lineup optimizer solver --
-# ortools: CP-SAT solver, optimizer/solver.py.
-ortools==9.15.6755
+# ortools: CP-SAT solver, optimizer/solver.py and nfl/solver.py.
+#
+# Pinned to 9.12.4544, NOT the newest available (9.15.6755), after a
+# real environment-recovery investigation on a second development
+# machine (AMD Ryzen 7 PRO 5850U, Windows, Python 3.13.7): 9.13.4784,
+# 9.14.6206, and 9.15.6755 all reproducibly crash this machine with a
+# native access violation inside CP-SAT's Solve() -- confirmed with the
+# absolute minimal possible repro (one IntVar, one constraint, Solve()),
+# so it is not anything about this project's model construction.
+# 9.12.4544 is the newest of the four cp313-win_amd64 wheels that
+# actually exist on PyPI for this ortools/Python combination, and is
+# the newest one confirmed to solve correctly (NFL and MLB solver test
+# suites both pass in full under it). Root cause inside ortools'
+# 9.13+ native build was not further isolated; this pin should be
+# revisited if a later ortools release resolves it.
+ortools==9.12.4544
 
 # -- NFL M6A: nflverse historical statistical data ingestion --
 # nflreadpy: the nflverse project's official, currently-maintained Python
