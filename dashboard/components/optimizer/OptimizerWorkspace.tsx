@@ -154,7 +154,19 @@ export function OptimizerWorkspace({
   // T1B/T1C: ADMIN-only "Canonical Postgres Test" mode. `undefined` is
   // sent (never "LEGACY_R2") when off, matching every existing caller's
   // default/legacy behavior exactly.
-  const [canonicalTestMode, setCanonicalTestMode] = useState(false);
+  // MLB FINISH MODE Phase L: defaults to canUseCanonicalServing itself
+  // (the prop, evaluated at mount -- correct even for a first-time
+  // visitor with no persisted state, since the hydration effect below
+  // only ever touches this value when a persisted object exists).
+  // Canonical Postgres is now the real production data source for every
+  // entitled user; server-side resolveServingBackend() still
+  // re-authorizes on every request regardless, so a non-entitled user
+  // requesting it is always silently downgraded to LEGACY_R2 -- but
+  // defaulting to false for them still avoids sending a meaningless
+  // param on every request. The checkbox below survives as a live,
+  // session-only admin override to force LEGACY_R2 for comparison/
+  // diagnostics.
+  const [canonicalTestMode, setCanonicalTestMode] = useState(canUseCanonicalServing);
   // T1L: reflects the backend the SERVER actually authorized and served
   // for the most recent slates/pool response -- never just an echo of
   // what was requested, so a silent server-side downgrade (flag flipped
@@ -220,10 +232,16 @@ export function OptimizerWorkspace({
           (persistedSource === "big_money_ml" && !canUseBigMoneyMl) || (persistedSource === "bluecollar" && !canUseBlueCollar);
         setProjectionSource(persistedSourceUnreachable ? "native" : persistedSource);
         setShowProjectionComparison(persisted.showProjectionComparison ?? false);
-        // T1C: same "unreachable persisted value" guard as projectionSource
-        // above -- a MEMBER (or a flag flip since the last session) must
-        // never silently keep canonical test mode on.
-        setCanonicalTestMode(Boolean(persisted.canonicalTestMode) && canUseCanonicalServing);
+        // MLB FINISH MODE Phase L: deliberately ignores any persisted
+        // canonicalTestMode value. Before this milestone the default was
+        // always false, so every existing browser already has `false`
+        // saved from a session where the choice never meaningfully
+        // existed -- honoring that stale value would silently keep real
+        // customers on the (now known-broken) LEGACY_R2 path forever.
+        // Always resolve fresh from current entitlement instead; a
+        // same-session checkbox toggle (diagnostics/comparison) still
+        // works, it just no longer survives a reload.
+        setCanonicalTestMode(canUseCanonicalServing);
       }
       setHydrated(true);
     });
@@ -709,22 +727,23 @@ export function OptimizerWorkspace({
           </select>
         </label>
 
-        {/* T1B/T1C: ADMIN-only. Never rendered at all for a non-admin --
-            the underlying capability is enforced server-side regardless,
-            but there is no reason to even show the control to anyone
-            who could never use it. */}
+        {/* MLB FINISH MODE Phase L: rendered only for entitled users
+            (enforced server-side regardless of this checkbox). Canonical
+            Postgres is now the real default -- this box starts checked
+            and exists as a live, session-only override to force the
+            legacy source for comparison/diagnostics, not to opt in. */}
         {canUseCanonicalServing && (
           <label
             className="flex items-center gap-1.5 rounded border border-purple/40 bg-purple/10 px-2 py-1 text-xs text-purple"
-            title="Admin-only: load this slate from the canonical Postgres data source instead of the normal legacy source. Members are never affected by this toggle."
+            title="Canonical Postgres is the current data source. Uncheck to temporarily force the legacy source for this session only (diagnostics/comparison)."
           >
             <input type="checkbox" checked={canonicalTestMode} onChange={(e) => setCanonicalTestMode(e.target.checked)} />
-            Admin Test Mode: Canonical Slate Data
+            Canonical Postgres Data Source
           </label>
         )}
         {activeServingBackend === "CANONICAL_POSTGRES" && (
           <span className="rounded bg-purple/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-purple">
-            Canonical Postgres (Admin Test)
+            Canonical Postgres
           </span>
         )}
 
@@ -964,18 +983,19 @@ export function OptimizerWorkspace({
       {slateUnavailableMessage && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{slateUnavailableMessage}</div>
       )}
-      {/* T2 Step 8: canonical Postgres test data is only refreshed by an
-          admin manually re-running the fetch worker (DraftKings itself
-          cannot be reached from Railway's own network -- see M7/M8's own
-          reports) -- so "stale_expired" here means something different,
-          and more actionable, than the customer-facing LEGACY_R2 message
-          below. Never a blank screen, never the generic "worker appears
-          to be delayed" wording that reads as a real outage. */}
+      {/* MLB FINISH MODE Phase L: Canonical Postgres is now kept current
+          by the automatic worker (DK-fetch -> research/identity/
+          eligibility -> Native projections -> ownership, unattended --
+          see scripts/refresh-research-and-eligibility.ts), same as
+          LEGACY_R2 always was. "stale_expired" here means the automatic
+          worker itself has fallen behind its own freshness threshold --
+          an honest, temporary, self-resolving condition, never a
+          manual-admin-action item. */}
       {slateStatus === "stale_expired" && canonicalTestMode && activeServingBackend === "CANONICAL_POSTGRES" ? (
         <div className="rounded border border-purple/40 bg-purple/5 px-3 py-2 text-xs text-purple">
           <span>
-            Canonical Postgres test data needs a refresh -- this is an admin-only test data source, not automatically kept current the way
-            the normal live site is. Ask a developer to re-run the fetch worker, or turn off Admin Test Mode to use the normal site.
+            Slate data needs a refresh -- the automatic background worker appears to be delayed. This resolves on its own; please check back
+            shortly.
           </span>
           <button
             type="button"
@@ -1028,8 +1048,10 @@ export function OptimizerWorkspace({
       )}
       {/* T3 Step 3/9: SLATE freshness (above) and RESEARCH/LINEUP
           freshness are genuinely different things -- never conflated.
-          Admin-only detail (canonical test mode only); normal members
-          are never shown this technical distinction. */}
+          Shown whenever serving from Canonical Postgres (the real
+          default for entitled users as of MLB FINISH MODE Phase L) --
+          honest transparency about data recency, not an admin-only
+          debug detail. */}
       {pool && canonicalTestMode && activeServingBackend === "CANONICAL_POSTGRES" && (
         <div className="rounded border border-purple/30 bg-bg-panel-raised px-3 py-2 text-[11px] text-text-faint">
           Lineup/Eligibility data:{" "}

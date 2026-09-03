@@ -186,12 +186,49 @@ def _run_today(args) -> int:
 
     provider, reason, _source = get_configured_provider(args.date)
     if provider is None:
+        # MLB FINISH MODE: get_configured_provider() catches
+        # ProviderNoSlateError internally (dfs/providers/config.py) and
+        # folds it into this same provider=None/reason path as a genuine
+        # ProviderUnavailableError/auth failure -- collapsing a real
+        # outage together with "DraftKings simply has no active
+        # DraftGroups for this date right now," which is honest and
+        # expected both early in the day (not yet published) and late in
+        # the day (today's own games already started/locked, so
+        # DraftKings removed those DraftGroups from its live lobby).
+        # Confirmed live: this exact path fired every ~5 minutes for
+        # hours after today's slates locked, driving consecutive_failures
+        # up and triggering the CRITICAL alert despite nothing actually
+        # being broken (the tomorrow-prefetch succeeded the entire time).
+        # Matched by the same distinctive wording
+        # ProviderNoSlateError itself always uses (dfs/providers/
+        # draftkings_unofficial_provider.py) -- a real
+        # ProviderUnavailableError/auth failure never contains this
+        # phrase, so this cannot mask a genuine outage.
+        if "no draftgroups found" in reason.lower():
+            print(f"No real Classic slates currently available for {args.date}: {reason}")
+            return 0
         print(f"ERROR: no DFS provider configured: {reason}", file=sys.stderr)
         return 1
 
     try:
         result = provider.get_slate(args.date, sport=args.sport, site=args.site, research_games=[])
-    except (ProviderAuthenticationError, ProviderUnavailableError, ProviderNoSlateError) as e:
+    except ProviderNoSlateError as e:
+        # MLB FINISH MODE: NOT a failure -- same honest handling as
+        # prefetch_future_slates's own docstring already establishes for
+        # tomorrow ("DK not having published this future date yet is NOT
+        # a failure"). The identical condition can equally arise for
+        # TODAY late in the day once today's own real games have already
+        # started/locked and DraftKings removes those DraftGroups from
+        # its live lobby -- an expected, recurring, end-of-day state, not
+        # a provider outage. Previously misclassified as return 1 here,
+        # which caused the recurring-failure alert to fire every cycle
+        # after today's slates locked, even though nothing was actually
+        # broken (confirmed live: this exact path was firing every ~5
+        # minutes for hours with a fully successful tomorrow-prefetch
+        # alongside it).
+        print(f"No real Classic slates currently available for {args.date}: {e}")
+        return 0
+    except (ProviderAuthenticationError, ProviderUnavailableError) as e:
         print(f"ERROR: DraftKings Unofficial discovery failed: {e}", file=sys.stderr)
         return 1
 
