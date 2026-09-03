@@ -125,6 +125,8 @@ export function parseBuildRequest(body: unknown): ParseResult {
       stackSize,
       stackTeam,
       allowPitcherVsHitter: Boolean(b.allowPitcherVsHitter),
+      // PROBABLE FIX: ON by default -- only an explicit `false` turns it off.
+      useProbableStarters: b.useProbableStarters === false ? false : true,
       minSalary,
       minUnique,
       minConfidence,

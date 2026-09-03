@@ -226,6 +226,14 @@ function poolPlayerRowFromCanonical(
     matchStatus: row.identity_status === "RESOLVED" ? "matched" : row.identity_status === "REVIEW_REQUIRED" ? "ambiguous" : "unmatched",
     eligibilityStatus: row.eligibility_status ?? "PENDING_ELIGIBILITY",
     optimizerEligible: row.optimizer_eligible === 1,
+    // PROBABLE FIX: real, evidence-based probable-starter fields (see
+    // dfs/eligibility.py's own docstring for the full CONFIRMED/PROBABLE
+    // mapping) -- null for every status where they don't apply, never
+    // fabricated for a player with no real evidence.
+    lineupConfirmation: row.lineup_confirmation,
+    probableConfidence: row.probable_confidence,
+    probableReason: row.probable_reason,
+    projectedBattingOrder: row.projected_batting_order,
     externalProjection: null,
     adjustedProjection: null,
     adjustmentDelta: null,

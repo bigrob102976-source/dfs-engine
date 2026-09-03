@@ -375,6 +375,14 @@ export interface CanonicalSlatePlayerRow {
   eligibility_status: string | null;
   optimizer_eligible: number | null;
   batting_order: number | null;
+  // PROBABLE FIX: additive real-evidence probable-starter columns
+  // (migrations/0016_probable_starters.sql) -- see
+  // dfs/eligibility.py's own docstring for the full CONFIRMED/PROBABLE
+  // mapping. NULL for every status where it doesn't apply.
+  lineup_confirmation: string | null;
+  probable_confidence: string | null;
+  probable_reason: string | null;
+  projected_batting_order: number | null;
   eligibility_computed_at: string | null;
   created_at: string;
   updated_at: string;

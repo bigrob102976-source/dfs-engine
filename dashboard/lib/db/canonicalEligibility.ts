@@ -31,6 +31,15 @@ interface EligibilityPlayerResult {
   eligibilityStatus: string;
   optimizerEligible: boolean;
   battingOrder: number | null;
+  // PROBABLE FIX: additive -- see dfs/eligibility.py's own docstring for
+  // the full CONFIRMED/PROBABLE mapping. lineupConfirmation is null for
+  // every status where it doesn't apply; probableConfidence/
+  // probableReason/projectedBattingOrder are only ever set alongside
+  // eligibilityStatus === "PROBABLE_HITTER".
+  lineupConfirmation: string | null;
+  probableConfidence: string | null;
+  probableReason: string | null;
+  projectedBattingOrder: number | null;
 }
 
 function parseJsonArray(json: string | null): string[] {
@@ -154,9 +163,19 @@ export async function computeAndPersistEligibilityForSlate(internalSlateId: stri
     await db.transaction(async (tx) => {
       for (const r of parsed.results) {
         await tx.run(
-          `UPDATE slate_players SET game_id = ?, eligibility_status = ?, optimizer_eligible = ?, batting_order = ?, eligibility_computed_at = ?, updated_at = ?
+          `UPDATE slate_players SET game_id = ?, eligibility_status = ?, optimizer_eligible = ?, batting_order = ?,
+             lineup_confirmation = ?, probable_confidence = ?, probable_reason = ?, projected_batting_order = ?,
+             eligibility_computed_at = ?, updated_at = ?
            WHERE internal_slate_id = ? AND provider_player_id = ?`,
-          [r.gameId, r.eligibilityStatus, r.optimizerEligible ? 1 : 0, r.battingOrder, now, now, internalSlateId, r.providerPlayerId],
+          [
+            r.gameId, r.eligibilityStatus, r.optimizerEligible ? 1 : 0, r.battingOrder,
+            // PROBABLE FIX: coalesced to null -- better-sqlite3 rejects a
+            // bare `undefined` bind param, and these fields are absent
+            // (not merely null) on any result JSON produced before this
+            // milestone (e.g. an older cached/mocked runner response).
+            r.lineupConfirmation ?? null, r.probableConfidence ?? null, r.probableReason ?? null, r.projectedBattingOrder ?? null,
+            now, now, internalSlateId, r.providerPlayerId,
+          ],
         );
       }
     });

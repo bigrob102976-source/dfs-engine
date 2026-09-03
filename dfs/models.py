@@ -122,10 +122,26 @@ class DFSPlayer:
     # layer -- see dfs/eligibility.py for the full status list and how
     # each is computed. Every DK row keeps this field regardless of
     # status; rows are never dropped from the pool, only labeled.
-    # STARTING_PITCHER | STARTING_HITTER | LINEUP_UNCONFIRMED | BENCH |
-    # RELIEF_PITCHER | SCRATCHED | UNMATCHED | AMBIGUOUS
+    # STARTING_PITCHER | STARTING_HITTER | PROBABLE_HITTER |
+    # LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | OUT | SCRATCHED |
+    # UNMATCHED | AMBIGUOUS
     eligibility_status: str = "UNMATCHED"
     optimizer_eligible: bool = False
+
+    # PROBABLE FIX milestone: whether a STARTING_PITCHER/STARTING_HITTER/
+    # PROBABLE_HITTER designation reflects MLB's own OFFICIALLY POSTED
+    # lineup for this game ("CONFIRMED"), or dfs/probable_starters.py's
+    # real-evidence inference made before that posts ("PROBABLE"). None
+    # for every other status (BENCH/RELIEF_PITCHER/OUT/SCRATCHED/
+    # LINEUP_UNCONFIRMED/UNMATCHED/AMBIGUOUS) -- see
+    # dfs/eligibility.py's own docstring for the full mapping. Purely
+    # additive/informational: optimizer_eligible is unaffected by this
+    # field, so every pre-existing caller that never reads it sees zero
+    # behavior change.
+    lineup_confirmation: Optional[str] = None  # "CONFIRMED" | "PROBABLE" | None
+    probable_confidence: Optional[str] = None  # "HIGH" | "MEDIUM" | "LOW" | None
+    probable_reason: Optional[str] = None
+    projected_batting_order: Optional[int] = None
 
     avg_points_per_game_dk: Optional[float] = None  # DK's own metric, preserved but never fed into our model
 

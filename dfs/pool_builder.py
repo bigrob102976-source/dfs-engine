@@ -21,6 +21,7 @@ from dfs.persistence import load_latest_player_pool, save_match_report, save_pla
 from dfs.player_integrity import PlayerIntegrityResult, summarize as summarize_integrity, validate_pool
 from dfs.player_pool import build_dfs_players, build_match_report
 from dfs.player_resolver import build_canonical_by_id, build_canonical_index, build_name_only_index, resolve_all
+from dfs.probable_starters import build_probable_hitters_map
 from dfs.providers.source_provenance import TRUSTED_FOR_PRODUCTION, UNKNOWN, classify_source_provenance
 from dfs.providers.source_realism import PROVIDER_KIND_CSV, check_source_realism
 from dfs.roster_feasibility import check_roster_feasibility
@@ -196,7 +197,13 @@ def build_pool(
         {p["dk_player_id"]: p.get("eligibility_status") for p in previous_pool_doc.get("players", [])}
         if previous_pool_doc else {}
     )
-    compute_eligibility(players, package["pitchers"], package["batters"], previous_eligibility_by_dk_id)
+    # PROBABLE FIX milestone: real, evidence-based probable-hitter
+    # inference (dfs/probable_starters.py) for any team whose official
+    # lineup hasn't posted yet -- see build_probable_hitters_map's own
+    # docstring for why this is the ONE shared implementation both this
+    # legacy path and scripts/compute_canonical_eligibility.py call.
+    probable_hitters = build_probable_hitters_map(date, package)
+    compute_eligibility(players, package["pitchers"], package["batters"], previous_eligibility_by_dk_id, probable_hitters=probable_hitters)
 
     # Milestone 31.1: DK Status/AvgPointsPerGame exclusion pass, layered
     # on top of the confirmed-starter eligibility above -- narrows

@@ -31,7 +31,14 @@ function dfsPlayerDict(p: PoolPlayerRow): Record<string, unknown> {
     dk_player_id: p.dkPlayerId, name: p.name, team: p.team, player_type: p.playerType,
     dk_positions: p.positions, salary: p.salary,
     mlb_player_id: p.mlbPlayerId, opponent: p.opponent, game_id: p.gameId,
-    batting_order: p.battingOrder, throwing_hand: null, batting_hand: null,
+    // PROBABLE FIX: a PROBABLE_HITTER never has a real CONFIRMED
+    // battingOrder (dfs/eligibility.py only ever sets that once the
+    // official lineup posts) -- fall back to the real, evidence-based
+    // projectedBattingOrder so the ownership model isn't starved of a
+    // batting-order signal just because the lineup hasn't posted yet.
+    // eligibility_status/lineup_confirmation below still tell the real
+    // story honestly either way.
+    batting_order: p.battingOrder ?? p.projectedBattingOrder ?? null, throwing_hand: null, batting_hand: null,
     projection: p.projection, ceiling: p.ceiling, floor: p.nativeFloor,
     overall_score: null, risk_score: null, confidence: p.nativeConfidence,
     tags: [], reasons: p.nativeReasons ?? [],

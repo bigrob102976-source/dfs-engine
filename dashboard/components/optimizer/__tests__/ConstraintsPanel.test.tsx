@@ -120,6 +120,8 @@ function defaultProps(overrides: Partial<Parameters<typeof ConstraintsPanel>[0]>
     onStackTeamChange: vi.fn(),
     allowPitcherVsHitter: false,
     onAllowPitcherVsHitterChange: vi.fn(),
+    useProbableStarters: true,
+    onUseProbableStartersChange: vi.fn(),
     minSalary: null,
     onMinSalaryChange: vi.fn(),
     minUnique: 2,
@@ -189,8 +191,17 @@ describe("ConstraintsPanel", () => {
   it("toggles allowPitcherVsHitter", () => {
     const onAllowPitcherVsHitterChange = vi.fn();
     render(<ConstraintsPanel {...defaultProps({ onAllowPitcherVsHitterChange })} />);
-    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByLabelText("Allow hitters vs opposing pitcher"));
     expect(onAllowPitcherVsHitterChange).toHaveBeenCalledWith(true);
+  });
+
+  it("Use Probable Starters is ON by default and can be toggled off", () => {
+    const onUseProbableStartersChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ useProbableStarters: true, onUseProbableStartersChange })} />);
+    const checkbox = screen.getByLabelText("Use Probable Starters") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(checkbox);
+    expect(onUseProbableStartersChange).toHaveBeenCalledWith(false);
   });
 
   it("shows the salary cap read-only and reports minSalary changes", () => {

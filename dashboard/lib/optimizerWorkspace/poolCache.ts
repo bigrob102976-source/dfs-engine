@@ -301,6 +301,12 @@ async function readPoolResult(entry: CachedPool): Promise<OptimizerPoolResult> {
       matchStatus: p.match_status,
       eligibilityStatus: p.eligibility_status ?? null,
       optimizerEligible: p.optimizer_eligible ?? false,
+      // PROBABLE FIX: real, evidence-based probable-starter fields --
+      // see dfs/eligibility.py's own docstring for the full mapping.
+      lineupConfirmation: p.lineup_confirmation ?? null,
+      probableConfidence: p.probable_confidence ?? null,
+      probableReason: p.probable_reason ?? null,
+      projectedBattingOrder: p.projected_batting_order ?? null,
       externalProjection: comparison?.externalProjection ?? null,
       adjustedProjection: comparison?.adjustedProjection ?? null,
       adjustmentDelta: comparison?.adjustmentDelta ?? null,

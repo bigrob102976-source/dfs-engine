@@ -124,9 +124,12 @@ class TrendMetrics:
 
 @dataclass
 class BatterInput:
-    """Normalized hitter record consumed by the Batter Agent. Only ever
-    built for hitters in a POSTED starting lineup -- see
-    research/adapters/batter_input.py."""
+    """Normalized hitter record consumed by the Batter Agent. Built for
+    hitters in a POSTED starting lineup (research/adapters/
+    batter_input.py::build_batter_inputs), or -- PROBABLE FIX milestone
+    -- a real, evidence-based probable starter before that posts
+    (build_batter_inputs_with_probables) -- never a pure guess either
+    way."""
 
     player_id: str
     name: str

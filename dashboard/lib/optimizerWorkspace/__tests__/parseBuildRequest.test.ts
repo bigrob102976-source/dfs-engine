@@ -106,6 +106,24 @@ describe("parseBuildRequest", () => {
     if (result.ok) expect(result.request.allowPitcherVsHitter).toBe(true);
   });
 
+  it("useProbableStarters defaults to true (ON by default) when omitted", () => {
+    const result = parseBuildRequest(baseBody({}));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.useProbableStarters).toBe(true);
+  });
+
+  it("useProbableStarters stays true when explicitly sent as true", () => {
+    const result = parseBuildRequest(baseBody({ useProbableStarters: true }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.useProbableStarters).toBe(true);
+  });
+
+  it("only an explicit false turns useProbableStarters off", () => {
+    const result = parseBuildRequest(baseBody({ useProbableStarters: false }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.request.useProbableStarters).toBe(false);
+  });
+
   it("rejects a non-object body", () => {
     expect(parseBuildRequest(null).ok).toBe(false);
     expect(parseBuildRequest("nope").ok).toBe(false);

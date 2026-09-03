@@ -90,3 +90,54 @@ def missing_lineup_games(package: Dict[str, list]) -> List[dict]:
     silently skipped."""
     games_with_lineups = {b["game_id"] for b in package["batters"]}
     return [g for g in package["games"] if g["game_id"] not in games_with_lineups]
+
+
+def build_batter_inputs_with_probables(package: Dict[str, list], probable_hitters: dict) -> List[BatterInput]:
+    """PROBABLE FIX milestone: build_batter_inputs() ABOVE stays
+    lineup-only by construction, exactly as documented (its own docstring
+    is deliberate and unchanged) -- this is a SEPARATE, additive function
+    for callers that want BOTH the confirmed starters build_batter_inputs
+    already returns AND real, evidence-based probable starters
+    (dfs/probable_starters.py) for a team+game whose lineup hasn't posted
+    yet, so Native projections/ownership can generate for a probable
+    starter without waiting for the official lineup (per this milestone).
+
+    `probable_hitters` is the SAME {(game_id, mlb_player_id):
+    ProbableHitterInfo} shape dfs/probable_starters.py::
+    build_probable_hitters_map already returns and dfs/eligibility.py
+    already consumes -- never a second, divergent probable-inference
+    algorithm. `batting_order` on the resulting BatterInput carries the
+    real PROJECTED order (dfs/eligibility.py's own honest distinction
+    from a CONFIRMED order is preserved at the eligibility layer, not
+    here -- this adapter's only job is identity + a plausible lineup
+    slot for scoring, same as it already does for confirmed starters)."""
+    confirmed = build_batter_inputs(package)
+    if not probable_hitters:
+        return confirmed
+
+    confirmed_keys = {(b.game_id, b.player_id) for b in confirmed}
+    games_by_id = {g["game_id"]: g for g in package["games"]}
+
+    probable_inputs: List[BatterInput] = []
+    for (game_id, mlb_player_id), info in probable_hitters.items():
+        if not info.on_active_roster:
+            continue  # dfs/eligibility.py maps this to OUT -- never a scoring candidate
+        if (game_id, mlb_player_id) in confirmed_keys:
+            continue  # a real, official lineup entry always wins outright
+        game = games_by_id.get(game_id)
+        if not game or not info.team_abbr:
+            continue  # no real game/team context to build a valid input from -- never guessed
+
+        probable_inputs.append(BatterInput(
+            player_id=str(mlb_player_id),
+            name=info.name or str(mlb_player_id),  # real name from the same boxscore evidence; ID only in the (rare) event a name was never captured
+            team=info.team_abbr,
+            opponent=info.opponent_abbr or "",
+            game_id=game_id,
+            venue_name=game.get("venue_name"),
+            batting_hand=None,
+            batting_order=info.projected_batting_order,
+            position=None,
+            salary=None,
+        ))
+    return confirmed + probable_inputs

@@ -1,11 +1,16 @@
-"""Milestone 30.1: tests for dfs/eligibility.py -- the optimizer-eligible
-player pool filtering layer (STARTING_PITCHER/STARTING_HITTER/
-LINEUP_UNCONFIRMED/BENCH/RELIEF_PITCHER/SCRATCHED/UNMATCHED/AMBIGUOUS)."""
+"""Milestone 30.1 (extended by the PROBABLE FIX milestone): tests for
+dfs/eligibility.py -- the optimizer-eligible player pool filtering layer
+(STARTING_PITCHER/STARTING_HITTER/PROBABLE_HITTER/LINEUP_UNCONFIRMED/
+BENCH/RELIEF_PITCHER/OUT/SCRATCHED/UNMATCHED/AMBIGUOUS)."""
 
 from dfs.eligibility import (
     AMBIGUOUS,
     BENCH,
+    CONFIRMED,
     LINEUP_UNCONFIRMED,
+    OUT,
+    PROBABLE,
+    PROBABLE_HITTER,
     RELIEF_PITCHER,
     SCRATCHED,
     STARTING_HITTER,
@@ -15,6 +20,7 @@ from dfs.eligibility import (
     eligibility_counts,
 )
 from dfs.models import DFSPlayer
+from dfs.probable_starters import ProbableHitterInfo
 
 
 def _pitcher(dk_id, mlb_id, game_id, team="BOS", opponent="TOR", match_status="matched"):
@@ -220,6 +226,158 @@ def test_same_name_identity_safety_uses_game_id_and_player_id_not_name():
     compute_eligibility(players, [_research_pitcher("gameA", "mlb_111")], [])
     assert players[0].eligibility_status == STARTING_PITCHER
     assert players[1].eligibility_status == RELIEF_PITCHER
+
+
+def _probable(mlb_id, order=3, confidence="HIGH", on_active_roster=True, reason="real evidence"):
+    return ProbableHitterInfo(
+        mlb_player_id=mlb_id, name="Real Player", on_active_roster=on_active_roster, projected_batting_order=order,
+        confidence=confidence, reason=reason, recent_starts_considered=3, recent_starts_found=3,
+    )
+
+
+class TestPitcherConfirmationDistinction:
+    """PROBABLE FIX: pitchers keep the EXACT same eligibility_status
+    (STARTING_PITCHER) whether MLB's probable designation has been
+    confirmed by an official lineup post or not -- zero blast radius on
+    every pre-existing test/consumer -- but now also carry a new,
+    purely-additive lineup_confirmation field distinguishing the two."""
+
+    def test_pitcher_confirmed_once_own_team_lineup_posts(self):
+        players = [_pitcher("d1", "p1", "g1", team="BOS")]
+        compute_eligibility(players, [_research_pitcher("g1", "p1", "BOS")], [_research_batter("g1", "h1", "BOS", 1)])
+        assert players[0].eligibility_status == STARTING_PITCHER
+        assert players[0].lineup_confirmation == CONFIRMED
+
+    def test_pitcher_probable_before_own_team_lineup_posts(self):
+        players = [_pitcher("d1", "p1", "g1", team="BOS")]
+        compute_eligibility(players, [_research_pitcher("g1", "p1", "BOS")], [])
+        assert players[0].eligibility_status == STARTING_PITCHER
+        assert players[0].optimizer_eligible is True
+        assert players[0].lineup_confirmation == PROBABLE
+
+    def test_probable_pitcher_replaced_by_different_starter(self):
+        """A real, required confirmation-proof scenario: the originally
+        probable starter is withdrawn (injury/rain/etc.) and a different
+        pitcher becomes the new probable starter before official
+        confirmation. The old one must fall out of STARTING_PITCHER
+        (SCRATCHED, since he WAS probable last build); the new one
+        becomes the fresh PROBABLE STARTING_PITCHER."""
+        old_starter = _pitcher("d1", "p_old", "g1", team="BOS")
+        new_starter = _pitcher("d2", "p_new", "g1", team="BOS")
+        players = [old_starter, new_starter]
+        compute_eligibility(
+            players, [_research_pitcher("g1", "p_new", "BOS")], [],
+            previous_eligibility_by_dk_id={"d1": STARTING_PITCHER},
+        )
+        assert players[0].eligibility_status == SCRATCHED
+        assert players[0].optimizer_eligible is False
+        assert players[1].eligibility_status == STARTING_PITCHER
+        assert players[1].lineup_confirmation == PROBABLE
+        assert players[1].optimizer_eligible is True
+
+
+class TestProbableHitterInference:
+    """PROBABLE FIX: real, evidence-based probable-hitter eligibility --
+    additive parameter, fully backward compatible when omitted (every
+    pre-existing test above never passes probable_hitters at all)."""
+
+    def test_probable_hitter_is_eligible_with_projected_order_and_confidence(self):
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        probable = {("g1", "h1"): _probable("h1", order=2, confidence="HIGH", reason="Started 3 of the last 3 games")}
+        compute_eligibility(players, [], [], probable_hitters=probable)
+        assert players[0].eligibility_status == PROBABLE_HITTER
+        assert players[0].optimizer_eligible is True
+        assert players[0].lineup_confirmation == PROBABLE
+        assert players[0].projected_batting_order == 2
+        assert players[0].probable_confidence == "HIGH"
+        assert players[0].probable_reason == "Started 3 of the last 3 games"
+
+    def test_no_probable_evidence_stays_lineup_unconfirmed_never_a_guess(self):
+        """A hitter with zero real recent-starts evidence must never be
+        promoted -- the probable_hitters map simply has no entry for
+        them, and the honest LINEUP_UNCONFIRMED status is preserved."""
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        compute_eligibility(players, [], [], probable_hitters={})
+        assert players[0].eligibility_status == LINEUP_UNCONFIRMED
+        assert players[0].optimizer_eligible is False
+
+    def test_probable_hitter_off_active_roster_is_out_never_eligible(self):
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        probable = {("g1", "h1"): _probable("h1", on_active_roster=False)}
+        compute_eligibility(players, [], [], probable_hitters=probable)
+        assert players[0].eligibility_status == OUT
+        assert players[0].optimizer_eligible is False
+        assert players[0].lineup_confirmation is None
+
+    def test_official_lineup_always_overrides_a_probable_guess(self):
+        """The official lineup posted for this team+game, but a stale
+        probable_hitters entry (e.g. computed slightly earlier in the
+        same refresh) still exists for this player -- CONFIRMED real
+        data must always win outright, never be second-guessed by a
+        probable inference."""
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        probable = {("g1", "h1"): _probable("h1", order=5, confidence="LOW")}  # stale/contradicting guess
+        compute_eligibility(players, [], [_research_batter("g1", "h1", "BOS", 2)], probable_hitters=probable)
+        assert players[0].eligibility_status == STARTING_HITTER
+        assert players[0].lineup_confirmation == CONFIRMED
+        assert players[0].batting_order == 2  # the REAL confirmed slot, never the stale probable guess
+
+    def test_official_lineup_posted_and_this_player_not_in_it_is_bench_not_probable(self):
+        """Team's lineup HAS posted (real, authoritative), and this
+        player isn't in it -- real BENCH data always overrides any
+        (now-moot) probable guess."""
+        players = [_hitter("d1", "bench_id", "g1", team="BOS")]
+        probable = {("g1", "bench_id"): _probable("bench_id", confidence="HIGH")}
+        compute_eligibility(players, [], [_research_batter("g1", "someone_else", "BOS", 1)], probable_hitters=probable)
+        assert players[0].eligibility_status == BENCH
+        assert players[0].optimizer_eligible is False
+
+    def test_probable_hitter_promoted_to_confirmed_once_lineup_posts(self):
+        """A required confirmation-proof scenario: a player who was
+        PROBABLE_HITTER on the prior build is now in the OFFICIALLY
+        posted lineup -- becomes STARTING_HITTER with the real confirmed
+        batting order (which may differ from what was merely projected)."""
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        compute_eligibility(
+            players, [], [_research_batter("g1", "h1", "BOS", 4)],
+            previous_eligibility_by_dk_id={"d1": PROBABLE_HITTER},
+        )
+        assert players[0].eligibility_status == STARTING_HITTER
+        assert players[0].lineup_confirmation == CONFIRMED
+        assert players[0].batting_order == 4
+        assert players[0].optimizer_eligible is True
+
+    def test_probable_hitter_becomes_bench_once_lineup_posts_without_them(self):
+        """A required confirmation-proof scenario: probable -> bench."""
+        players = [_hitter("d1", "not_picked", "g1", team="BOS")]
+        compute_eligibility(
+            players, [], [_research_batter("g1", "someone_else", "BOS", 1)],
+            previous_eligibility_by_dk_id={"d1": PROBABLE_HITTER},
+        )
+        assert players[0].eligibility_status == SCRATCHED  # was probable, no longer confirmed -- surfaced, not silently dropped
+        assert players[0].optimizer_eligible is False
+
+    def test_probable_hitter_scratched_when_no_longer_a_probable_candidate(self):
+        """A probable hitter who drops out of the NEXT cycle's own
+        probable_hitters evidence entirely (e.g. a real recent bench
+        pattern emerged) before any official lineup posts -- SCRATCHED,
+        not silently reverted to LINEUP_UNCONFIRMED, so the loss of a
+        previously-expected player is visible."""
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        compute_eligibility(
+            players, [], [], probable_hitters={},
+            previous_eligibility_by_dk_id={"d1": PROBABLE_HITTER},
+        )
+        assert players[0].eligibility_status == SCRATCHED
+        assert players[0].optimizer_eligible is False
+
+    def test_probable_hitter_counted_in_eligibility_counts(self):
+        players = [_hitter("d1", "h1", "g1", team="BOS")]
+        probable = {("g1", "h1"): _probable("h1")}
+        compute_eligibility(players, [], [], probable_hitters=probable)
+        counts = eligibility_counts(players)
+        assert counts["probable_hitters"] == 1
+        assert counts["optimizer_eligible"] == 1
 
 
 def test_eligibility_counts_breakdown():

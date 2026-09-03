@@ -205,16 +205,31 @@ export function PoolTable({
                   <td className="px-2 py-1 text-text-muted">{p.opponent ?? "--"}</td>
                   <td className="px-2 py-1">
                     {(() => {
-                      const elig = formatEligibilityStatus(p.eligibilityStatus);
+                      const elig = formatEligibilityStatus(p.eligibilityStatus, p.lineupConfirmation);
                       const toneClass =
                         elig.tone === "starting" ? "bg-green/15 text-green"
+                        : elig.tone === "probable" ? "bg-purple/15 text-purple"
                         : elig.tone === "bench" ? "bg-bg-panel-raised text-text-muted"
                         : elig.tone === "unconfirmed" ? "bg-yellow/15 text-yellow"
                         : "bg-red/10 text-red";
-                      return <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${toneClass}`}>{elig.label}</span>;
+                      const isProbable = p.eligibilityStatus === "PROBABLE_HITTER" || (p.eligibilityStatus === "STARTING_PITCHER" && p.lineupConfirmation === "PROBABLE");
+                      return (
+                        <span className="inline-flex flex-col gap-0.5" title={p.probableReason ?? undefined}>
+                          <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${toneClass}`}>{elig.label}</span>
+                          {isProbable && p.probableConfidence && (
+                            <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-purple/70">
+                              Confidence: {p.probableConfidence}
+                            </span>
+                          )}
+                        </span>
+                      );
                     })()}
                   </td>
-                  <td className="px-2 py-1 text-right text-text-muted">{p.playerType === "pitcher" ? "" : (p.battingOrder ?? "--")}</td>
+                  <td className="px-2 py-1 text-right text-text-muted">
+                    {p.playerType === "pitcher" ? "" : (
+                      p.battingOrder ?? (p.projectedBattingOrder != null ? <span className="italic text-purple/70">Proj: {p.projectedBattingOrder}</span> : "--")
+                    )}
+                  </td>
                   <td className="px-2 py-1 text-right text-text">${p.salary.toLocaleString()}</td>
                   <td className="px-2 py-1 text-right text-text">{fmt(p.projection)}</td>
                   {showProjectionComparison && (

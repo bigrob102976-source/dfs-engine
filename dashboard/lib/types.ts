@@ -200,14 +200,24 @@ export interface DFSPlayer extends JsonRecord {
   season_sample_size: number | null;
   lineup_status: string;
   match_status: string;
-  /** Milestone 30.1: explicit playing-status/optimizer-eligibility layer
-   * -- see dfs/eligibility.py. STARTING_PITCHER | STARTING_HITTER |
-   * LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | SCRATCHED | UNMATCHED |
-   * AMBIGUOUS. Optional only so pool files saved before this milestone
-   * (which lack the field) don't fail to parse -- readers should treat a
-   * missing value as UNMATCHED/not eligible, never assume eligibility. */
+  /** Milestone 30.1 (extended by the PROBABLE FIX milestone): explicit
+   * playing-status/optimizer-eligibility layer -- see
+   * dfs/eligibility.py. STARTING_PITCHER | STARTING_HITTER |
+   * PROBABLE_HITTER | LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | OUT |
+   * SCRATCHED | UNMATCHED | AMBIGUOUS. Optional only so pool files saved
+   * before this milestone (which lack the field) don't fail to parse --
+   * readers should treat a missing value as UNMATCHED/not eligible,
+   * never assume eligibility. */
   eligibility_status?: string;
   optimizer_eligible?: boolean;
+  /** PROBABLE FIX: real, evidence-based probable-starter fields -- see
+   * dfs/eligibility.py's own docstring for the full CONFIRMED/PROBABLE
+   * mapping. Optional for the same before-this-milestone-pool-file
+   * reason as eligibility_status above. */
+  lineup_confirmation?: string | null;
+  probable_confidence?: string | null;
+  probable_reason?: string | null;
+  projected_batting_order?: number | null;
 }
 
 export interface DKPlayerPool extends JsonRecord {

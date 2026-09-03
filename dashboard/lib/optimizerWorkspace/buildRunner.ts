@@ -224,6 +224,9 @@ async function buildArgv(
   if (request.maxPlayerRisk != null) args.push("--max-player-risk", String(request.maxPlayerRisk));
   if (request.minSalary != null) args.push("--min-salary", String(request.minSalary));
   if (request.allowPitcherVsHitter) args.push("--allow-pitcher-vs-hitter");
+  // PROBABLE FIX: ON by default -- only pass the exclusion flag when the
+  // user has explicitly turned "Use Probable Starters" off.
+  if (request.useProbableStarters === false) args.push("--exclude-probable-starters");
   args.push("--interactive"); // config.optimizer_config.INTERACTIVE_SOLVER_MAX_TIME_SECONDS, not the 30s batch default
   args.push(...extra);
   return args;

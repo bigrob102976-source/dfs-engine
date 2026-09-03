@@ -404,3 +404,37 @@ def collect_batter_bios(
         if person:
             people[pid] = person
     return people
+
+
+def fetch_team_recent_schedule(team_id: str, start_date: str, end_date: str) -> Optional[dict]:
+    """One team's schedule over a date range (used to find its most
+    recently PLAYED games before a slate date, for probable-starter
+    inference -- see dfs/probable_starters.py). Returns None on any
+    failure rather than raising -- a single team's lookup failing must
+    never take down a refresh covering many teams."""
+    url = f"{MLB_STATS_BASE}/schedule?sportId=1&teamId={team_id}&startDate={start_date}&endDate={end_date}"
+    try:
+        return _get_json(url)
+    except _FETCH_ERRORS:
+        return None
+
+
+def fetch_boxscore(game_id: str) -> Optional[dict]:
+    """Full boxscore for one COMPLETED game -- includes each team's actual
+    starting batting order (dfs/probable_starters.py's real-evidence
+    source for "who started recently, and in what order"). A Final game's
+    boxscore never changes, so callers should cache this indefinitely
+    (see research/cache.py's DEFAULT_RESULTS_CACHE_ROOT docstring for the
+    same reasoning already established for postgame pitcher results).
+    Mirrors evaluation/results_collector.py::fetch_boxscore exactly, but
+    lives here so dfs/ and research/ (both PREGAME-path packages, see
+    tests/test_architecture_separation.py) never need to import
+    evaluation/ (a POSTGAME-only package) just to read a historical,
+    already-completed game's real lineup -- that is not a lookahead-bias
+    concern, since the game being inspected is always from a date BEFORE
+    the slate being built, never today's own games."""
+    url = f"{MLB_STATS_BASE}/game/{game_id}/boxscore"
+    try:
+        return _get_json(url)
+    except _FETCH_ERRORS:
+        return None

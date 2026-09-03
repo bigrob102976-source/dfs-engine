@@ -77,7 +77,20 @@ def _load_projection_overrides(path: str):
         return json.load(f)
 
 
-def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None, strict_source: bool = False):
+def _is_probable_starter(record: dict) -> bool:
+    """PROBABLE FIX milestone: real, evidence-based probable starter
+    (dfs/eligibility.py's own PROBABLE_HITTER status for hitters, or a
+    STARTING_PITCHER whose lineup_confirmation is still "PROBABLE" for
+    pitchers) -- distinct from a CONFIRMED starter either way."""
+    status = record.get("eligibility_status")
+    if status == "PROBABLE_HITTER":
+        return True
+    if status == "STARTING_PITCHER" and record.get("lineup_confirmation") == "PROBABLE":
+        return True
+    return False
+
+
+def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None, strict_source: bool = False, exclude_probable_starters: bool = False):
     """`strict_source=True` (Milestone 32.4 -- Big Money ML) enforces
     SOURCE PURITY: a player with no entry in `projection_overrides` (or
     whose override has no projection value) is excluded from the
@@ -103,6 +116,13 @@ def _build_optimizer_players(pool_doc: dict, projection_overrides: dict = None, 
         # check, which conflated match/projection-availability status
         # with real starter confirmation.
         if not record.get("optimizer_eligible"):
+            continue
+        # PROBABLE FIX milestone: "Use Probable Starters" optimizer
+        # setting, ON by default (this branch is only reached when the
+        # user has explicitly turned it OFF) -- excludes a real,
+        # evidence-based probable starter from THIS build only; a
+        # CONFIRMED starter is never affected either way.
+        if exclude_probable_starters and _is_probable_starter(record):
             continue
 
         override = projection_overrides.get(record.get("mlb_player_id")) if record.get("mlb_player_id") else None
@@ -321,6 +341,11 @@ def main() -> None:
         help="Allow rostering a hitter against one of the lineup's own pitchers (off by default)",
     )
     parser.add_argument(
+        "--exclude-probable-starters", action="store_true",
+        help="PROBABLE FIX: exclude real, evidence-based probable starters from this build -- 'Use Probable "
+             "Starters' is ON by default (probable starters included); pass this flag to turn it off.",
+    )
+    parser.add_argument(
         "--time-limit-seconds", type=float, default=None,
         help="Override the CP-SAT per-lineup time budget (default: config.optimizer_config.SOLVER_MAX_TIME_SECONDS)",
     )
@@ -338,7 +363,10 @@ def main() -> None:
 
     pool_doc = _load_pool(args.pool)
     projection_overrides = _load_projection_overrides(args.projection_overrides) if args.projection_overrides else None
-    players, skipped, excluded_missing_source = _build_optimizer_players(pool_doc, projection_overrides, strict_source=args.strict_projection_source)
+    players, skipped, excluded_missing_source = _build_optimizer_players(
+        pool_doc, projection_overrides, strict_source=args.strict_projection_source,
+        exclude_probable_starters=args.exclude_probable_starters,
+    )
 
     if not args.validate_only:
         print("=" * 70)

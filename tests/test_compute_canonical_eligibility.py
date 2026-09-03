@@ -39,7 +39,11 @@ def test_starting_pitcher_eligible_end_to_end(monkeypatch):
     result = bridge.compute_for_payload(payload)
 
     assert result["status"] == "OK"
-    assert result["results"] == [{"providerPlayerId": "1", "gameId": "g1", "eligibilityStatus": "STARTING_PITCHER", "optimizerEligible": True, "battingOrder": None}]
+    assert result["results"] == [{
+        "providerPlayerId": "1", "gameId": "g1", "eligibilityStatus": "STARTING_PITCHER", "optimizerEligible": True,
+        "battingOrder": None, "lineupConfirmation": "PROBABLE", "probableConfidence": None, "probableReason": None,
+        "projectedBattingOrder": None,
+    }]
 
 
 def test_starting_hitter_gets_batting_order(monkeypatch):

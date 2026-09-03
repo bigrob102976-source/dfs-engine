@@ -140,6 +140,11 @@ export function OptimizerWorkspace({
   // clears it naturally without extra bookkeeping.
   const [stackHandoff, setStackHandoff] = useState<{ team: string; size: number } | null>(null);
   const [allowPitcherVsHitter, setAllowPitcherVsHitter] = useState(false);
+  // PROBABLE FIX milestone: ON by default -- real, evidence-based
+  // probable starters (dfs/eligibility.py's PROBABLE_HITTER, or a
+  // STARTING_PITCHER not yet lineup-confirmed) are usable in a build
+  // exactly like confirmed starters until this is explicitly turned off.
+  const [useProbableStarters, setUseProbableStarters] = useState(true);
   const [minSalary, setMinSalary] = useState<number | null>(null);
   const [minUnique, setMinUnique] = useState(2);
   const [lineups, setLineups] = useState(20);
@@ -220,6 +225,10 @@ export function OptimizerWorkspace({
         setStackSize(persisted.stackSize);
         setStackTeam(persisted.stackTeam);
         setAllowPitcherVsHitter(persisted.allowPitcherVsHitter);
+        // PROBABLE FIX: defaults true for a persisted session that
+        // predates this milestone (the field is simply absent) -- same
+        // "ON by default" contract as a brand-new visitor.
+        setUseProbableStarters(persisted.useProbableStarters ?? true);
         setMinSalary(persisted.minSalary);
         setMinUnique(persisted.minUnique);
         setLineups(persisted.lineups);
@@ -330,6 +339,7 @@ export function OptimizerWorkspace({
       stackSize,
       stackTeam,
       allowPitcherVsHitter,
+      useProbableStarters,
       minSalary,
       minUnique,
       lineups,
@@ -339,7 +349,7 @@ export function OptimizerWorkspace({
       canonicalTestMode,
     });
   }, [
-    hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique,
+    hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique,
     lineups, objective, projectionSource, showProjectionComparison, canonicalTestMode,
   ]);
 
@@ -524,14 +534,15 @@ export function OptimizerWorkspace({
       stackSize,
       stackTeam,
       allowPitcherVsHitter,
+      useProbableStarters,
       minSalary,
       minUnique,
       projectionSource,
       servingBackend: canonicalTestMode ? ("CANONICAL_POSTGRES" as const) : undefined,
     };
   }, [
-    pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, minSalary,
-    minUnique, projectionSource, canonicalTestMode,
+    pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters,
+    minSalary, minUnique, projectionSource, canonicalTestMode,
   ]);
 
   // Milestone 17/20/23: if the newly-selected slate has no data for the
@@ -609,7 +620,7 @@ export function OptimizerWorkspace({
         });
     }, 500);
     return () => clearTimeout(handle);
-  }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, minSalary, minUnique, objective, buildRequestBody]);
+  }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique, objective, buildRequestBody]);
 
   function handleBuild() {
     setBuilding(true);
@@ -1130,6 +1141,8 @@ export function OptimizerWorkspace({
             }}
             allowPitcherVsHitter={allowPitcherVsHitter}
             onAllowPitcherVsHitterChange={setAllowPitcherVsHitter}
+            useProbableStarters={useProbableStarters}
+            onUseProbableStartersChange={setUseProbableStarters}
             minSalary={minSalary}
             onMinSalaryChange={setMinSalary}
             minUnique={minUnique}

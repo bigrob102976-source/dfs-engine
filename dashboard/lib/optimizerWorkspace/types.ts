@@ -70,10 +70,22 @@ export interface PoolPlayerRow {
   matchStatus: string;
   // Milestone 30.1: the explicit playing-status/optimizer-eligibility
   // layer (dfs/eligibility.py) -- STARTING_PITCHER | STARTING_HITTER |
-  // LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | SCRATCHED | UNMATCHED |
-  // AMBIGUOUS. null/false for pools saved before this milestone.
+  // PROBABLE_HITTER | LINEUP_UNCONFIRMED | BENCH | RELIEF_PITCHER | OUT |
+  // SCRATCHED | UNMATCHED | AMBIGUOUS. null/false for pools saved before
+  // this milestone.
   eligibilityStatus: string | null;
   optimizerEligible: boolean;
+
+  // PROBABLE FIX: real, evidence-based probable-starter fields -- see
+  // dfs/eligibility.py's own docstring for the full mapping.
+  // lineupConfirmation is "CONFIRMED" | "PROBABLE" | null (null when not
+  // applicable). probableConfidence/probableReason/projectedBattingOrder
+  // are only ever set alongside eligibilityStatus === "PROBABLE_HITTER".
+  // null/undefined for pools saved before this milestone.
+  lineupConfirmation?: string | null;
+  probableConfidence?: string | null;
+  probableReason?: string | null;
+  projectedBattingOrder?: number | null;
 
   // Milestone 17: optional three-way projection comparison, joined in
   // from the latest adjusted-projection snapshot by mlbPlayerId. `projection`
@@ -237,6 +249,12 @@ export interface OptimizerBuildRequest {
   stackSize: number | null;
   stackTeam: string | null;
   allowPitcherVsHitter: boolean;
+  // PROBABLE FIX milestone: ON by default (real, evidence-based probable
+  // starters are included exactly like confirmed ones) -- set false to
+  // exclude them from THIS build only; a confirmed starter is never
+  // affected either way. Optional so a pre-existing caller that never
+  // sends it keeps today's default (probable starters included).
+  useProbableStarters?: boolean;
   minSalary: number | null;
   minUnique: number;
   minConfidence: number | null;

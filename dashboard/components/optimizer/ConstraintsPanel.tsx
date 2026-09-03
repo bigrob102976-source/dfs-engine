@@ -20,6 +20,11 @@ interface ConstraintsPanelProps {
   allowPitcherVsHitter: boolean;
   onAllowPitcherVsHitterChange: (value: boolean) => void;
 
+  // PROBABLE FIX milestone: ON by default -- see dfs/eligibility.py's
+  // PROBABLE_HITTER / lineup_confirmation for what "probable" means here.
+  useProbableStarters: boolean;
+  onUseProbableStartersChange: (value: boolean) => void;
+
   minSalary: number | null;
   onMinSalaryChange: (value: number | null) => void;
 
@@ -41,6 +46,8 @@ export function ConstraintsPanel({
   onStackTeamChange,
   allowPitcherVsHitter,
   onAllowPitcherVsHitterChange,
+  useProbableStarters,
+  onUseProbableStartersChange,
   minSalary,
   onMinSalaryChange,
   minUnique,
@@ -166,6 +173,20 @@ export function ConstraintsPanel({
         </label>
         <p className="mb-3 text-[10px] text-text-faint">
           When off, the optimizer will not roster hitters against one of your selected pitchers.
+        </p>
+
+        <label className="mb-2 flex items-center justify-between gap-2 text-xs text-text-muted">
+          <span>Use Probable Starters</span>
+          <input
+            type="checkbox"
+            checked={useProbableStarters}
+            onChange={(e) => onUseProbableStartersChange(e.target.checked)}
+            className="accent-accent"
+          />
+        </label>
+        <p className="mb-3 text-[10px] text-text-faint">
+          On by default. Includes real, evidence-based probable starters (see the Status column) before official lineups post. Confirmed
+          starters are never affected by this setting.
         </p>
 
         <div className="mb-2 flex items-center justify-between text-xs text-text-muted">

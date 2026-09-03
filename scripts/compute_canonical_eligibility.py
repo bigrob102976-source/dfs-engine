@@ -59,6 +59,7 @@ from dfs.eligibility import compute_eligibility
 from dfs.models import DFSPlayer
 from dfs.player_resolver import _infer_player_type_from_dk_positions
 from dfs.pool_builder import ensure_research_package
+from dfs.probable_starters import build_probable_hitters_map
 from dfs.slate_validation import match_game_infos
 from research.adapters.pitcher_input import ResearchPackageNotFoundError
 
@@ -121,7 +122,8 @@ def compute_for_payload(payload: dict) -> dict:
 
     dfs_players = [_build_dfs_player(p, game_id_by_provider_id.get(p["providerPlayerId"])) for p in players_in]
 
-    compute_eligibility(dfs_players, package.get("pitchers", []), package.get("batters", []))
+    probable_hitters = build_probable_hitters_map(date, package)
+    compute_eligibility(dfs_players, package.get("pitchers", []), package.get("batters", []), probable_hitters=probable_hitters)
 
     results = [
         {
@@ -130,6 +132,10 @@ def compute_for_payload(payload: dict) -> dict:
             "eligibilityStatus": player.eligibility_status,
             "optimizerEligible": player.optimizer_eligible,
             "battingOrder": player.batting_order,
+            "lineupConfirmation": player.lineup_confirmation,
+            "probableConfidence": player.probable_confidence,
+            "probableReason": player.probable_reason,
+            "projectedBattingOrder": player.projected_batting_order,
         }
         for player in dfs_players
     ]

@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.batter_agent import analyze_slate
+from dfs.probable_starters import build_probable_hitters_map
 from research import collector, enrichment as pitcher_enrichment, statcast_batter_collector, statcast_batter_enrichment
 from research import statcast_collector as pitcher_statcast_collector
 from research import statcast_enrichment as pitcher_statcast_enrichment
@@ -142,13 +143,23 @@ def main() -> None:
     args = parser.parse_args()
 
     package = _ensure_research_package(args.date, args.output)
-    batter_inputs = batter_adapter.build_batter_inputs(package)
+    confirmed_count = len(batter_adapter.build_batter_inputs(package))
+    # PROBABLE FIX milestone: real, evidence-based probable starters
+    # (dfs/probable_starters.py) for any team whose official lineup
+    # hasn't posted yet, merged in alongside confirmed starters -- so
+    # Native projections/ownership never have to wait for official
+    # lineups. Never a second, divergent probable-inference algorithm --
+    # the SAME build_probable_hitters_map dfs/eligibility.py itself uses.
+    probable_hitters = build_probable_hitters_map(args.date, package)
+    batter_inputs = batter_adapter.build_batter_inputs_with_probables(package, probable_hitters)
     missing_games = batter_adapter.missing_lineup_games(package)
 
     print("=" * 70)
     print("REAL MLB DFS BATTER BOARD")
     print(f"Slate: {args.date}")
-    print(f"Starting Hitters Analyzed: {len(batter_inputs)}")
+    print(f"Confirmed Starting Hitters: {confirmed_count}")
+    print(f"Probable Starting Hitters (real evidence, lineup not yet posted): {len(batter_inputs) - confirmed_count}")
+    print(f"Total Hitters Analyzed: {len(batter_inputs)}")
     print(f"Games without a posted lineup yet: {len(missing_games)}")
     for g in missing_games:
         print(f"  - game {g['game_id']}: {g['away_team_abbr']} @ {g['home_team_abbr']}")
@@ -156,7 +167,7 @@ def main() -> None:
     print()
 
     if not batter_inputs:
-        print("No posted starting lineups yet -- nothing to analyze. Lineups are typically posted a few hours before first pitch.")
+        print("No posted lineups AND no real probable-starter evidence yet -- nothing to analyze. Lineups are typically posted a few hours before first pitch.")
         return
 
     batter_ids = [b.player_id for b in batter_inputs]

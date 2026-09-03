@@ -20,6 +20,10 @@ export interface PersistedWorkspaceState {
   stackSize: number | null;
   stackTeam: string | null;
   allowPitcherVsHitter: boolean;
+  // PROBABLE FIX milestone. Optional so state persisted before this
+  // milestone still loads cleanly -- callers must default to true
+  // ("ON by default") when absent.
+  useProbableStarters?: boolean;
   minSalary: number | null;
   minUnique: number;
   lineups: number;
