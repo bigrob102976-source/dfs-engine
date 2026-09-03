@@ -61,6 +61,49 @@ def test_resolve_player_by_name_ambiguous_raises():
         resolve_player_by_name(players, "Same Name")
 
 
+class TestRealDuplicateNameDisambiguation:
+    """MLB WORKFLOW QA: confirmed live 2026-09-03 -- two real, different,
+    active MLB players can genuinely share a name on the same real slate
+    (two "Max Muncy"s, ATH and LAD). A bare name is still honestly
+    rejected as ambiguous (never guessed), but the "Name (TEAM)" format
+    the error message itself suggests must actually resolve -- this is
+    what lets the web UI (OptimizerWorkspace.tsx's buildRequestBody)
+    disambiguate automatically without a second round trip."""
+
+    def _duplicate_named_pool(self):
+        players = feasible_pool() + [
+            hitter("dupe1", "AAA", ["OF"], 2000, 5.0),
+            hitter("dupe2", "BBB", ["OF"], 2000, 5.0),
+        ]
+        players[-1].name = "Same Name"
+        players[-2].name = "Same Name"
+        return players
+
+    def test_team_suffix_resolves_the_specific_player(self):
+        players = self._duplicate_named_pool()
+        p = resolve_player_by_name(players, "Same Name (AAA)")
+        assert p.key == "dupe1"
+        p2 = resolve_player_by_name(players, "Same Name (BBB)")
+        assert p2.key == "dupe2"
+
+    def test_team_suffix_is_case_insensitive_on_team(self):
+        players = self._duplicate_named_pool()
+        p = resolve_player_by_name(players, "Same Name (aaa)")
+        assert p.key == "dupe1"
+
+    def test_nonexistent_team_suffix_falls_through_to_ambiguous_error(self):
+        players = self._duplicate_named_pool()
+        with pytest.raises(OptimizerConfigError, match="matches more than one active player"):
+            resolve_player_by_name(players, "Same Name (ZZZ)")
+
+    def test_a_name_with_no_collision_is_unaffected_by_a_team_suffix_format(self):
+        players = feasible_pool()
+        # "Phi C" has no collision -- exact bare-name resolution (the
+        # overwhelming common case) must stay byte-for-byte unchanged.
+        p = resolve_player_by_name(players, "Phi C")
+        assert p.key == "phi_c"
+
+
 def test_resolve_settings_lock_and_exclude_conflict_raises():
     players = feasible_pool()
     settings = OptimizerSettings(locks=["Phi C"], excludes=["Phi C"])

@@ -515,13 +515,29 @@ export function OptimizerWorkspace({
   }, [hydrated, selectedSlateId, selectedDate, slatesValidated, canonicalTestMode]);
 
   const buildRequestBody = useCallback(() => {
-    const byId = new Map((pool?.players ?? []).map((p) => [p.dkPlayerId, p]));
-    const lockNames = locks.map((id) => byId.get(id)?.name).filter((n): n is string => Boolean(n));
-    const exclusionNames = exclusions.map((id) => byId.get(id)?.name).filter((n): n is string => Boolean(n));
+    const players = pool?.players ?? [];
+    const byId = new Map(players.map((p) => [p.dkPlayerId, p]));
+    // MLB WORKFLOW QA: real MLB player names are NOT globally unique --
+    // a real, live slate can have two different active players sharing
+    // the same name (confirmed live 2026-09-03: two real "Max Muncy"s,
+    // ATH and LAD). Locks/exclusions/exposure are still resolved by name
+    // server-side (optimizer/constraints.py::resolve_player_by_name),
+    // but a bare, colliding name there is genuinely ambiguous and would
+    // reject the request even though the user's own click (a specific
+    // dkPlayerId row) was never ambiguous at all. Disambiguate to
+    // "Name (TEAM)" automatically -- but ONLY when a real collision
+    // exists in the CURRENT pool, so every other player's request is
+    // byte-for-byte unchanged from before this fix.
+    const nameCounts = new Map<string, number>();
+    for (const p of players) nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
+    const resolvedName = (p: { name: string; team: string }) => ((nameCounts.get(p.name) ?? 0) > 1 ? `${p.name} (${p.team})` : p.name);
+
+    const lockNames = locks.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => Boolean(p)).map(resolvedName);
+    const exclusionNames = exclusions.map((id) => byId.get(id)).filter((p): p is NonNullable<typeof p> => Boolean(p)).map(resolvedName);
     const maxExposureByName: Record<string, number> = {};
     for (const [id, fraction] of Object.entries(maxExposure)) {
-      const name = byId.get(id)?.name;
-      if (name) maxExposureByName[name] = fraction;
+      const player = byId.get(id);
+      if (player) maxExposureByName[resolvedName(player)] = fraction;
     }
     return {
       slateId: selectedSlateId,

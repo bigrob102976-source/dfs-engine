@@ -10,6 +10,7 @@ predictions" from "AI interpretation"/"decision making").
 """
 
 import math
+import re
 from typing import Dict, List, Set, Tuple
 
 from config.dk_roster_config import DK_CLASSIC_ROSTER_SLOTS, DK_ROSTER_SIZE
@@ -20,6 +21,16 @@ from optimizer.models import OptimizerPlayer, OptimizerSettings
 class OptimizerConfigError(ValueError):
     """A lock/exclude/exposure setting is contradictory or unresolvable.
     Raised BEFORE any solver call -- never silently dropped or ignored."""
+
+
+# MLB WORKFLOW QA: real MLB player names are NOT globally unique -- a real,
+# live slate can (and, confirmed live 2026-09-03, does) have two active
+# players both named "Max Muncy" on two different real teams (ATH/LAD).
+# Team abbreviations in this codebase are always 2-4 letters (BOS, TOR,
+# LAD, NYY, ...), so this pattern is very unlikely to accidentally
+# misparse a genuine player name that happens to contain a parenthetical
+# -- case-insensitive since the comparison below already normalizes case.
+_TEAM_SUFFIX_RE = re.compile(r"^(.*)\s+\(([A-Za-z]{2,4})\)$")
 
 
 def filter_eligible_players(players: List[OptimizerPlayer], settings: OptimizerSettings) -> List[OptimizerPlayer]:
@@ -45,7 +56,33 @@ def filter_eligible_players(players: List[OptimizerPlayer], settings: OptimizerS
 
 
 def resolve_player_by_name(players: List[OptimizerPlayer], name: str) -> OptimizerPlayer:
-    target = normalize_name(name)
+    """Resolves a lock/exclude/exposure setting's player name to a real,
+    currently-active player. Real MLB player names are not globally
+    unique (see _TEAM_SUFFIX_RE's own comment) -- a bare name matching
+    more than one active player raises a clear, actionable error listing
+    every real candidate as "Name (TEAM)". Also accepts that EXACT
+    "Name (TEAM)" format as input, so a caller (or a disambiguating
+    client -- the web UI does this automatically once it detects a
+    same-name collision in the current pool, see buildRequestBody in
+    OptimizerWorkspace.tsx) can resolve the ambiguity without a second
+    round trip through this error."""
+    # Retrying bare-name resolution against `base_name` (not the original
+    # `name`) on fallthrough is deliberate: a team suffix that doesn't
+    # unambiguously resolve should still let a genuine same-name
+    # collision produce the real, actionable "matches more than one"
+    # error (listing every real candidate) -- retrying against the
+    # original "Name (TEAM)" string would instead always report a bare
+    # "no active player found", hiding the real, more useful diagnosis.
+    lookup_name = name
+    suffix_match = _TEAM_SUFFIX_RE.match(name.strip())
+    if suffix_match:
+        base_name, team = suffix_match.groups()
+        team_matches = [p for p in players if normalize_name(p.name) == normalize_name(base_name) and p.team.upper() == team.upper()]
+        if len(team_matches) == 1:
+            return team_matches[0]
+        lookup_name = base_name
+
+    target = normalize_name(lookup_name)
     matches = [p for p in players if normalize_name(p.name) == target]
     if not matches:
         raise OptimizerConfigError(f"No active player found matching {name!r}.")
