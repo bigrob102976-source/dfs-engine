@@ -106,6 +106,42 @@ async function runIdentityRefresh(date: string): Promise<StepResult> {
   }
 }
 
+/** MLB FINISH MODE Phase C -- root-caused live in production: the Native
+ * projection engine's OWN required input is predictions/<date>/
+ * {pitcher,batter}_board_*.json (the Pitcher/Batter Agent's real
+ * scoring output, see scripts/run_native_projection_engine.py's own
+ * "hard failure if both missing" contract) -- NOT research_output/ or
+ * DraftKings. dashboard/lib/slatePipeline.ts's own runSlatePipeline()
+ * already re-scores both agents on every refresh (its own M32.7
+ * comment), but that function is entangled with the DK-dependent
+ * legacy pool build and can never be this automatic path's caller (same
+ * reason build_research_package.py/refresh_player_identity.py had to be
+ * duplicated here rather than reused via that function). Confirmed live
+ * (2026-09-03): without this step, the Native engine honestly reported
+ * zero coverage for every real slate, not a bug in the engine itself --
+ * see scripts/run_real_pitcher_agent.py's own imports (research/agents
+ * only, never dfs.providers/DraftKings) for why this is exactly as safe
+ * to run from Railway as steps 1-2 above. */
+async function runPitcherAgent(date: string): Promise<StepResult> {
+  try {
+    const result = await runPythonScript("scripts/run_real_pitcher_agent.py", ["--date", date]);
+    if (result.exitCode !== 0) return { ok: false, detail: tail(result.stdout + result.stderr, 500) };
+    return { ok: true, detail: "OK" };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runBatterAgent(date: string): Promise<StepResult> {
+  try {
+    const result = await runPythonScript("scripts/run_real_batter_agent.py", ["--date", date]);
+    if (result.exitCode !== 0) return { ok: false, detail: tail(result.stdout + result.stderr, 500) };
+    return { ok: true, detail: "OK" };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function runNativeProjectionEngine(date: string): Promise<StepResult> {
   try {
     const result = await runPythonScript("scripts/run_native_projection_engine.py", ["--date", date]);
@@ -173,6 +209,8 @@ export interface RefreshSummary {
   research: StepResult;
   identity: StepResult;
   eligibility: { ok: boolean; detail: string; slatesFound?: number; slatesUpdated?: number; slatesFailed?: number };
+  pitcherAgent: StepResult;
+  batterAgent: StepResult;
   nativeProjectionEngine: StepResult;
   projections: { ok: boolean; detail: string; slatesFound?: number; slatesUpdated?: number; slatesFailed?: number };
   ownership: OwnershipRefreshResult;
@@ -190,15 +228,15 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   console.log(`AUTOMATIC RESEARCH/IDENTITY/ELIGIBILITY/PROJECTION/OWNERSHIP REFRESH -- ${sport} ${date}`);
   console.log(`===================================================================`);
 
-  console.log("\n--- 1/6: research package refresh (MLB Stats API) ---");
+  console.log("\n--- 1/8: research package refresh (MLB Stats API) ---");
   const research = await runResearchRefresh(date);
   console.log(research.ok ? "OK" : `FAILED: ${research.detail}`);
 
-  console.log("\n--- 2/6: player identity crosswalk refresh (MLB Stats API) ---");
+  console.log("\n--- 2/8: player identity crosswalk refresh (MLB Stats API) ---");
   const identity = await runIdentityRefresh(date);
   console.log(identity.ok ? "OK" : `FAILED: ${identity.detail}`);
 
-  console.log("\n--- 3/6: canonical eligibility recompute (Postgres only) ---");
+  console.log("\n--- 3/8: canonical eligibility recompute (Postgres only) ---");
   let eligibility: RefreshSummary["eligibility"];
   try {
     const result = await refreshCanonicalEligibilityForDate(date, sport);
@@ -214,11 +252,19 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   }
   console.log(eligibility.ok ? "OK" : `DEGRADED: ${eligibility.detail}`);
 
-  console.log("\n--- 4/6: Big Money Native projection engine (research boards -- never DraftKings) ---");
+  console.log("\n--- 4/8: pitcher agent scoring (research/Statcast -- never DraftKings) ---");
+  const pitcherAgent = await runPitcherAgent(date);
+  console.log(pitcherAgent.ok ? "OK" : `FAILED: ${pitcherAgent.detail}`);
+
+  console.log("\n--- 5/8: batter agent scoring (research/Statcast -- never DraftKings) ---");
+  const batterAgent = await runBatterAgent(date);
+  console.log(batterAgent.ok ? "OK" : `FAILED: ${batterAgent.detail}`);
+
+  console.log("\n--- 6/8: Big Money Native projection engine (pitcher/batter agent boards -- never DraftKings) ---");
   const nativeProjectionEngine = await runNativeProjectionEngine(date);
   console.log(nativeProjectionEngine.ok ? "OK" : `FAILED: ${nativeProjectionEngine.detail}`);
 
-  console.log("\n--- 5/6: canonical projection persistence (Postgres only) ---");
+  console.log("\n--- 7/8: canonical projection persistence (Postgres only) ---");
   let projections: RefreshSummary["projections"];
   try {
     const result = await refreshCanonicalProjectionsForDate(date, sport);
@@ -234,7 +280,7 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   }
   console.log(projections.ok ? "OK" : `DEGRADED: ${projections.detail}`);
 
-  console.log(`\n--- 6/6: canonical ownership generation (real scripts/project_dk_ownership.py per slate, every ${OWNERSHIP_REFRESH_INTERVAL_MINUTES}m) ---`);
+  console.log(`\n--- 8/8: canonical ownership generation (real scripts/project_dk_ownership.py per slate, every ${OWNERSHIP_REFRESH_INTERVAL_MINUTES}m) ---`);
   let ownership: OwnershipRefreshResult;
   try {
     ownership = await refreshOwnershipForDate(date, sport);
@@ -243,7 +289,7 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   }
   console.log(ownership.skipped ? ownership.detail : ownership.ok ? "OK" : `DEGRADED: ${ownership.detail}`);
 
-  const summary: RefreshSummary = { date, sport, research, identity, eligibility, nativeProjectionEngine, projections, ownership };
+  const summary: RefreshSummary = { date, sport, research, identity, eligibility, pitcherAgent, batterAgent, nativeProjectionEngine, projections, ownership };
   console.log(`\nRESULT_JSON:${JSON.stringify(summary)}`);
   return summary;
 }

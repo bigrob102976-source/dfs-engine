@@ -203,6 +203,25 @@ function writeNativeSnapshot(date: string) {
 }
 
 describe("MLB FINISH MODE Phase B/D/I: Native projection + ownership orchestration", () => {
+  it("MLB FINISH MODE Phase C: a pitcher/batter agent failure is isolated -- never prevents eligibility/other steps from succeeding, and the OTHER agent still runs", async () => {
+    insertCanonicalSlate("s1", "dkunofficial-1");
+    insertCanonicalPlayer("s1", "1");
+    const { __setPythonRunnerForTests } = await import("../../lib/orchestrator/pythonRunner");
+    __setPythonRunnerForTests(async (script) => {
+      if (script === "scripts/run_real_pitcher_agent.py") return { exitCode: 1, stdout: "", stderr: "pitcher agent crashed", command: [] };
+      if (script === "scripts/compute_canonical_eligibility.py") {
+        return { exitCode: 0, stdout: 'RESULT_JSON:{"status":"OK","date":"2026-09-02","results":[]}', stderr: "", command: [] };
+      }
+      return { exitCode: 0, stdout: "ok", stderr: "", command: [] };
+    });
+
+    const summary = await runRefresh("2026-09-02", "MLB");
+    expect(summary.pitcherAgent.ok).toBe(false);
+    expect(summary.pitcherAgent.detail).toContain("pitcher agent crashed");
+    expect(summary.batterAgent.ok).toBe(true); // the OTHER agent is unaffected
+    expect(summary.eligibility.ok).toBe(true);
+  });
+
   it("a Native engine failure is isolated -- never prevents eligibility/other steps from succeeding", async () => {
     insertCanonicalSlate("s1", "dkunofficial-1");
     insertCanonicalPlayer("s1", "1");
