@@ -90,6 +90,18 @@ describe("LineupsPanel", () => {
     expect(screen.getAllByText("Player A")).toHaveLength(2);
   });
 
+  it("shows each roster player's real opponent when expanded", () => {
+    const { container } = render(<LineupsPanel result={result()} />);
+    const lineupRow = container.querySelector("table tbody tr")!;
+    fireEvent.click(lineupRow);
+    expect(screen.getByText("NYM")).toBeInTheDocument();
+  });
+
+  it("MLB WORKFLOW QA: never shows a dead, always-blank Leverage column", () => {
+    render(<LineupsPanel result={result()} />);
+    expect(screen.queryByText("Leverage")).not.toBeInTheDocument();
+  });
+
   it("renders an export link pointing at the API with the csv path", () => {
     render(<LineupsPanel result={result()} />);
     const link = screen.getByRole("link", { name: /export lineups/i });

@@ -105,11 +105,70 @@ describe("PoolTable", () => {
     expect(rows[0].textContent).toContain("Ace Pitcher"); // projection 20
   });
 
-  it("the P position tab shows only pitchers", () => {
+  it("the Pitchers tab shows only pitchers", () => {
     renderTable();
-    fireEvent.click(screen.getByRole("button", { name: "P" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pitchers" }));
     expect(screen.getByText("Ace Pitcher")).toBeInTheDocument();
     expect(screen.queryByText("Bravo Hitter")).not.toBeInTheDocument();
+  });
+
+  it("the Hitters tab shows only hitters", () => {
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: "Hitters" }));
+    expect(screen.getByText("Bravo Hitter")).toBeInTheDocument();
+    expect(screen.getByText("Alpha Hitter")).toBeInTheDocument();
+    expect(screen.queryByText("Ace Pitcher")).not.toBeInTheDocument();
+  });
+
+  it("the Team filter narrows to one team", () => {
+    renderTable();
+    fireEvent.change(screen.getByDisplayValue("All Teams"), { target: { value: "TOR" } });
+    expect(screen.getByText("Ace Pitcher")).toBeInTheDocument();
+    expect(screen.queryByText("Bravo Hitter")).not.toBeInTheDocument();
+  });
+
+  it("the Starter filter narrows to Confirmed vs Probable", () => {
+    const mixed = [
+      player({ dkPlayerId: "d1", name: "Confirmed Guy", eligibilityStatus: "STARTING_HITTER", lineupConfirmation: "CONFIRMED" }),
+      player({ dkPlayerId: "d2", name: "Probable Guy", eligibilityStatus: "PROBABLE_HITTER", lineupConfirmation: "PROBABLE" }),
+    ];
+    render(
+      <PoolTable players={mixed} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByDisplayValue("All Starters"), { target: { value: "CONFIRMED" } });
+    expect(screen.getByText("Confirmed Guy")).toBeInTheDocument();
+    expect(screen.queryByText("Probable Guy")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue("Confirmed Starters"), { target: { value: "PROBABLE" } });
+    expect(screen.queryByText("Confirmed Guy")).not.toBeInTheDocument();
+    expect(screen.getByText("Probable Guy")).toBeInTheDocument();
+  });
+
+  it("filtering never mutates locks or exclusions -- switching tabs and back preserves them", () => {
+    const onToggleLock = vi.fn();
+    render(
+      <PoolTable
+        players={[
+          player({ dkPlayerId: "d1", name: "Locked Hitter", playerType: "hitter" }),
+          player({ dkPlayerId: "d3", name: "Ace Pitcher", playerType: "pitcher", positions: ["P"] }),
+        ]}
+        locks={new Set(["d1"])}
+        exclusions={new Set()}
+        maxExposure={{}}
+        onToggleLock={onToggleLock}
+        onToggleExclude={vi.fn()}
+        onExposureChange={vi.fn()}
+      />,
+    );
+    // The locked hitter is filtered OUT of view by the Pitchers tab, but
+    // the lock itself (owned by the parent, never PoolTable's own state)
+    // must be completely unaffected by what's merely visible.
+    fireEvent.click(screen.getByRole("button", { name: "Pitchers" }));
+    expect(screen.queryByText("Locked Hitter")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "ALL" }));
+    expect(screen.getByText("Locked Hitter")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unlock Locked Hitter" })).toBeInTheDocument();
+    expect(onToggleLock).not.toHaveBeenCalled();
   });
 
   it("a multi-position player appears under every eligible position tab", () => {
@@ -130,10 +189,10 @@ describe("PoolTable", () => {
 
   it("clicking a sortable header toggles direction", () => {
     renderTable();
-    // Anchored regex: the "Legacy" (independent) projection column
-    // defaults to showing a sort-direction arrow, e.g. "Legacy ↓", so an
-    // exact string match won't work.
-    const header = screen.getByRole("columnheader", { name: /^Legacy/ });
+    // Anchored regex: the "Projection" column defaults to showing a
+    // sort-direction arrow, e.g. "Projection ↓", so an exact string
+    // match won't work.
+    const header = screen.getByRole("columnheader", { name: /^Projection/ });
     fireEvent.click(header); // ascending
     let rows = screen.getAllByRole("row").slice(1);
     expect(rows[0].textContent).toContain("Bravo Hitter"); // lowest projection (5) first
@@ -339,11 +398,11 @@ describe("PoolTable", () => {
       render(
         <PoolTable players={statusPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
       );
-      expect(screen.getByText("Starting")).toBeInTheDocument();
+      expect(screen.getByText("Confirmed Starter")).toBeInTheDocument();
       expect(screen.getByText("Starting Pitcher")).toBeInTheDocument();
       expect(screen.getByText("Bench")).toBeInTheDocument();
       expect(screen.getByText("Relief")).toBeInTheDocument();
-      expect(screen.getByText("Lineup Not Confirmed")).toBeInTheDocument();
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
       expect(screen.getByText("Identity Unresolved")).toBeInTheDocument();
       // Never the raw backend string anywhere in the table.
       expect(screen.queryByText("STARTING_HITTER")).not.toBeInTheDocument();
@@ -356,7 +415,7 @@ describe("PoolTable", () => {
         <PoolTable players={statusPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
       );
       const row = screen.getByText("Unconfirmed Guy").closest("tr")!;
-      expect(row.textContent).toContain("Lineup Not Confirmed");
+      expect(row.textContent).toContain("Unknown");
       expect(row.textContent).not.toContain("Starting");
     });
 

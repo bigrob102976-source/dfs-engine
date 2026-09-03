@@ -23,6 +23,7 @@ function ExpandedLineup({ lineup }: { lineup: Lineup }) {
               <td className="w-10 py-1 font-mono text-text-faint">{SLOT_ORDER[i] ?? a.slot}</td>
               <td className="py-1 text-text">{a.name}</td>
               <td className="py-1 text-text-muted">{a.team}</td>
+              <td className="py-1 text-text-muted">{a.opponent ?? "--"}</td>
               <td className="py-1 text-right text-text-muted">${a.salary}</td>
               <td className="py-1 text-right text-text-muted">{fmt(a.projection)}</td>
               <td className="py-1 text-right text-text-muted">{a.projected_ownership !== null ? `${fmt(a.projected_ownership)}%` : "--"}</td>
@@ -112,7 +113,6 @@ export function LineupsPanel({ result }: { result: OptimizerBuildResult }) {
               <th className="px-2 py-1.5 text-right">Projection</th>
               <th className="px-2 py-1.5 text-right">Ceiling</th>
               <th className="px-2 py-1.5 text-right">Own Sum</th>
-              <th className="px-2 py-1.5 text-right">Leverage</th>
               <th className="px-2 py-1.5 text-right">Avg Risk</th>
               <th className="px-2 py-1.5 text-right">Avg Conf</th>
               <th className="px-2 py-1.5 text-left">Primary Stack</th>
@@ -131,7 +131,6 @@ export function LineupsPanel({ result }: { result: OptimizerBuildResult }) {
                   <td className="px-2 py-1.5 text-right text-text">{fmt(lineup.projection)}</td>
                   <td className="px-2 py-1.5 text-right text-text-muted">{fmt(lineup.ceiling)}</td>
                   <td className="px-2 py-1.5 text-right text-text-muted">{lineup.sum_ownership !== null ? `${fmt(lineup.sum_ownership)}%` : "--"}</td>
-                  <td className="px-2 py-1.5 text-right text-text-muted">--</td>
                   <td className="px-2 py-1.5 text-right text-text-muted">{fmt(lineup.average_risk)}</td>
                   <td className="px-2 py-1.5 text-right text-text-muted">{fmt(lineup.average_confidence)}</td>
                   <td className="px-2 py-1.5 text-text-muted">
@@ -140,7 +139,7 @@ export function LineupsPanel({ result }: { result: OptimizerBuildResult }) {
                 </tr>
                 {expanded === lineup.index && (
                   <tr>
-                    <td colSpan={10} className="p-0">
+                    <td colSpan={9} className="p-0">
                       <ExpandedLineup lineup={lineup} />
                     </td>
                   </tr>

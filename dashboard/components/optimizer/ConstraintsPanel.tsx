@@ -187,6 +187,11 @@ export function ConstraintsPanel({
         <p className="mb-3 text-[10px] text-text-faint">
           On by default. Includes real, evidence-based probable starters (see the Status column) before official lineups post. Confirmed
           starters are never affected by this setting.
+          {!useProbableStarters && (
+            <span className="mt-1 block text-yellow">
+              Off, early in the day: with no official lineups posted yet, this can leave too few eligible hitters to build a legal lineup.
+            </span>
+          )}
         </p>
 
         <div className="mb-2 flex items-center justify-between text-xs text-text-muted">

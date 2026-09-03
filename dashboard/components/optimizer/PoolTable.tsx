@@ -4,10 +4,23 @@ import { useMemo, useState } from "react";
 
 import { POSITION_TABS, type PositionTab } from "@/lib/dkRosterRules";
 import { formatEligibilityStatus } from "@/lib/eligibilityLabels";
-import { sortRows, type SortDirection } from "@/lib/sortFilter";
+import { distinctValues, sortRows, type SortDirection } from "@/lib/sortFilter";
 import type { PoolPlayerRow } from "@/lib/optimizerWorkspace/types";
 
 import { PlayerDetailModal } from "./PlayerDetailModal";
+
+// MLB WORKFLOW QA: a local extension of the shared POSITION_TABS (never
+// modify that constant itself -- ProjectionLabTable.tsx renders it too,
+// and its own filter treats every tab value as a literal DK position
+// string; a "HIT" pseudo-tab there would always match zero rows). "P"
+// (pitchers) already existed; "HIT" is the same idea for hitters,
+// satisfying the "All / Pitchers / Hitters / Position" filter list.
+type PoolTableTab = PositionTab | "HIT";
+const POOL_TABLE_TABS: readonly PoolTableTab[] = ["ALL", "P", "HIT", ...POSITION_TABS.filter((t) => t !== "ALL" && t !== "P")];
+
+type StarterFilter = "ALL" | "CONFIRMED" | "PROBABLE";
+const ALL_TEAMS = "ALL_TEAMS";
+const ALL_GAMES = "ALL_GAMES";
 
 interface Column {
   key: string;
@@ -26,7 +39,15 @@ const COLUMNS: Column[] = [
   { key: "eligibilityStatus", label: "Status", sortKey: "eligibilityStatus" },
   { key: "battingOrder", label: "Ord", sortKey: "battingOrder", align: "right" },
   { key: "salary", label: "Salary", sortKey: "salary", align: "right" },
-  { key: "projection", label: "Legacy", sortKey: "projection", align: "right" },
+  // MLB WORKFLOW QA: renamed from "Legacy" -- this is the primary
+  // projection value the optimizer actually builds against (under
+  // canonical Postgres serving it IS the Big Money Native value, see
+  // canonicalPostgresBackend.ts's own "Native is the default projection
+  // source, not a separate comparison column" docstring). "Legacy"
+  // read as stale/deprecated to a real customer even though the number
+  // is current; "BM Native"/"BM AI" alongside it remain the optional
+  // admin-facing comparison columns, unchanged.
+  { key: "projection", label: "Projection", sortKey: "projection", align: "right" },
   { key: "ceiling", label: "Ceil", sortKey: "ceiling", align: "right" },
   { key: "value", label: "Value", sortKey: "value", align: "right" },
   { key: "nativeProjection", label: "BM Native", sortKey: "nativeProjection", align: "right" },
@@ -74,7 +95,10 @@ export function PoolTable({
   onExposureChange: (dkPlayerId: string, fraction: number) => void;
   showProjectionComparison?: boolean;
 }) {
-  const [positionTab, setPositionTab] = useState<PositionTab>("ALL");
+  const [positionTab, setPositionTab] = useState<PoolTableTab>("ALL");
+  const [teamFilter, setTeamFilter] = useState(ALL_TEAMS);
+  const [gameFilter, setGameFilter] = useState(ALL_GAMES);
+  const [starterFilter, setStarterFilter] = useState<StarterFilter>("ALL");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<keyof PoolPlayerRow>("projection");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
@@ -86,17 +110,35 @@ export function PoolTable({
     return [...COLUMNS.slice(0, projIndex + 1), ...COMPARISON_COLUMNS, ...COLUMNS.slice(projIndex + 1)];
   }, [showProjectionComparison]);
 
+  const teamOptions = useMemo(() => distinctValues(players, (p) => p.team), [players]);
+  // "TEAM @ OPP" labeled by (alphabetically-lower team) @ (alphabetically-higher team),
+  // so both sides of the same game always produce the identical label/gameId pair.
+  const gameOptions = useMemo(() => {
+    const byGameId = new Map<string, string>();
+    for (const p of players) {
+      if (!p.gameId || byGameId.has(p.gameId)) continue;
+      const teams = [p.team, p.opponent ?? "?"].sort();
+      byGameId.set(p.gameId, `${teams[0]} @ ${teams[1]}`);
+    }
+    return Array.from(byGameId.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [players]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return players.filter((p) => {
       if (positionTab === "P" && p.playerType !== "pitcher") return false;
-      if (positionTab !== "ALL" && positionTab !== "P" && !p.positions.includes(positionTab)) return false;
+      if (positionTab === "HIT" && p.playerType !== "hitter") return false;
+      if (positionTab !== "ALL" && positionTab !== "P" && positionTab !== "HIT" && !p.positions.includes(positionTab)) return false;
+      if (teamFilter !== ALL_TEAMS && p.team !== teamFilter) return false;
+      if (gameFilter !== ALL_GAMES && p.gameId !== gameFilter) return false;
+      if (starterFilter === "CONFIRMED" && p.lineupConfirmation !== "CONFIRMED") return false;
+      if (starterFilter === "PROBABLE" && p.lineupConfirmation !== "PROBABLE") return false;
       if (q && !p.name.toLowerCase().includes(q) && !p.team.toLowerCase().includes(q) && !(p.opponent ?? "").toLowerCase().includes(q)) {
         return false;
       }
       return true;
     });
-  }, [players, positionTab, search]);
+  }, [players, positionTab, teamFilter, gameFilter, starterFilter, search]);
 
   const sorted = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
@@ -113,7 +155,7 @@ export function PoolTable({
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1">
-          {POSITION_TABS.map((tab) => (
+          {POOL_TABLE_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
@@ -122,10 +164,43 @@ export function PoolTable({
                 positionTab === tab ? "bg-accent-dim text-text" : "bg-bg-panel-raised text-text-faint hover:text-text-muted"
               }`}
             >
-              {tab}
+              {tab === "HIT" ? "Hitters" : tab === "P" ? "Pitchers" : tab}
             </button>
           ))}
         </div>
+        <select
+          value={starterFilter}
+          onChange={(e) => setStarterFilter(e.target.value as StarterFilter)}
+          className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-xs text-text outline-none focus:border-accent"
+        >
+          <option value="ALL">All Starters</option>
+          <option value="CONFIRMED">Confirmed Starters</option>
+          <option value="PROBABLE">Probable Starters</option>
+        </select>
+        <select
+          value={teamFilter}
+          onChange={(e) => setTeamFilter(e.target.value)}
+          className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-xs text-text outline-none focus:border-accent"
+        >
+          <option value={ALL_TEAMS}>All Teams</option>
+          {teamOptions.map((team) => (
+            <option key={team} value={team}>
+              {team}
+            </option>
+          ))}
+        </select>
+        <select
+          value={gameFilter}
+          onChange={(e) => setGameFilter(e.target.value)}
+          className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-xs text-text outline-none focus:border-accent"
+        >
+          <option value={ALL_GAMES}>All Games</option>
+          {gameOptions.map(([gameId, label]) => (
+            <option key={gameId} value={gameId}>
+              {label}
+            </option>
+          ))}
+        </select>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
