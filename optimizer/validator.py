@@ -88,6 +88,18 @@ def validate_lineup(
                 f"Secondary stack requirement not met for {settings.stack_team_2} (need {settings.stack_size_2})."
             )
 
+    if settings.min_games_represented and settings.min_games_represented > 1:
+        games_represented = {
+            players_by_key[a.dk_player_id].game_id
+            for a in lineup.assignments
+            if a.dk_player_id in players_by_key and players_by_key[a.dk_player_id].game_id
+        }
+        if len(games_represented) < settings.min_games_represented:
+            violations.append(
+                f"Lineup spans only {len(games_represented)} game(s); DraftKings Classic MLB requires "
+                f"players from at least {settings.min_games_represented}."
+            )
+
     if not settings.allow_pitcher_vs_hitter:
         conflicts = pitcher_vs_hitter_conflicts(list(players_by_key.values()))
         for a in lineup.assignments:

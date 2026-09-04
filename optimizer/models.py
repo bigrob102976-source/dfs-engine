@@ -7,7 +7,7 @@ that already exists on the unified DFS player pool (dfs/models.py).
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Set
 
-from config.dk_roster_config import DK_CLASSIC_SALARY_CAP, DK_MAX_HITTERS_PER_TEAM
+from config.dk_roster_config import DK_CLASSIC_SALARY_CAP, DK_MAX_HITTERS_PER_TEAM, DK_MIN_GAMES_REPRESENTED
 from config.optimizer_config import ALLOW_PITCHER_VS_HITTER_DEFAULT, DEFAULT_MAX_EXPOSURE, DEFAULT_MIN_UNIQUE
 
 
@@ -71,6 +71,20 @@ class OptimizerSettings:
     allow_pitcher_vs_hitter: bool = ALLOW_PITCHER_VS_HITTER_DEFAULT
     salary_cap: int = DK_CLASSIC_SALARY_CAP
     team_max_hitters: int = DK_MAX_HITTERS_PER_TEAM
+    # M3 (Ops Finish): a real, documented DraftKings Classic MLB rule --
+    # a legal lineup must include players from at least this many
+    # different games. Previously defined (config/dk_roster_config.py)
+    # and used only for a coarse POOL-level feasibility pre-check
+    # (dfs/roster_feasibility.py -- "is a legal lineup theoretically
+    # possible from this pool at all"), never enforced on the actual
+    # PER-LINEUP the solver picks -- a pool spanning 5 games could still
+    # have every one of its slots filled from a single game, which is a
+    # real DK rule violation the system previously never caught. Always
+    # on by default (this is a fixed rule, not a user preference, same
+    # pattern as team_max_hitters/salary_cap above); settable only for
+    # tests that want to exercise a pool with fewer real games than DK's
+    # own minimum without every such test needing multi-game fixtures.
+    min_games_represented: int = DK_MIN_GAMES_REPRESENTED
     # Milestone 10: all optional, all None/unused unless --ownership was supplied.
     max_total_ownership: Optional[float] = None
     max_player_ownership: Optional[float] = None

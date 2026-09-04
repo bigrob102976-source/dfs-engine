@@ -255,6 +255,14 @@ def _concrete_infeasibility_reasons(eligible_players: List[OptimizerPlayer], set
         if len(available) < slot["count"]:
             reasons.append(f"Only {len(available)} eligible {slot['slot']} player(s) available (need {slot['count']}).")
 
+    if settings.min_games_represented and settings.min_games_represented > 1:
+        distinct_games = {p.game_id for p in eligible_players if p.game_id}
+        if len(distinct_games) < settings.min_games_represented:
+            reasons.append(
+                f"The eligible pool only spans {len(distinct_games)} game(s); DraftKings Classic MLB requires "
+                f"players from at least {settings.min_games_represented}."
+            )
+
     if settings.min_salary is not None and settings.min_salary > settings.salary_cap:
         reasons.append(f"Minimum salary spend (${settings.min_salary}) exceeds the salary cap (${settings.salary_cap}).")
 

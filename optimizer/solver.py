@@ -105,6 +105,26 @@ def solve_single_lineup(
         if team_vars:
             model.Add(sum(team_vars) <= settings.team_max_hitters)
 
+    if settings.min_games_represented and settings.min_games_represented > 1:
+        game_groups: Dict[str, List[OptimizerPlayer]] = {}
+        for player in candidate_pool:
+            if player.game_id:
+                game_groups.setdefault(player.game_id, []).append(player)
+        game_used_vars = []
+        for game_id, game_players in game_groups.items():
+            game_player_vars = [used[p.key] for p in game_players if p.key in used]
+            if not game_player_vars:
+                continue
+            game_used = model.NewBoolVar(f"game_{game_id}")
+            # Reified OR: game_used == 1 iff at least one player from this
+            # game is rostered -- AddMaxEquality is exact for 0/1 vars
+            # (max of any all-zero set is 0, max with a 1 present is 1).
+            model.AddMaxEquality(game_used, game_player_vars)
+            game_used_vars.append(game_used)
+        if len(game_used_vars) < settings.min_games_represented:
+            return None
+        model.Add(sum(game_used_vars) >= settings.min_games_represented)
+
     if not settings.allow_pitcher_vs_hitter:
         for pitcher_key, hitter_keys in pitcher_vs_hitter_conflicts(candidate_pool).items():
             if pitcher_key not in used:
