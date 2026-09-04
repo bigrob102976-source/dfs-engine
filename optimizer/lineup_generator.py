@@ -57,6 +57,15 @@ def _build_lineup(index: int, assignment: List[Tuple[str, OptimizerPlayer]], set
     else:
         primary_stack_team, primary_stack_size = None, 0
 
+    # Multi-team stacks (M2): report the requested secondary team's own
+    # actual hitter count -- not "whichever team has the second-most
+    # hitters" (that could be a team never requested at all).
+    if settings.stack_team_2:
+        secondary_stack_team = settings.stack_team_2
+        secondary_stack_size = hitter_team_counts.get(settings.stack_team_2, 0)
+    else:
+        secondary_stack_team, secondary_stack_size = None, 0
+
     ownerships = [a.projected_ownership for a in assignments if a.projected_ownership is not None]
     has_full_ownership = len(ownerships) == len(assignments)
     sum_ownership = round(sum(ownerships), 2) if has_full_ownership else None
@@ -72,6 +81,7 @@ def _build_lineup(index: int, assignment: List[Tuple[str, OptimizerPlayer]], set
         average_risk=round(sum(risks) / len(risks), 2) if risks else None,
         average_confidence=round(sum(confidences) / len(confidences), 2) if confidences else None,
         team_counts=team_counts, primary_stack_team=primary_stack_team, primary_stack_size=primary_stack_size,
+        secondary_stack_team=secondary_stack_team, secondary_stack_size=secondary_stack_size,
         sum_ownership=sum_ownership, average_ownership=average_ownership, max_ownership=max_ownership,
         players_above_chalk_threshold=chalk_count,
     )

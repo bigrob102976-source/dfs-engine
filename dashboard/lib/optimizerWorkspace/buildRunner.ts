@@ -215,6 +215,8 @@ async function buildArgv(
   args.push("--min-unique", String(request.minUnique));
   if (request.stackSize != null) args.push("--stack-size", String(request.stackSize));
   if (request.stackTeam) args.push("--stack-team", request.stackTeam);
+  if (request.stackSize2 != null) args.push("--stack-size-2", String(request.stackSize2));
+  if (request.stackTeam2) args.push("--stack-team-2", request.stackTeam2);
   for (const name of request.locks) args.push("--lock", name);
   for (const name of request.exclusions) args.push("--exclude", name);
   for (const [name, fraction] of Object.entries(request.maxExposure)) {

@@ -15,7 +15,7 @@ let tmpDir: string;
 function baseRequest(overrides: Partial<OptimizerBuildRequest> = {}): OptimizerBuildRequest {
   return {
     date: DATE, slateId: "dkunofficial-canary", lineups: 1, objective: "projection",
-    locks: [], exclusions: [], maxExposure: {}, stackSize: null, stackTeam: null,
+    locks: [], exclusions: [], maxExposure: {}, stackSize: null, stackTeam: null, stackSize2: null, stackTeam2: null,
     allowPitcherVsHitter: false, minSalary: null, minUnique: 2, minConfidence: null, maxPlayerRisk: null,
     projectionSource: "independent", servingBackend: "CANONICAL_POSTGRES",
     ...overrides,

@@ -19,6 +19,11 @@ export interface PersistedWorkspaceState {
   maxExposure: Record<string, number>;
   stackSize: number | null;
   stackTeam: string | null;
+  // Multi-team stacks (M2). Optional so state persisted before this
+  // milestone still loads cleanly -- absent means null/null, identical
+  // to a brand-new session (no secondary stack).
+  stackSize2?: number | null;
+  stackTeam2?: string | null;
   allowPitcherVsHitter: boolean;
   // PROBABLE FIX milestone. Optional so state persisted before this
   // milestone still loads cleanly -- callers must default to true

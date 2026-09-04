@@ -50,6 +50,16 @@ class OptimizerSettings:
     min_unique: int = DEFAULT_MIN_UNIQUE
     stack_size: Optional[int] = None
     stack_team: Optional[str] = None
+    # Multi-team stacks (M2): a SECOND, independent required team stack,
+    # e.g. stack_size=5/stack_team="NYY" + stack_size_2=3/stack_team_2="BOS"
+    # for a 5-3. Only ever meaningful together with stack_size/stack_team --
+    # resolve_settings() (optimizer/constraints.py) rejects stack_size_2
+    # set without an explicit stack_team (no AUTO primary-team selection
+    # for two-team stacks) or without stack_team_2, and rejects
+    # stack_team == stack_team_2. None/None (the default) is byte-identical
+    # to every pre-M2 single-team-or-no-stack build.
+    stack_size_2: Optional[int] = None
+    stack_team_2: Optional[str] = None
     locks: List[str] = field(default_factory=list)          # player names, as given on the CLI
     excludes: List[str] = field(default_factory=list)
     max_exposure: Dict[str, float] = field(default_factory=dict)   # player name -> fraction
@@ -117,6 +127,12 @@ class Lineup:
     average_ownership: Optional[float] = None
     max_ownership: Optional[float] = None
     players_above_chalk_threshold: Optional[int] = None
+    # Multi-team stacks (M2): the second team's own hitter count, only
+    # ever set when the build requested a two-team stack (settings.stack_team_2)
+    # -- None/0 for every no-stack or single-team-stack lineup, identical
+    # to before this field existed.
+    secondary_stack_team: Optional[str] = None
+    secondary_stack_size: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -132,6 +148,8 @@ class Lineup:
             "team_counts": self.team_counts,
             "primary_stack_team": self.primary_stack_team,
             "primary_stack_size": self.primary_stack_size,
+            "secondary_stack_team": self.secondary_stack_team,
+            "secondary_stack_size": self.secondary_stack_size,
             "sum_ownership": self.sum_ownership,
             "average_ownership": self.average_ownership,
             "max_ownership": self.max_ownership,

@@ -160,6 +160,39 @@ def test_compute_min_exposure_targets_rounds_up():
     assert targets["a"] == 2  # ceil(1.5)
 
 
+class TestExposureRoundingDeterminism:
+    """Phase 11: one deterministic rounding rule -- max exposure FLOORS,
+    min exposure CEILS -- verified against IEEE-754 float multiplication
+    ambiguity, not just the "nice" cases. 0.58 * 50 is exactly 29 in real
+    arithmetic but floats to 28.999999999999996 in float64; a bare
+    int(fraction * num_lineups) would silently under-allow by one lineup
+    (see optimizer/constraints.py's _EXPOSURE_ROUNDING_EPSILON)."""
+
+    def test_20_lineups_at_25_percent_allows_5(self):
+        caps = compute_exposure_count_caps({"a": 0.25}, 1.0, 20, ["a"])
+        assert caps["a"] == 5
+
+    def test_5_lineups_at_25_percent_allows_1(self):
+        caps = compute_exposure_count_caps({"a": 0.25}, 1.0, 5, ["a"])
+        assert caps["a"] == 1
+
+    def test_3_lineups_at_50_percent_allows_1(self):
+        caps = compute_exposure_count_caps({"a": 0.5}, 1.0, 3, ["a"])
+        assert caps["a"] == 1
+
+    def test_max_exposure_floors_on_a_float_boundary_that_rounds_down_in_binary(self):
+        # 0.58 * 50 == 29 exactly in real arithmetic; float64 computes
+        # 28.999999999999996. A naive int() would wrongly cap at 28.
+        caps = compute_exposure_count_caps({"a": 0.58}, 1.0, 50, ["a"])
+        assert caps["a"] == 29
+
+    def test_min_exposure_ceils_on_a_float_boundary_that_rounds_up_in_binary(self):
+        # 0.14 * 50 == 7 exactly in real arithmetic; float64 computes
+        # 7.000000000000001. A naive math.ceil() would wrongly require 8.
+        targets = compute_min_exposure_targets({"a": 0.14}, 50)
+        assert targets["a"] == 7
+
+
 def test_pitcher_vs_hitter_conflicts_detected():
     players = feasible_pool()
     conflicts = pitcher_vs_hitter_conflicts(players)

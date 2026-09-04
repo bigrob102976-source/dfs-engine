@@ -78,6 +78,22 @@ export function parseBuildRequest(body: unknown): ParseResult {
 
   const stackTeam = b.stackTeam === undefined || b.stackTeam === null ? null : String(b.stackTeam);
 
+  // Multi-team stacks (M2): shape-only validation here, same pattern as
+  // stackSize/stackTeam above. The REAL contradiction checks (stackSize2
+  // without stackTeam/stackTeam2, stackTeam === stackTeam2, etc.) are
+  // authoritative in optimizer/constraints.py::resolve_settings -- this
+  // just keeps obviously-malformed shapes from reaching the Python
+  // subprocess at all.
+  const stackSize2 = b.stackSize2 === undefined || b.stackSize2 === null ? null : Number(b.stackSize2);
+  if (stackSize2 !== null && (!Number.isInteger(stackSize2) || stackSize2 < 2 || stackSize2 > 5)) {
+    return { ok: false, error: "\"stackSize2\" must be an integer between 2 and 5, or null." };
+  }
+
+  const stackTeam2 = b.stackTeam2 === undefined || b.stackTeam2 === null ? null : String(b.stackTeam2);
+  if (stackSize2 !== null && stackTeam2 !== null && stackTeam !== null && stackTeam2 === stackTeam) {
+    return { ok: false, error: "\"stackTeam2\" must be different from \"stackTeam\"." };
+  }
+
   const minSalary = b.minSalary === undefined || b.minSalary === null ? null : Number(b.minSalary);
   if (minSalary !== null && (!Number.isFinite(minSalary) || minSalary < 0)) {
     return { ok: false, error: "\"minSalary\" must be a non-negative number, or null." };
@@ -124,6 +140,8 @@ export function parseBuildRequest(body: unknown): ParseResult {
       maxExposure,
       stackSize,
       stackTeam,
+      stackSize2,
+      stackTeam2,
       allowPitcherVsHitter: Boolean(b.allowPitcherVsHitter),
       // PROBABLE FIX: ON by default -- only an explicit `false` turns it off.
       useProbableStarters: b.useProbableStarters === false ? false : true,

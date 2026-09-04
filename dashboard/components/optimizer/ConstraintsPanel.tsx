@@ -1,6 +1,6 @@
 "use client";
 
-import { MIN_UNIQUE_OPTIONS, PRIMARY_STACK_PRESETS, SECONDARY_STACK_PRESETS_PLANNED } from "@/lib/dkRosterRules";
+import { MIN_UNIQUE_OPTIONS, STACK_TYPE_OPTIONS } from "@/lib/dkRosterRules";
 import type { OptimizerPoolResult } from "@/lib/optimizerWorkspace/types";
 
 interface ConstraintsPanelProps {
@@ -14,8 +14,16 @@ interface ConstraintsPanelProps {
 
   stackSize: number | null;
   stackTeam: string | null;
-  onStackSizeChange: (size: number | null) => void;
+  // Multi-team stacks (M2): stackSize2/stackTeam2 are only ever
+  // meaningful together (a "5-3" etc.) -- see STACK_TYPE_OPTIONS.
+  stackSize2: number | null;
+  stackTeam2: string | null;
+  // Fires with BOTH sizes at once (a Stack Type preset click sets, e.g.,
+  // 5+3 together -- there's no meaningful "pick just the primary size"
+  // step for a two-team preset).
+  onStackTypeChange: (stackSize: number | null, stackSize2: number | null) => void;
   onStackTeamChange: (team: string | null) => void;
+  onStackTeam2Change: (team: string | null) => void;
 
   allowPitcherVsHitter: boolean;
   onAllowPitcherVsHitterChange: (value: boolean) => void;
@@ -42,8 +50,11 @@ export function ConstraintsPanel({
   onClearExclusions,
   stackSize,
   stackTeam,
-  onStackSizeChange,
+  stackSize2,
+  stackTeam2,
+  onStackTypeChange,
   onStackTeamChange,
+  onStackTeam2Change,
   allowPitcherVsHitter,
   onAllowPitcherVsHitterChange,
   useProbableStarters,
@@ -115,48 +126,70 @@ export function ConstraintsPanel({
       <section className="rounded border border-border-subtle bg-bg-panel-raised p-3">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">Stacking</div>
         <div className="mb-2 flex flex-wrap gap-1">
-          {PRIMARY_STACK_PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() => onStackSizeChange(preset.size)}
-              className={`rounded px-2 py-1 text-[11px] ${
-                stackSize === preset.size ? "bg-accent-dim text-text" : "bg-bg-panel text-text-faint hover:text-text-muted"
-              }`}
-            >
-              {preset.label}
-            </button>
-          ))}
+          {STACK_TYPE_OPTIONS.map((opt) => {
+            const isSelected = stackSize === opt.stackSize && stackSize2 === opt.stackSize2;
+            return (
+              <button
+                key={opt.label}
+                type="button"
+                onClick={() => onStackTypeChange(opt.stackSize, opt.stackSize2)}
+                className={`rounded px-2 py-1 text-[11px] ${
+                  isSelected ? "bg-accent-dim text-text" : "bg-bg-panel text-text-faint hover:text-text-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
-        <label className="mb-2 flex items-center gap-2 text-xs text-text-muted">
-          Stack Team
-          <select
-            value={stackTeam ?? ""}
-            onChange={(e) => onStackTeamChange(e.target.value || null)}
-            disabled={stackSize === null}
-            className="rounded border border-border bg-bg-panel px-2 py-1 text-text disabled:opacity-40"
-          >
-            <option value="">Any</option>
-            {teams.map((team) => (
-              <option key={team} value={team}>
-                {team}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="border-t border-border-subtle pt-2">
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-faint">Secondary Stack -- Planned</div>
-          <div className="flex flex-wrap gap-1">
-            {SECONDARY_STACK_PRESETS_PLANNED.map((label) => (
-              <span key={label} className="cursor-not-allowed rounded bg-bg-panel px-2 py-1 text-[11px] text-text-faint opacity-50" title="Not yet supported by the optimizer">
-                {label}
-              </span>
-            ))}
-          </div>
-          <p className="mt-1 text-[10px] text-text-faint">
-            The optimizer currently enforces one required team stack per lineup. Multi-stack presets are disabled, not faked.
-          </p>
-        </div>
+        {(() => {
+          const selectedType = STACK_TYPE_OPTIONS.find((opt) => opt.stackSize === stackSize && opt.stackSize2 === stackSize2);
+          const requiresSecondaryTeam = selectedType?.requiresSecondaryTeam ?? false;
+          return (
+            <>
+              <label className="mb-2 flex items-center gap-2 text-xs text-text-muted">
+                Primary Team
+                <select
+                  value={stackTeam ?? ""}
+                  onChange={(e) => onStackTeamChange(e.target.value || null)}
+                  disabled={stackSize === null}
+                  className="rounded border border-border bg-bg-panel px-2 py-1 text-text disabled:opacity-40"
+                >
+                  <option value="">{requiresSecondaryTeam ? "Select a team" : "Any"}</option>
+                  {teams.map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {requiresSecondaryTeam && (
+                <label className="mb-2 flex items-center gap-2 text-xs text-text-muted">
+                  Secondary Team
+                  <select
+                    value={stackTeam2 ?? ""}
+                    onChange={(e) => onStackTeam2Change(e.target.value || null)}
+                    className="rounded border border-border bg-bg-panel px-2 py-1 text-text"
+                  >
+                    <option value="">Select a team</option>
+                    {teams
+                      .filter((team) => team !== stackTeam)
+                      .map((team) => (
+                        <option key={team} value={team}>
+                          {team}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              {requiresSecondaryTeam && !stackTeam && (
+                <p className="mb-2 text-[10px] text-yellow">
+                  Two-team stacks require an explicit Primary Team -- automatic team selection is not supported for two-team stacks.
+                </p>
+              )}
+            </>
+          );
+        })()}
       </section>
 
       <section className="rounded border border-border-subtle bg-bg-panel-raised p-3">

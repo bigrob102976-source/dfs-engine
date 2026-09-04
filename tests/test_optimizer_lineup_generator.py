@@ -78,6 +78,28 @@ def test_max_exposure_respected_across_lineups():
     assert count <= 3  # 0.5 * 6
 
 
+def test_min_unique_still_enforced_when_a_previous_lineups_player_later_hits_exposure_cap():
+    """Bug found live (M2, real 39-player slate): a tight stack thins the
+    pool enough that once a player shared with an earlier lineup hits its
+    own exposure cap and becomes dynamically excluded, the uniqueness
+    constraint against that earlier lineup used to be skipped entirely
+    (see optimizer/solver.py's fix comment) -- letting two generated
+    lineups differ by fewer than min_unique players. Reproduced here with
+    a tight PHI stack (only 7 eligible hitters) + a low cap on one of them."""
+    players = feasible_pool()
+    settings = OptimizerSettings(
+        num_lineups=6, min_unique=2, stack_size=5, stack_team="PHI",
+        max_exposure={"Phi Of1": 0.34},  # int(0.34 * 6) == 2
+    )
+    out = generate_lineups(players, settings)
+    lineups = out.result.lineups
+    assert len(lineups) >= 3
+    for i, a in enumerate(lineups):
+        for b in lineups[i + 1:]:
+            shared = set(a.player_keys()) & set(b.player_keys())
+            assert 10 - len(shared) >= 2, f"lineup {a.index} and {b.index} differ by only {10 - len(shared)} player(s)"
+
+
 def test_insufficient_unique_lineups_reports_shortfall_without_duplicates():
     players = feasible_pool()
     # Locking 6 of 10 slots (5 PHI non-OF hitters, already at PHI's team

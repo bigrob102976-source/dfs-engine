@@ -147,7 +147,53 @@ def resolve_settings(
             raise OptimizerConfigError(f"{player.name!r} is excluded but also has a --min-exposure target -- contradiction.")
         min_exposure_by_key[player.key] = fraction
 
+    _validate_stack_settings(settings)
+
     return eligible, locked_keys, excluded_keys, max_exposure_by_key, min_exposure_by_key
+
+
+def _validate_stack_settings(settings: OptimizerSettings) -> None:
+    """Multi-team stacks (M2): a second, independent required team stack
+    is only ever well-formed as an explicit (team, size) pair layered on
+    top of an explicit primary (team, size) pair -- raised BEFORE any
+    solve, exactly like every other contradiction resolve_settings()
+    already guards (never a generic solver failure for something this
+    cheaply detectable)."""
+    if settings.stack_size_2:
+        if not settings.stack_size:
+            raise OptimizerConfigError(
+                "A secondary stack size (--stack-size-2) was set without a primary --stack-size."
+            )
+        if not settings.stack_team:
+            raise OptimizerConfigError(
+                "Two-team stacks require an explicit primary --stack-team -- automatic ('any team') primary "
+                "selection is not supported for two-team stacks."
+            )
+        if not settings.stack_team_2:
+            raise OptimizerConfigError(
+                "A secondary stack size (--stack-size-2) was set without a --stack-team-2."
+            )
+        if settings.stack_team == settings.stack_team_2:
+            raise OptimizerConfigError(
+                f"Primary and secondary stack teams must be different (both set to {settings.stack_team!r})."
+            )
+    elif settings.stack_team_2:
+        raise OptimizerConfigError("--stack-team-2 was set without --stack-size-2.")
+
+
+# Exposure rounding policy (deterministic, documented -- Phase 11):
+#   max exposure -> FLOOR(fraction * num_lineups)   (never promise more than requested)
+#   min exposure -> CEIL(fraction * num_lineups)    (never promise less than requested)
+# A plain `int(fraction * num_lineups)` / `math.ceil(...)` is NOT safe on
+# its own: IEEE-754 float multiplication can land a fraction that should
+# be an EXACT integer boundary (e.g. 0.58 * 50 == 29 exactly, in real
+# arithmetic) a hair below or above it instead (0.58 * 50 ==
+# 28.999999999999996 in float64), silently under- or over-allowing by one
+# lineup. This epsilon nudges the value back onto its true integer
+# boundary before flooring/ceiling -- verified against every
+# (percent, num_lineups) pair for percent in 1..99 and num_lineups in
+# 1..200, zero mismatches against the exact (fractions.Fraction) result.
+_EXPOSURE_ROUNDING_EPSILON = 1e-9
 
 
 def compute_exposure_count_caps(
@@ -156,12 +202,15 @@ def compute_exposure_count_caps(
     caps = {}
     for key in all_keys:
         fraction = max_exposure_by_key.get(key, default_fraction)
-        caps[key] = num_lineups if fraction >= 1.0 else int(fraction * num_lineups)
+        caps[key] = num_lineups if fraction >= 1.0 else int(fraction * num_lineups + _EXPOSURE_ROUNDING_EPSILON)
     return caps
 
 
 def compute_min_exposure_targets(min_exposure_by_key: Dict[str, float], num_lineups: int) -> Dict[str, int]:
-    return {key: math.ceil(fraction * num_lineups) for key, fraction in min_exposure_by_key.items()}
+    return {
+        key: math.ceil(fraction * num_lineups - _EXPOSURE_ROUNDING_EPSILON)
+        for key, fraction in min_exposure_by_key.items()
+    }
 
 
 def hitters_by_team(players: List[OptimizerPlayer]) -> Dict[str, List[OptimizerPlayer]]:
@@ -235,6 +284,32 @@ def _concrete_infeasibility_reasons(eligible_players: List[OptimizerPlayer], set
             teams = hitters_by_team(eligible_players)
             if not any(len(v) >= settings.stack_size for v in teams.values()):
                 reasons.append(f"No team in the eligible pool has {settings.stack_size}+ eligible hitters for the requested stack.")
+
+    if settings.stack_size_2 and settings.stack_team_2:
+        team_hitters_2 = [p for p in eligible_players if p.player_type == "hitter" and p.team == settings.stack_team_2]
+        if len(team_hitters_2) < settings.stack_size_2:
+            reasons.append(
+                f"--stack-team-2 {settings.stack_team_2} only has {len(team_hitters_2)} eligible hitter(s) "
+                f"(need {settings.stack_size_2})."
+            )
+        # A 5+3 (or similar) stack needs 8 DISTINCT hitters split across
+        # two specific teams -- even when each team individually clears
+        # its own bar, the two together might not both fit within the 8
+        # hitter roster slots at once (e.g. a stack_size + stack_size_2
+        # combination that would need more hitters than DK_ROSTER_SIZE
+        # has non-pitcher slots for). Checked here as a concrete,
+        # cheaply-computable combined bound rather than left as a bare
+        # solver infeasibility with no explanation.
+        if settings.stack_size:
+            hitter_slot_count = DK_ROSTER_SIZE - sum(
+                s["count"] for s in DK_CLASSIC_ROSTER_SLOTS if s["slot"] == "P"
+            )
+            if settings.stack_size + settings.stack_size_2 > hitter_slot_count:
+                reasons.append(
+                    f"Combined stack of {settings.stack_size} + {settings.stack_size_2} = "
+                    f"{settings.stack_size + settings.stack_size_2} hitters exceeds the {hitter_slot_count} hitter "
+                    f"roster slots available in a DraftKings Classic MLB lineup."
+                )
 
     return reasons
 

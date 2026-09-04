@@ -51,6 +51,8 @@ function baseRequest(overrides: Partial<OptimizerBuildRequest> = {}): OptimizerB
     maxExposure: {},
     stackSize: null,
     stackTeam: null,
+    stackSize2: null,
+    stackTeam2: null,
     allowPitcherVsHitter: false,
     minSalary: null,
     minUnique: 2,
@@ -247,6 +249,56 @@ describe("buildLineups", () => {
     expect(argValue(buildCall.args, "--min-confidence")).toBe("60");
     expect(argValue(buildCall.args, "--max-player-risk")).toBe("70");
     expect(buildCall.args).toContain("--interactive");
+  });
+
+  it("Multi-team stacks (M2): builds argv with --stack-size-2/--stack-team-2 for a two-team stack", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    await seedCachedPool(calls);
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(
+      makeFakeRunner(
+        {
+          "scripts/optimize_dk_lineups.py": (args) => {
+            if (args.includes("--validate-only")) return ok(JSON.stringify({ errors: [] }));
+            writeJson(`lineups/${DATE}/dk_lineups_${nextTs()}.json`, { lineups_requested: 1, lineups_generated: 1, stopped_reason: null, lineups: [] });
+            return ok();
+          },
+        },
+        calls,
+      ),
+    );
+
+    const { buildLineups } = await import("../buildRunner");
+    await buildLineups(baseRequest({ lineups: 1, stackSize: 5, stackTeam: "PHI", stackSize2: 3, stackTeam2: "NYY" }));
+    const buildCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py" && !c.args.includes("--validate-only"))!;
+    expect(argValue(buildCall.args, "--stack-size")).toBe("5");
+    expect(argValue(buildCall.args, "--stack-team")).toBe("PHI");
+    expect(argValue(buildCall.args, "--stack-size-2")).toBe("3");
+    expect(argValue(buildCall.args, "--stack-team-2")).toBe("NYY");
+  });
+
+  it("Multi-team stacks (M2): never sends --stack-size-2/--stack-team-2 for a single-team (or no) stack", async () => {
+    const calls: Array<{ script: string; args: string[] }> = [];
+    await seedCachedPool(calls);
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(
+      makeFakeRunner(
+        {
+          "scripts/optimize_dk_lineups.py": (args) => {
+            if (args.includes("--validate-only")) return ok(JSON.stringify({ errors: [] }));
+            writeJson(`lineups/${DATE}/dk_lineups_${nextTs()}.json`, { lineups_requested: 1, lineups_generated: 1, stopped_reason: null, lineups: [] });
+            return ok();
+          },
+        },
+        calls,
+      ),
+    );
+
+    const { buildLineups } = await import("../buildRunner");
+    await buildLineups(baseRequest({ lineups: 1, stackSize: 5, stackTeam: "PHI" }));
+    const buildCall = calls.find((c) => c.script === "scripts/optimize_dk_lineups.py" && !c.args.includes("--validate-only"))!;
+    expect(buildCall.args).not.toContain("--stack-size-2");
+    expect(buildCall.args).not.toContain("--stack-team-2");
   });
 
   it("skips the real solve entirely when the pre-check finds errors", async () => {

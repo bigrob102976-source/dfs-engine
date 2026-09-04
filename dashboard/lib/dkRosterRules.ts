@@ -41,20 +41,29 @@ export const OPTIMIZER_OBJECTIVES = [
 
 export const LINEUP_COUNT_OPTIONS = [1, 5, 10, 20, 50, 100, 150];
 
-/** Primary-stack presets the (single-stack) optimizer can actually
- * enforce today. Presets that require a SECOND, independent team stack
- * (5/2, 5/3, 4/4, 4/3/1) are listed separately in
- * SECONDARY_STACK_PRESETS_PLANNED, disabled -- the optimizer's CP-SAT
- * model only supports one required team stack per lineup (see
- * optimizer/solver.py; grepped repo-wide, no secondary/multi-stack
- * concept exists anywhere). Not faking support for those. */
-export const PRIMARY_STACK_PRESETS = [
-  { label: "No Forced Stack", size: null },
-  { label: "3", size: 3 },
-  { label: "4", size: 4 },
-  { label: "5", size: 5 },
-];
+/** Multi-team stacks (M2): every stack shape the optimizer's CP-SAT model
+ * actually enforces (optimizer/solver.py -- a plain single-team stack via
+ * `stackSize`/`stackTeam`, or a second, independent team stack layered on
+ * top via `stackSize2`/`stackTeam2`). `requiresSecondaryTeam` is what
+ * ConstraintsPanel.tsx uses to decide whether to show the Secondary Team
+ * selector at all -- never rendering a control that isn't wired through
+ * to a real constraint. */
+export interface StackTypeOption {
+  label: string;
+  stackSize: number | null;
+  stackSize2: number | null;
+  requiresSecondaryTeam: boolean;
+}
 
-export const SECONDARY_STACK_PRESETS_PLANNED = ["5 / 2", "5 / 3", "4 / 4", "4 / 3 / 1"];
+export const STACK_TYPE_OPTIONS: StackTypeOption[] = [
+  { label: "None", stackSize: null, stackSize2: null, requiresSecondaryTeam: false },
+  { label: "3", stackSize: 3, stackSize2: null, requiresSecondaryTeam: false },
+  { label: "4", stackSize: 4, stackSize2: null, requiresSecondaryTeam: false },
+  { label: "5", stackSize: 5, stackSize2: null, requiresSecondaryTeam: false },
+  { label: "5-3", stackSize: 5, stackSize2: 3, requiresSecondaryTeam: true },
+  { label: "5-2", stackSize: 5, stackSize2: 2, requiresSecondaryTeam: true },
+  { label: "4-4", stackSize: 4, stackSize2: 4, requiresSecondaryTeam: true },
+  { label: "4-3", stackSize: 4, stackSize2: 3, requiresSecondaryTeam: true },
+];
 
 export const MIN_UNIQUE_OPTIONS = [1, 2, 3, 4];

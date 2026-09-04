@@ -116,8 +116,11 @@ function defaultProps(overrides: Partial<Parameters<typeof ConstraintsPanel>[0]>
     onClearExclusions: vi.fn(),
     stackSize: null,
     stackTeam: null,
-    onStackSizeChange: vi.fn(),
+    stackSize2: null,
+    stackTeam2: null,
+    onStackTypeChange: vi.fn(),
     onStackTeamChange: vi.fn(),
+    onStackTeam2Change: vi.fn(),
     allowPitcherVsHitter: false,
     onAllowPitcherVsHitterChange: vi.fn(),
     useProbableStarters: true,
@@ -163,29 +166,62 @@ describe("ConstraintsPanel", () => {
     expect(screen.getByText("No players excluded.")).toBeInTheDocument();
   });
 
-  it("calls onStackSizeChange when a primary stack preset is clicked", () => {
-    const onStackSizeChange = vi.fn();
-    render(<ConstraintsPanel {...defaultProps({ onStackSizeChange })} />);
+  it("calls onStackTypeChange with both sizes when a single-team preset is clicked", () => {
+    const onStackTypeChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onStackTypeChange })} />);
     fireEvent.click(screen.getByRole("button", { name: "5" }));
-    expect(onStackSizeChange).toHaveBeenCalledWith(5);
+    expect(onStackTypeChange).toHaveBeenCalledWith(5, null);
   });
 
-  it("disables the Stack Team selector until a stack size is chosen", () => {
+  it("calls onStackTypeChange with both sizes when a two-team preset is clicked", () => {
+    const onStackTypeChange = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ onStackTypeChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "5-3" }));
+    expect(onStackTypeChange).toHaveBeenCalledWith(5, 3);
+  });
+
+  it("disables the Primary Team selector until a stack type is chosen", () => {
     render(<ConstraintsPanel {...defaultProps({ stackSize: null })} />);
-    expect(screen.getByText("Stack Team").closest("label")!.querySelector("select")).toBeDisabled();
+    expect(screen.getByText("Primary Team").closest("label")!.querySelector("select")).toBeDisabled();
   });
 
-  it("enables the Stack Team selector once a stack size is chosen", () => {
+  it("enables the Primary Team selector once a stack size is chosen", () => {
     render(<ConstraintsPanel {...defaultProps({ stackSize: 5 })} />);
-    expect(screen.getByText("Stack Team").closest("label")!.querySelector("select")).not.toBeDisabled();
+    expect(screen.getByText("Primary Team").closest("label")!.querySelector("select")).not.toBeDisabled();
   });
 
-  it("secondary stack presets are shown but disabled, never faking support", () => {
-    render(<ConstraintsPanel {...defaultProps()} />);
-    const preset = screen.getByText("5 / 2");
-    expect(preset.tagName).toBe("SPAN"); // not a clickable button
-    expect(preset).toHaveAttribute("title", "Not yet supported by the optimizer");
-    expect(screen.getByText(/multi-stack presets are disabled, not faked/i)).toBeInTheDocument();
+  it("Primary Team allows 'Any' for a single-team stack", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5, stackSize2: null })} />);
+    const select = screen.getByText("Primary Team").closest("label")!.querySelector("select")!;
+    expect(select.querySelector("option[value='']")!.textContent).toBe("Any");
+  });
+
+  it("hides the Secondary Team selector for a single-team stack", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5, stackSize2: null })} />);
+    expect(screen.queryByText("Secondary Team")).not.toBeInTheDocument();
+  });
+
+  it("shows the Secondary Team selector for a two-team stack, requiring an explicit Primary Team", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5, stackSize2: 3 })} />);
+    const primarySelect = screen.getByText("Primary Team").closest("label")!.querySelector("select")!;
+    expect(primarySelect.querySelector("option[value='']")!.textContent).toBe("Select a team");
+    expect(screen.getByText("Secondary Team")).toBeInTheDocument();
+    expect(screen.getByText(/two-team stacks require an explicit primary team/i)).toBeInTheDocument();
+  });
+
+  it("Secondary Team options exclude the current Primary Team, preventing identical selections", () => {
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5, stackSize2: 3, stackTeam: "PHI" })} />);
+    const secondarySelect = screen.getByText("Secondary Team").closest("label")!.querySelector("select")!;
+    const optionValues = Array.from(secondarySelect.querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value);
+    expect(optionValues).not.toContain("PHI");
+  });
+
+  it("calls onStackTeam2Change when the Secondary Team selector changes", () => {
+    const onStackTeam2Change = vi.fn();
+    render(<ConstraintsPanel {...defaultProps({ stackSize: 5, stackSize2: 3, stackTeam: "PHI", onStackTeam2Change })} />);
+    const secondarySelect = screen.getByText("Secondary Team").closest("label")!.querySelector("select")!;
+    fireEvent.change(secondarySelect, { target: { value: "NYY" } });
+    expect(onStackTeam2Change).toHaveBeenCalledWith("NYY");
   });
 
   it("toggles allowPitcherVsHitter", () => {

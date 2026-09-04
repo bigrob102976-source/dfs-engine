@@ -113,8 +113,10 @@ def solve_single_lineup(
                 if hitter_key in used:
                     model.Add(used[pitcher_key] + used[hitter_key] <= 1)
 
-    if settings.stack_size:
+    if settings.stack_size or settings.stack_size_2:
         team_groups = hitters_by_team(candidate_pool)
+
+    if settings.stack_size:
         if settings.stack_team:
             team_vars = [used[p.key] for p in team_groups.get(settings.stack_team, []) if p.key in used]
             if not team_vars:
@@ -134,10 +136,35 @@ def solve_single_lineup(
                 return None
             model.Add(sum(indicators) >= 1)
 
+    # Multi-team stacks (M2): a second, independent required team stack.
+    # resolve_settings() already guarantees stack_size_2 never appears
+    # without an explicit stack_team/stack_team_2 pair and that the two
+    # teams differ, so this is always a plain second linear inequality on
+    # a disjoint set of hitters (hitters_by_team groups each hitter under
+    # exactly one team) -- the same hitter can never satisfy both.
+    if settings.stack_size_2:
+        secondary_vars = [used[p.key] for p in team_groups.get(settings.stack_team_2, []) if p.key in used]
+        if not secondary_vars:
+            return None
+        model.Add(sum(secondary_vars) >= settings.stack_size_2)
+
+    # Uniqueness bug fix (found live, M2): a previous lineup's player who
+    # is unavailable THIS solve (e.g. dynamically excluded for hitting an
+    # exposure cap, see lineup_generator.py) can never appear in the new
+    # lineup either way -- it contributes exactly 0 to the shared-player
+    # count, not an unknown. The constraint is correct with however many
+    # of prev_keys are still present in `used` (down to zero, a vacuous
+    # no-op when every one of them is gone); it must NEVER be skipped
+    # just because some are missing. Skipping it (the old behavior) let
+    # two generated lineups differ by fewer than min_unique players
+    # whenever a shared player from the earlier lineup happened to hit
+    # its exposure cap before the later lineup was solved -- confirmed
+    # live against a real 39-player slate (stack + exposure + min_unique
+    # together: lineups 3/14, 7/15, and 13/19 each differed by only 1
+    # player against a min_unique=2 request).
     for prev_keys in previous_lineups:
         prev_vars = [used[k] for k in prev_keys if k in used]
-        if len(prev_vars) == len(prev_keys):
-            model.Add(sum(prev_vars) <= len(prev_keys) - settings.min_unique)
+        model.Add(sum(prev_vars) <= len(prev_keys) - settings.min_unique)
 
     objective_terms = [used[k] * scaled_objective_value(by_key[k], settings.objective_mode) for k in used]
     model.Maximize(sum(objective_terms))

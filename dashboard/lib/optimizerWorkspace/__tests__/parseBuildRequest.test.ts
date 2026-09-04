@@ -91,6 +91,36 @@ describe("parseBuildRequest", () => {
     }
   });
 
+  it("defaults stackSize2/stackTeam2 to null when omitted", () => {
+    const result = parseBuildRequest(baseBody());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.stackSize2).toBeNull();
+      expect(result.request.stackTeam2).toBeNull();
+    }
+  });
+
+  it("rejects stackSize2 outside 2-5", () => {
+    expect(parseBuildRequest(baseBody({ stackSize: 5, stackTeam: "PHI", stackSize2: 1, stackTeam2: "NYY" })).ok).toBe(false);
+    expect(parseBuildRequest(baseBody({ stackSize: 5, stackTeam: "PHI", stackSize2: 6, stackTeam2: "NYY" })).ok).toBe(false);
+  });
+
+  it("accepts a valid two-team stack (e.g. 5-3)", () => {
+    const result = parseBuildRequest(baseBody({ stackSize: 5, stackTeam: "PHI", stackSize2: 3, stackTeam2: "NYY" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.stackSize).toBe(5);
+      expect(result.request.stackTeam).toBe("PHI");
+      expect(result.request.stackSize2).toBe(3);
+      expect(result.request.stackTeam2).toBe("NYY");
+    }
+  });
+
+  it("rejects an identical primary and secondary stack team", () => {
+    const result = parseBuildRequest(baseBody({ stackSize: 5, stackTeam: "PHI", stackSize2: 3, stackTeam2: "PHI" }));
+    expect(result.ok).toBe(false);
+  });
+
   it("rejects a negative minSalary", () => {
     expect(parseBuildRequest(baseBody({ minSalary: -100 })).ok).toBe(false);
   });

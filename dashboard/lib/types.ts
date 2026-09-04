@@ -270,6 +270,11 @@ export interface Lineup extends JsonRecord {
   team_counts: Record<string, number>;
   primary_stack_team: string | null;
   primary_stack_size: number;
+  // Multi-team stacks (M2): only ever set for a two-team stack build --
+  // null/0 for every no-stack or single-team-stack lineup, identical to
+  // before this field existed.
+  secondary_stack_team?: string | null;
+  secondary_stack_size?: number;
   sum_ownership: number | null;
   average_ownership: number | null;
   max_ownership: number | null;

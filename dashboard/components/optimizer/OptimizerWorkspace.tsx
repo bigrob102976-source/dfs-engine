@@ -133,6 +133,11 @@ export function OptimizerWorkspace({
   const [maxExposure, setMaxExposure] = useState<Record<string, number>>({});
   const [stackSize, setStackSize] = useState<number | null>(null);
   const [stackTeam, setStackTeam] = useState<string | null>(null);
+  // Multi-team stacks (M2): a second, independent required team stack
+  // (e.g. 5-3) -- see lib/dkRosterRules.ts's STACK_TYPE_OPTIONS. Only
+  // ever meaningful together (both null/null for None/3/4/5).
+  const [stackSize2, setStackSize2] = useState<number | null>(null);
+  const [stackTeam2, setStackTeam2] = useState<string | null>(null);
   // Milestone 32.6 Part 4: set only when the current stackTeam/stackSize
   // came from a Stacks page "Use This Stack" handoff (?stackTeam=&
   // stackSize= in the URL) -- shown as a one-time confirmation banner,
@@ -224,6 +229,8 @@ export function OptimizerWorkspace({
         setMaxExposure(persisted.maxExposure);
         setStackSize(persisted.stackSize);
         setStackTeam(persisted.stackTeam);
+        setStackSize2(persisted.stackSize2 ?? null);
+        setStackTeam2(persisted.stackTeam2 ?? null);
         setAllowPitcherVsHitter(persisted.allowPitcherVsHitter);
         // PROBABLE FIX: defaults true for a persisted session that
         // predates this milestone (the field is simply absent) -- same
@@ -319,6 +326,12 @@ export function OptimizerWorkspace({
         if (urlStackTeam !== stackTeam || urlStackSize !== stackSize) {
           setStackTeam(urlStackTeam);
           setStackSize(urlStackSize);
+          // Stacks page recommendations are always single-team (see its
+          // own docstring) -- a handoff always resets any two-team
+          // stack that was previously configured, never leaves a stale
+          // secondary team/size paired with the new primary.
+          setStackSize2(null);
+          setStackTeam2(null);
         }
         setStackHandoff({ team: urlStackTeam, size: urlStackSize });
       }
@@ -338,6 +351,8 @@ export function OptimizerWorkspace({
       maxExposure,
       stackSize,
       stackTeam,
+      stackSize2,
+      stackTeam2,
       allowPitcherVsHitter,
       useProbableStarters,
       minSalary,
@@ -349,7 +364,7 @@ export function OptimizerWorkspace({
       canonicalTestMode,
     });
   }, [
-    hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique,
+    hydrated, selectedSlateId, selectedDate, locks, exclusions, maxExposure, stackSize, stackTeam, stackSize2, stackTeam2, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique,
     lineups, objective, projectionSource, showProjectionComparison, canonicalTestMode,
   ]);
 
@@ -492,6 +507,15 @@ export function OptimizerWorkspace({
           stackWarnings.push(`Stack team ${stackTeam} is no longer on this slate's pool -- the stack constraint was cleared.`);
           setStackTeam(null);
           setStackHandoff(null);
+          // A primary team disappearing invalidates any two-team stack
+          // built on top of it too -- never leave a secondary
+          // size/team stranded with no primary.
+          setStackSize2(null);
+          setStackTeam2(null);
+        } else if (stackTeam2 && !teams.has(stackTeam2)) {
+          stackWarnings.push(`Secondary stack team ${stackTeam2} is no longer on this slate's pool -- the secondary stack constraint was cleared.`);
+          setStackSize2(null);
+          setStackTeam2(null);
         }
         setReconcileWarnings([...reconciled.warnings, ...stackWarnings]);
       })
@@ -499,7 +523,7 @@ export function OptimizerWorkspace({
         setPoolLoading(false);
         setPoolError("Failed to load player pool.");
       });
-  }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam, canonicalTestMode]);
+  }, [locks, exclusions, maxExposure, pool, selectedDate, stackTeam, stackTeam2, canonicalTestMode]);
 
   useEffect(() => {
     // slatesValidated: never load a pool for a selectedSlateId that
@@ -549,6 +573,8 @@ export function OptimizerWorkspace({
       maxExposure: maxExposureByName,
       stackSize,
       stackTeam,
+      stackSize2,
+      stackTeam2,
       allowPitcherVsHitter,
       useProbableStarters,
       minSalary,
@@ -557,7 +583,7 @@ export function OptimizerWorkspace({
       servingBackend: canonicalTestMode ? ("CANONICAL_POSTGRES" as const) : undefined,
     };
   }, [
-    pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters,
+    pool, locks, exclusions, maxExposure, selectedSlateId, selectedDate, lineups, objective, stackSize, stackTeam, stackSize2, stackTeam2, allowPitcherVsHitter, useProbableStarters,
     minSalary, minUnique, projectionSource, canonicalTestMode,
   ]);
 
@@ -636,7 +662,7 @@ export function OptimizerWorkspace({
         });
     }, 500);
     return () => clearTimeout(handle);
-  }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique, objective, buildRequestBody]);
+  }, [pool, locks, exclusions, maxExposure, stackSize, stackTeam, stackSize2, stackTeam2, allowPitcherVsHitter, useProbableStarters, minSalary, minUnique, objective, buildRequestBody]);
 
   function handleBuild() {
     setBuilding(true);
@@ -1147,13 +1173,26 @@ export function OptimizerWorkspace({
             onClearExclusions={() => setExclusions([])}
             stackSize={stackSize}
             stackTeam={stackTeam}
-            onStackSizeChange={(size) => {
+            stackSize2={stackSize2}
+            stackTeam2={stackTeam2}
+            onStackTypeChange={(size, size2) => {
               setStackHandoff(null);
               setStackSize(size);
+              setStackSize2(size2);
+              // Switching to a stack type that no longer needs a
+              // secondary team (None/3/4/5) clears any stale secondary
+              // team selection from a previous two-team stack.
+              if (size2 === null) setStackTeam2(null);
             }}
             onStackTeamChange={(team) => {
               setStackHandoff(null);
               setStackTeam(team);
+              // Never leave the secondary team equal to the (new) primary.
+              if (team !== null && team === stackTeam2) setStackTeam2(null);
+            }}
+            onStackTeam2Change={(team) => {
+              setStackHandoff(null);
+              setStackTeam2(team);
             }}
             allowPitcherVsHitter={allowPitcherVsHitter}
             onAllowPitcherVsHitterChange={setAllowPitcherVsHitter}

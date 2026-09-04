@@ -248,6 +248,16 @@ export interface OptimizerBuildRequest {
   maxExposure: Record<string, number>; // player name -> fraction (0-1)
   stackSize: number | null;
   stackTeam: string | null;
+  // Multi-team stacks (M2): a SECOND, independent required team stack
+  // (e.g. stackSize=5/stackTeam="NYY" + stackSize2=3/stackTeam2="BOS" for
+  // a 5-3). Only ever meaningful together with stackSize/stackTeam --
+  // parseBuildRequest.ts/optimizer/constraints.py::resolve_settings both
+  // reject stackSize2 without an explicit stackTeam (no AUTO primary for
+  // two-team stacks) or without stackTeam2, and reject stackTeam ===
+  // stackTeam2. null/null (the default) is byte-identical to every
+  // pre-M2 single-team-or-no-stack build.
+  stackSize2: number | null;
+  stackTeam2: string | null;
   allowPitcherVsHitter: boolean;
   // PROBABLE FIX milestone: ON by default (real, evidence-based probable
   // starters are included exactly like confirmed ones) -- set false to

@@ -911,7 +911,7 @@ describe("OptimizerWorkspace", () => {
       render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument());
 
-      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+      await waitFor(() => expect(screen.getByLabelText("Primary Team")).toHaveValue("BOS"));
       expect(screen.getByText(/Stack: BOS/)).toBeInTheDocument();
       expect(screen.getByText(/×1/)).toBeInTheDocument();
       expect(screen.getByText(/Team stack rule only/)).toBeInTheDocument();
@@ -922,7 +922,7 @@ describe("OptimizerWorkspace", () => {
       installFetchMock();
       render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument());
-      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+      await waitFor(() => expect(screen.getByLabelText("Primary Team")).toHaveValue("BOS"));
 
       expect(screen.getByText("Locked (0)")).toBeInTheDocument();
       expect(screen.getByText("No players locked.")).toBeInTheDocument();
@@ -932,10 +932,10 @@ describe("OptimizerWorkspace", () => {
       mockSearchParams = new URLSearchParams("stackTeam=BOS&stackSize=1");
       installFetchMock();
       render(<OptimizerWorkspace canUseBigMoneyMl={false} />);
-      await waitFor(() => expect(screen.getByLabelText("Stack Team")).toHaveValue("BOS"));
+      await waitFor(() => expect(screen.getByLabelText("Primary Team")).toHaveValue("BOS"));
       expect(screen.getByText(/Stack: BOS/)).toBeInTheDocument();
 
-      fireEvent.change(screen.getByLabelText("Stack Team"), { target: { value: "" } });
+      fireEvent.change(screen.getByLabelText("Primary Team"), { target: { value: "" } });
       await waitFor(() => expect(screen.queryByText(/applied from Stacks/)).not.toBeInTheDocument());
     });
 

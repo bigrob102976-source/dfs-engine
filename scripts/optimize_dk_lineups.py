@@ -324,6 +324,13 @@ def main() -> None:
     parser.add_argument("--min-unique", type=int, default=1)
     parser.add_argument("--stack-size", type=int, default=None)
     parser.add_argument("--stack-team", default=None)
+    parser.add_argument(
+        "--stack-size-2", type=int, default=None,
+        help="Multi-team stacks (M2): a SECOND, independent required team stack size (e.g. --stack-size 5 "
+             "--stack-team NYY --stack-size-2 3 --stack-team-2 BOS for a 5-3). Requires --stack-size, "
+             "--stack-team, and --stack-team-2 all be set; the two teams must differ.",
+    )
+    parser.add_argument("--stack-team-2", default=None, help="Secondary stack team -- see --stack-size-2.")
     parser.add_argument("--lock", action="append", default=[])
     parser.add_argument("--exclude", action="append", default=[])
     parser.add_argument("--max-exposure", action="append", default=[])
@@ -398,7 +405,9 @@ def main() -> None:
 
     settings = OptimizerSettings(
         objective_mode=args.objective, num_lineups=args.lineups, min_unique=args.min_unique,
-        stack_size=args.stack_size, stack_team=args.stack_team, locks=list(args.lock), excludes=list(args.exclude),
+        stack_size=args.stack_size, stack_team=args.stack_team,
+        stack_size_2=args.stack_size_2, stack_team_2=args.stack_team_2,
+        locks=list(args.lock), excludes=list(args.exclude),
         max_exposure=dict(_parse_key_value(a, "--max-exposure") for a in args.max_exposure),
         max_exposure_default=args.max_exposure_default,
         min_exposure=dict(_parse_key_value(a, "--min-exposure") for a in args.min_exposure),
@@ -468,6 +477,8 @@ def main() -> None:
         for lineup in result.lineups:
             if lineup.primary_stack_team:
                 key = f"{lineup.primary_stack_team} ({lineup.primary_stack_size})"
+                if lineup.secondary_stack_team:
+                    key += f" / {lineup.secondary_stack_team} ({lineup.secondary_stack_size})"
                 stack_counts[key] = stack_counts.get(key, 0) + 1
         print("Stack distribution:")
         for key, count in sorted(stack_counts.items(), key=lambda kv: -kv[1]):

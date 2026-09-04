@@ -112,6 +112,38 @@ def test_stack_requirement_not_met_detected():
     assert any("Stack requirement" in v or "No team meets" in v for v in violations)
 
 
+def test_secondary_stack_requirement_not_met_detected():
+    by_key = _players_by_key()
+    # 5 PHI hitters (meets primary) but only 2 NYY hitters (< secondary of 3).
+    assignments = [
+        _assignment("P", by_key["p_tor"]), _assignment("P", by_key["p_pit"]),
+        _assignment("C", by_key["phi_c"]), _assignment("1B", by_key["phi_1b"]),
+        _assignment("2B", by_key["phi_2b"]), _assignment("3B", by_key["phi_3b"]),
+        _assignment("SS", by_key["phi_ss"]), _assignment("OF", by_key["nyy_of1"]),
+        _assignment("OF", by_key["nyy_of2"]), _assignment("OF", by_key["phi_of1"]),
+    ]
+    lineup = _lineup(assignments)
+    settings = OptimizerSettings(stack_size=5, stack_team="PHI", stack_size_2=3, stack_team_2="NYY")
+    violations = validate_lineup(lineup, by_key, settings)
+    assert any("Secondary stack requirement" in v for v in violations)
+
+
+def test_secondary_stack_requirement_met_no_violation():
+    by_key = _players_by_key()
+    # 5 PHI hitters + 3 NYY hitters -- satisfies a 5-3 with MINIMUM semantics.
+    assignments = [
+        _assignment("P", by_key["p_tor"]), _assignment("P", by_key["p_pit"]),
+        _assignment("C", by_key["phi_c"]), _assignment("1B", by_key["phi_1b"]),
+        _assignment("2B", by_key["phi_2b"]), _assignment("3B", by_key["phi_3b"]),
+        _assignment("SS", by_key["phi_ss"]), _assignment("OF", by_key["nyy_of1"]),
+        _assignment("OF", by_key["nyy_of2"]), _assignment("OF", by_key["nyy_of3"]),
+    ]
+    lineup = _lineup(assignments)
+    settings = OptimizerSettings(stack_size=5, stack_team="PHI", stack_size_2=3, stack_team_2="NYY")
+    violations = validate_lineup(lineup, by_key, settings)
+    assert violations == []
+
+
 def test_pitcher_vs_hitter_conflict_detected():
     by_key = _players_by_key()
     assignments = _legal_assignments(by_key)

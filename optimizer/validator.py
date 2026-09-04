@@ -78,6 +78,16 @@ def validate_lineup(
             if not hitter_team_counts or max(hitter_team_counts.values()) < settings.stack_size:
                 violations.append(f"No team meets the required stack size of {settings.stack_size}.")
 
+    # Multi-team stacks (M2): MINIMUM semantics, independently re-checked
+    # here exactly like every other constraint in this module -- "5-3"
+    # means ">=5 primary AND >=3 secondary", never an exact match. Never
+    # trusts that solve_single_lineup's own constraint was applied correctly.
+    if settings.stack_size_2 and settings.stack_team_2:
+        if hitter_team_counts.get(settings.stack_team_2, 0) < settings.stack_size_2:
+            violations.append(
+                f"Secondary stack requirement not met for {settings.stack_team_2} (need {settings.stack_size_2})."
+            )
+
     if not settings.allow_pitcher_vs_hitter:
         conflicts = pitcher_vs_hitter_conflicts(list(players_by_key.values()))
         for a in lineup.assignments:

@@ -134,7 +134,11 @@ export function LineupsPanel({ result }: { result: OptimizerBuildResult }) {
                   <td className="px-2 py-1.5 text-right text-text-muted">{fmt(lineup.average_risk)}</td>
                   <td className="px-2 py-1.5 text-right text-text-muted">{fmt(lineup.average_confidence)}</td>
                   <td className="px-2 py-1.5 text-text-muted">
-                    {lineup.primary_stack_team ? `${lineup.primary_stack_team} (${lineup.primary_stack_size})` : "--"}
+                    {lineup.primary_stack_team
+                      ? `${lineup.primary_stack_team} (${lineup.primary_stack_size})${
+                          lineup.secondary_stack_team ? ` / ${lineup.secondary_stack_team} (${lineup.secondary_stack_size})` : ""
+                        }`
+                      : "--"}
                   </td>
                 </tr>
                 {expanded === lineup.index && (
