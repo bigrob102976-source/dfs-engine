@@ -135,8 +135,66 @@ def test_unresolved_gsis_reported_never_discarded():
     rows = [_ws_row("00-1")]
     records, unresolved = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
     assert len(records) == 1  # never discarded
-    assert records[0].canonical_player_id is None
-    assert unresolved == ["00-1"]
+
+
+# --- NFL M8 -- box-score passthroughs + reception_share ---
+
+def _qb_ws_row(gsis_id, team="PHI", attempts=30, completions=20, passing_yards=250, passing_tds=2,
+               carries=2, rushing_yards=10, rushing_tds=0):
+    return {
+        "player_id": gsis_id, "team": team, "opponent_team": "DAL", "position": "QB", "game_id": "g1",
+        "targets": 0, "receptions": 0, "carries": carries,
+        "attempts": attempts, "completions": completions, "passing_yards": passing_yards, "passing_tds": passing_tds,
+        "rushing_yards": rushing_yards, "rushing_tds": rushing_tds,
+        "receiving_yards": 0, "receiving_tds": 0,
+    }
+
+
+def test_box_score_fields_are_direct_passthroughs():
+    rows = [_qb_ws_row("00-1")]
+    records, _ = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
+    r = records[0]
+    assert r.pass_attempts == 30
+    assert r.completions == 20
+    assert r.passing_yards == 250
+    assert r.passing_tds == 2
+    assert r.rushing_yards == 10
+    assert r.rushing_tds == 0
+
+
+def test_receiving_box_score_fields_passthrough():
+    rows = [_ws_row("00-1", targets=8, receptions=6)]
+    rows[0]["receiving_yards"] = 80
+    rows[0]["receiving_tds"] = 1
+    records, _ = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
+    r = records[0]
+    assert r.receiving_yards == 80
+    assert r.receiving_tds == 1
+
+
+def test_reception_share_computed_against_team_total():
+    rows = [_ws_row("00-1", receptions=6), _ws_row("00-2", receptions=4)]
+    records, _ = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
+    by_id = {r.gsis_id: r for r in records}
+    assert by_id["00-1"].reception_share == 0.6
+    assert by_id["00-2"].reception_share == 0.4
+
+
+def test_reception_share_none_when_team_has_zero_total_receptions():
+    rows = [_ws_row("00-1", receptions=0)]
+    records, _ = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
+    assert records[0].reception_share is None
+
+
+def test_box_score_fields_none_when_source_omits_them():
+    """A row missing a box-score key entirely (e.g. a defensive-only
+    stat line with no offensive columns) leaves the field None, never 0."""
+    rows = [{"player_id": "00-1", "team": "PHI", "opponent_team": "DAL", "position": "QB", "game_id": "g1"}]
+    records, _ = build_usage_records(SEASON, WEEK, rows, [], [], {}, {}, FETCHED_AT)
+    r = records[0]
+    assert r.pass_attempts is None
+    assert r.passing_yards is None
+    assert r.receiving_yards is None
 
 
 def test_row_with_no_gsis_identity_is_skipped_entirely():

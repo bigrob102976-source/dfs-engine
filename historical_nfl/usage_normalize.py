@@ -47,6 +47,15 @@ routes from snaps" instruction, NEITHER is done: routes and
 route_participation are left None on every M6C record, and the real
 gap is reported by usage_quality.py rather than papered over.
 
+NFL M8 adds reception_share (team_reception_share), derived exactly like
+target_share above (player receptions / SUM of every player's receptions
+on that team+week, both from load_player_stats()'s own `receptions`
+field -- self-consistent, never a play-by-play proxy), plus real
+box-score passthroughs (pass_attempts/completions/passing_yards/
+passing_tds/rushing_yards/rushing_tds/receiving_yards/receiving_tds),
+all DIRECT columns on load_player_stats() (confirmed live, 2025 Week 1)
+-- never derived, never invented.
+
 Red zone / goal line (Phase 9): defined here as yardline_100 <= 20
 (red zone -- "at or inside the opponent's 20") and yardline_100 <= 5
 (goal line -- "at or inside the opponent's 5"), using play-by-play's
@@ -68,16 +77,19 @@ RED_ZONE_YARDLINE_100 = 20
 GOAL_LINE_YARDLINE_100 = 5
 
 
-def _team_target_totals(weekly_stats_rows: List[dict]) -> Dict[Tuple[str, str], int]:
-    """{(team, ) -> team_targets} keyed just by team (one week's worth of
-    rows is always pre-filtered to a single season/week by the caller)."""
+def _team_field_totals(weekly_stats_rows: List[dict], field: str) -> Dict[str, int]:
+    """{team -> sum(field)} keyed just by team (one week's worth of rows
+    is always pre-filtered to a single season/week by the caller). Reused
+    for both target_share (field="targets") and NFL M8's reception_share
+    (field="receptions") -- same self-consistent "player's own stat /
+    SUM of every player's same stat on that team+week" derivation."""
     totals: Dict[str, int] = {}
     for row in weekly_stats_rows:
         team = row.get("team")
-        targets = row.get("targets")
-        if team is None or targets is None:
+        value = row.get(field)
+        if team is None or value is None:
             continue
-        totals[team] = totals.get(team, 0) + targets
+        totals[team] = totals.get(team, 0) + value
     return totals
 
 
@@ -152,7 +164,8 @@ def build_usage_records(
     """Returns (records, unresolved_canonical_gsis_ids) -- the latter is
     every real GSIS ID in this week's usage that has no M6B canonical
     mapping yet (Phase 5: reported, never discarded, never guessed)."""
-    team_targets = _team_target_totals(weekly_stats_rows)
+    team_targets = _team_field_totals(weekly_stats_rows, "targets")
+    team_receptions = _team_field_totals(weekly_stats_rows, "receptions")
     team_carries, player_carries = _pbp_carry_counts(pbp_rows)
     redzone_goalline = _pbp_redzone_goalline(pbp_rows)
     snaps_by_gsis = _snap_lookup_by_gsis(snap_counts_rows, pfr_gsis_bridge)
@@ -171,6 +184,12 @@ def build_usage_records(
         team_total_targets = team_targets.get(team) if team else None
         if targets is not None and team_total_targets:
             target_share = round(targets / team_total_targets, 4)
+
+        receptions = row.get("receptions")
+        reception_share = None
+        team_total_receptions = team_receptions.get(team) if team else None
+        if receptions is not None and team_total_receptions:
+            reception_share = round(receptions / team_total_receptions, 4)
 
         # A player absent from player_carries genuinely had zero
         # non-kneel rush attempts this week (every real play-by-play row
@@ -201,11 +220,15 @@ def build_usage_records(
             offensive_snaps=snap.get("offense_snaps"), defensive_snaps=snap.get("defense_snaps"),
             special_teams_snaps=snap.get("st_snaps"), snap_share=snap.get("offense_pct"),
             targets=targets, target_share=target_share,
-            receptions=row.get("receptions"),
+            receptions=receptions, reception_share=reception_share,
             carries=row.get("carries"), carry_share=carry_share,
             routes=None, route_participation=None,
             red_zone_targets=rz.get("red_zone_targets"), red_zone_carries=rz.get("red_zone_carries"),
             goal_line_carries=rz.get("goal_line_carries"),
+            pass_attempts=row.get("attempts"), completions=row.get("completions"),
+            passing_yards=row.get("passing_yards"), passing_tds=row.get("passing_tds"),
+            rushing_yards=row.get("rushing_yards"), rushing_tds=row.get("rushing_tds"),
+            receiving_yards=row.get("receiving_yards"), receiving_tds=row.get("receiving_tds"),
             source=SOURCE_WEEKLY_STATS_DERIVED,
             source_provenance=f"{SOURCE_WEEKLY_STATS_DERIVED}+{SOURCE_SNAP_COUNTS}+{SOURCE_PBP_DERIVED}",
             event_time=None, available_at=None, ingested_at=fetched_at,

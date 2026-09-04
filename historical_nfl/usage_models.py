@@ -34,7 +34,16 @@ routes / route_participation are left None for EVERY record in M6C --
 see historical_nfl/usage_normalize.py's module docstring for why
 nflverse's real load_participation() data does not decompose into a
 trustworthy per-player route count without an inference this milestone
-was explicitly told not to make."""
+was explicitly told not to make.
+
+NFL M8 -- adds real box-score fields (pass_attempts/completions/passing_
+yards/passing_tds/rushing_yards/rushing_tds/receiving_yards/receiving_tds),
+all DIRECT columns on nflreadpy.load_player_stats() (confirmed live,
+2025 Week 1 -- see historical_nfl/usage_normalize.py's module docstring),
+plus reception_share (team_reception_share), derived the same
+self-consistent way as target_share (player receptions / SUM of every
+player's receptions on that team+week, both from load_player_stats()'s
+own `receptions` field)."""
 
 from dataclasses import asdict, dataclass
 from typing import Optional
@@ -68,6 +77,7 @@ class NflUsageRecord:
     target_share: Optional[float] = None  # DERIVED -- see module docstring
 
     receptions: Optional[int] = None
+    reception_share: Optional[float] = None  # NFL M8 -- DERIVED, see module docstring
 
     carries: Optional[int] = None
     carry_share: Optional[float] = None  # DERIVED -- see module docstring
@@ -78,6 +88,20 @@ class NflUsageRecord:
     red_zone_targets: Optional[int] = None  # DERIVED from M6A play-by-play
     red_zone_carries: Optional[int] = None  # DERIVED from M6A play-by-play
     goal_line_carries: Optional[int] = None  # DERIVED from M6A play-by-play
+
+    # NFL M8 -- DIRECT columns on nflreadpy.load_player_stats(), never
+    # invented: a QB with 0 attempts is a real 0 (the source itself
+    # reports it), never fabricated where the source doesn't provide it.
+    pass_attempts: Optional[int] = None
+    completions: Optional[int] = None
+    passing_yards: Optional[int] = None
+    passing_tds: Optional[int] = None
+
+    rushing_yards: Optional[int] = None
+    rushing_tds: Optional[int] = None
+
+    receiving_yards: Optional[int] = None
+    receiving_tds: Optional[int] = None
 
     source: str = SOURCE_WEEKLY_STATS_DERIVED
     source_provenance: Optional[str] = None
