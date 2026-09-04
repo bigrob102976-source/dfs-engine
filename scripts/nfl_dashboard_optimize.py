@@ -1,16 +1,34 @@
-"""NFL UI M1 -- the real optimizer bridge the dashboard's NFL Optimizer
-tab calls. Builds the real DK pool, attaches real Big Money Native
-projections, and runs the EXISTING nfl/solver.py CP-SAT solver --
-never a duplicate/reimplemented optimizer.
+"""NFL UI M1/M13 -- the real optimizer bridge the dashboard's NFL
+Optimizer tab calls. Builds the real DK pool, attaches real Big Money
+Native projections/ceiling and real ownership/leverage, and runs the
+EXISTING nfl/solver.py CP-SAT solver -- never a duplicate/reimplemented
+optimizer.
 
-Never fakes feasibility: if projection coverage can't fill every roster
-slot, or locks/excludes are contradictory, the real error from
-nfl/solver.py is surfaced as-is, never swallowed into a fabricated
-empty-but-successful result.
+Never fakes feasibility: if data coverage can't fill every roster slot,
+or locks/excludes/stack/exposure settings are contradictory, the real
+error from nfl/solver.py is surfaced as-is, never swallowed into a
+fabricated empty-but-successful result.
 
 Usage:
-    python scripts/nfl_dashboard_optimize.py <draft_group_id> <num_lineups> [mode] [locks_csv] [excludes_csv]
-    mode: "roster_feasibility" (default) or "projection"
+    python scripts/nfl_dashboard_optimize.py <draft_group_id> <settings_json>
+
+settings_json (all fields optional, sane defaults applied):
+{
+  "numLineups": 1,
+  "mode": "roster_feasibility" | "projection" | "ceiling" | "leverage",
+  "locks": ["<draftkings_player_id>", ...],
+  "excludes": ["<draftkings_player_id>", ...],
+  "stack": {
+    "qbStackMode": "off" | "single" | "double",
+    "bringBackMode": "off" | "one",
+    "rbDstEnabled": false,
+    "maxPlayersPerTeam": null | <int>,
+    "maxPlayersPerGame": null | <int>
+  },
+  "maxExposure": {"<draftkings_player_id>": <0.0-1.0>, ...},
+  "maxExposureDefault": 1.0,
+  "minExposure": {"<draftkings_player_id>": <0.0-1.0>, ...}
+}
 """
 
 import json
@@ -23,14 +41,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from draftkings_unofficial import collector
 from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
 from nfl.game_context_builder import build_nfl_game_context
-from nfl.optimizer_models import NflOptimizerPlayer, NflOptimizerSettings
+from nfl.optimizer_models import NflOptimizerPlayer, NflOptimizerSettings, NflStackConfig
 from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
 from nfl.ownership_models import NflOwnershipInputPlayer
 from nfl.pool_builder import NflPoolBuildError, build_pool
-from nfl.solver import NflOptimizerConfigError, NflProjectionCoverageError, generate_lineups
+from nfl.solver import NflProjectionCoverageError, generate_lineups
+from nfl.constraints import NflOptimizerConfigError
+
+SCORING_MODES = ("projection", "ceiling", "leverage")
 
 
-def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes: list) -> int:
+def _parse_stack(raw: dict) -> NflStackConfig:
+    return NflStackConfig(
+        qb_stack_mode=raw.get("qbStackMode", "off"),
+        bring_back_mode=raw.get("bringBackMode", "off"),
+        rb_dst_enabled=bool(raw.get("rbDstEnabled", False)),
+        max_players_per_team=raw.get("maxPlayersPerTeam"),
+        max_players_per_game=raw.get("maxPlayersPerGame"),
+    )
+
+
+def main(draft_group_id: int, settings_raw: dict) -> int:
     universe = collector.collect_sport_universe("NFL")
     if universe.status != collector.STATUS_OK:
         print(json.dumps({"error": f"DISCOVERY_FAILED: {universe.status} ({universe.error})"}))
@@ -41,6 +72,8 @@ def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes
         return 1
     slate_date = collector.slate_local_date(slate)
 
+    mode = settings_raw.get("mode", "roster_feasibility")
+
     try:
         pool = build_pool(slate_date, draft_group_id, sport_code="NFL")
     except NflPoolBuildError as exc:
@@ -49,15 +82,14 @@ def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes
 
     projections_by_dk_id = {}
     ownership_by_dk_id = {}
-    if mode == "projection":
+    if mode in SCORING_MODES:
         try:
-            # NFL M12: builds the SAME ctx generate_projections() would
-            # otherwise build internally (usage/game-context features),
-            # reused here for ownership's usage/Vegas inputs too -- one
-            # fetch, not two.
+            # NFL M12/M13: builds the SAME ctx generate_projections()
+            # would otherwise build internally (usage/game-context
+            # features), reused here for ownership's usage/Vegas inputs
+            # too -- one fetch, not two.
             ctx = build_current_nfl_projection_features(draft_group_id, slate_date)
             records = generate_projections(draft_group_id, slate_date, ctx=ctx)
-            projections_by_dk_id = {r.draftkings_player_id: r.projection for r in records}
         except Exception as exc:  # noqa: BLE001 -- real, reportable failure, never silently falls back
             print(json.dumps({"error": f"PROJECTIONS_UNAVAILABLE: {exc}"}))
             return 1
@@ -93,20 +125,32 @@ def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes
                 ownership_input_players, draft_group_id, slate_date, pool.source_provenance,
                 datetime.now(timezone.utc).isoformat(),
             )
-            ownership_by_dk_id = {r.draftkings_player_id: r.ownership_projection for r in ownership_records}
+            ownership_by_dk_id = {r.draftkings_player_id: r for r in ownership_records}
+        projections_by_dk_id = projection_records_by_dk_id
 
     optimizer_players = [
         NflOptimizerPlayer(
             key=p.draftkings_player_id, name=p.name, team=p.team, opponent=p.opponent, game_id=p.game_id,
             position=p.position, roster_slots=p.roster_slots, salary=p.salary, is_team_entity=p.is_team_entity,
             draft_group_id=p.draft_group_id, slate_date=p.slate_date,
-            projection=projections_by_dk_id.get(p.draftkings_player_id),
-            projected_ownership=ownership_by_dk_id.get(p.draftkings_player_id),
+            projection=(projections_by_dk_id[p.draftkings_player_id].projection if p.draftkings_player_id in projections_by_dk_id else None),
+            ceiling=(projections_by_dk_id[p.draftkings_player_id].ceiling if p.draftkings_player_id in projections_by_dk_id else None),
+            projected_ownership=(ownership_by_dk_id[p.draftkings_player_id].ownership_projection if p.draftkings_player_id in ownership_by_dk_id else None),
+            leverage_score=(ownership_by_dk_id[p.draftkings_player_id].leverage_score if p.draftkings_player_id in ownership_by_dk_id else None),
         )
         for p in pool.players
     ]
 
-    settings = NflOptimizerSettings(mode=mode, num_lineups=num_lineups, locks=locks, excludes=excludes)
+    settings = NflOptimizerSettings(
+        mode=mode,
+        num_lineups=settings_raw.get("numLineups", 1),
+        locks=settings_raw.get("locks", []),
+        excludes=settings_raw.get("excludes", []),
+        stack=_parse_stack(settings_raw.get("stack", {})),
+        max_exposure=settings_raw.get("maxExposure", {}),
+        max_exposure_default=settings_raw.get("maxExposureDefault", 1.0),
+        min_exposure=settings_raw.get("minExposure", {}),
+    )
 
     try:
         result = generate_lineups(optimizer_players, settings)
@@ -120,12 +164,16 @@ def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes
         "lineups": [
             {
                 "index": lu.index, "total_salary": lu.total_salary, "remaining_salary": lu.remaining_salary,
-                "total_projection": lu.total_projection,
+                "total_projection": lu.total_projection, "total_ceiling": lu.total_ceiling,
+                "sum_ownership": lu.sum_ownership, "average_ownership": lu.average_ownership,
+                "total_leverage_score": lu.total_leverage_score,
+                "qb_stack_team": lu.qb_stack_team, "qb_stack_receiver_count": lu.qb_stack_receiver_count,
+                "bring_back_player": lu.bring_back_player, "rb_dst_team": lu.rb_dst_team,
                 "assignments": [
                     {
                         "slot": a.slot, "draftkings_player_id": a.draftkings_player_id, "name": a.name,
                         "position": a.position, "team": a.team, "salary": a.salary,
-                        "projected_ownership": a.projected_ownership,
+                        "projected_ownership": a.projected_ownership, "ceiling": a.ceiling,
                     }
                     for a in lu.assignments
                 ],
@@ -138,12 +186,9 @@ def main(draft_group_id: int, num_lineups: int, mode: str, locks: list, excludes
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print(json.dumps({"error": "Usage: python scripts/nfl_dashboard_optimize.py <draft_group_id> <num_lineups> [mode] [locks_csv] [excludes_csv]"}))
+    if len(sys.argv) < 2:
+        print(json.dumps({"error": "Usage: python scripts/nfl_dashboard_optimize.py <draft_group_id> [settings_json]"}))
         sys.exit(2)
     draft_group_id_arg = int(sys.argv[1])
-    num_lineups_arg = int(sys.argv[2])
-    mode_arg = sys.argv[3] if len(sys.argv) > 3 else "roster_feasibility"
-    locks_arg = sys.argv[4].split(",") if len(sys.argv) > 4 and sys.argv[4] else []
-    excludes_arg = sys.argv[5].split(",") if len(sys.argv) > 5 and sys.argv[5] else []
-    sys.exit(main(draft_group_id_arg, num_lineups_arg, mode_arg, locks_arg, excludes_arg))
+    settings_json_arg = json.loads(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else {}
+    sys.exit(main(draft_group_id_arg, settings_json_arg))

@@ -113,8 +113,19 @@ def test_present_exclude_is_rejected():
     assert any("Excluded player(s) present" in v for v in violations)
 
 
-def test_wrong_mode_is_rejected():
+def test_unknown_mode_is_rejected():
+    """A genuinely invalid mode string is still rejected -- but a real
+    scoring mode (projection/ceiling/leverage, added after M3) must NOT
+    be, unlike this test's original (buggy) assertion that only
+    accepted 'roster_feasibility'."""
     players, lineup = _valid_pool_and_lineup()
-    lineup.mode = "not_roster_feasibility"
+    lineup.mode = "not_a_real_mode"
     violations = validate_lineup(lineup, players)
-    assert any("expected 'roster_feasibility'" in v for v in violations)
+    assert any("Lineup mode is" in v for v in violations)
+
+
+def test_projection_mode_is_a_valid_mode():
+    players, lineup = _valid_pool_and_lineup()
+    lineup.mode = "projection"
+    violations = validate_lineup(lineup, players)
+    assert not any("Lineup mode is" in v for v in violations)

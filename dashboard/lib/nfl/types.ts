@@ -123,6 +123,8 @@ export interface NflLineupAssignment {
   // for this player (or the lineup was generated in "roster_feasibility"
   // mode, which doesn't fetch projections/ownership at all).
   projected_ownership: number | null;
+  // NFL M13 -- null unless a real ceiling was available for this player.
+  ceiling: number | null;
 }
 
 export interface NflLineup {
@@ -130,6 +132,16 @@ export interface NflLineup {
   total_salary: number;
   remaining_salary: number;
   total_projection: number | null;
+  // NFL M13 -- each null unless EVERY assigned player had the real data
+  // needed (never a partial/fabricated sum) -- see nfl/optimizer_models.py.
+  total_ceiling: number | null;
+  sum_ownership: number | null;
+  average_ownership: number | null;
+  total_leverage_score: number | null;
+  qb_stack_team: string | null;
+  qb_stack_receiver_count: number;
+  bring_back_player: string | null;
+  rb_dst_team: string | null;
   assignments: NflLineupAssignment[];
 }
 
@@ -142,6 +154,26 @@ export interface NflOptimizeResult {
   error?: string;
   error_type?: string;
 }
+
+// NFL M13 -- mirrors nfl/optimizer_models.py::NflStackConfig exactly
+// (camelCase here, snake_case there -- dashboard/app/api/nfl/optimize/
+// route.ts and scripts/nfl_dashboard_optimize.py do the translation).
+export type NflQbStackMode = "off" | "single" | "double";
+export type NflBringBackMode = "off" | "one";
+
+export interface NflStackConfig {
+  qbStackMode: NflQbStackMode;
+  bringBackMode: NflBringBackMode;
+  rbDstEnabled: boolean;
+  maxPlayersPerTeam: number | null;
+  maxPlayersPerGame: number | null;
+}
+
+export const DEFAULT_NFL_STACK_CONFIG: NflStackConfig = {
+  qbStackMode: "off", bringBackMode: "off", rbDstEnabled: false, maxPlayersPerTeam: null, maxPlayersPerGame: null,
+};
+
+export type NflObjectiveMode = "roster_feasibility" | "projection" | "ceiling" | "leverage";
 
 export const NFL_ROSTER_SLOT_ORDER = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "DST"];
 export const NFL_POSITIONS = ["QB", "RB", "WR", "TE", "DST"] as const;
