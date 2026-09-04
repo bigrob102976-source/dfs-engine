@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fmt, fmtPercent, fmtSalary, fmtValue, identityLabel, projectionLabel } from "./format";
+import { fmt, fmtOwnership, fmtPercent, fmtSalary, fmtValue, identityLabel, projectionLabel } from "./format";
 
 describe("fmt", () => {
   it("renders null as --, never 0 or the string null", () => {
@@ -32,6 +32,23 @@ describe("fmtSalary / fmtPercent / fmtValue", () => {
   it("fmtValue renders -- when projection is null even if salary is real", () => {
     expect(fmtValue(null, 6000)).toBe("--");
     expect(fmtValue(12, 6000)).toBe("2.00");
+  });
+});
+
+describe("fmtOwnership", () => {
+  it("renders -- for null/undefined/NaN, never a fake 0%", () => {
+    expect(fmtOwnership(null)).toBe("--");
+    expect(fmtOwnership(undefined)).toBe("--");
+    expect(fmtOwnership(Number.NaN)).toBe("--");
+  });
+
+  it("renders an already-0-100-scaled value directly, unlike fmtPercent's 0-1 input", () => {
+    expect(fmtOwnership(18.5)).toBe("18.5%");
+    expect(fmtOwnership(2.03)).toBe("2.0%");
+  });
+
+  it("renders a real zero as 0.0%, distinct from missing", () => {
+    expect(fmtOwnership(0)).toBe("0.0%");
   });
 });
 

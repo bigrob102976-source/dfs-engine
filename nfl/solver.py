@@ -83,15 +83,17 @@ class NflProjectionCoverageError(RuntimeError):
 
 def to_optimizer_players(players: List[NflPlayer]) -> List[NflOptimizerPlayer]:
     """Reduces the canonical M2 NflPlayer pool to only what the solver
-    needs. `projection` is carried over exactly as-is (None stays None
-    -- never coerced to 0.0); see nfl/projection_merge.py for how a
-    real NflPlayer.projection gets populated from a NflProjectionRecord."""
+    needs. `projection`/`projected_ownership` are carried over exactly
+    as-is (None stays None -- never coerced to 0.0); see
+    nfl/projection_merge.py for how a real NflPlayer.projection gets
+    populated from a NflProjectionRecord, and nfl/ownership_merge.py for
+    the NFL M12 ownership equivalent (NflPlayer.ownership)."""
     return [
         NflOptimizerPlayer(
             key=p.draftkings_player_id, name=p.name, team=p.team, opponent=p.opponent, game_id=p.game_id,
             position=p.position, roster_slots=list(p.roster_slots), salary=p.salary,
             is_team_entity=p.is_team_entity, draft_group_id=p.draft_group_id, slate_date=p.slate_date,
-            projection=p.projection,
+            projection=p.projection, projected_ownership=p.ownership,
         )
         for p in players
     ]
@@ -275,7 +277,10 @@ def generate_lineups(players: List[NflOptimizerPlayer], settings: NflOptimizerSe
             break
 
         assignments = [
-            NflLineupSlotAssignment(slot=slot, draftkings_player_id=p.key, name=p.name, position=p.position, team=p.team, salary=p.salary)
+            NflLineupSlotAssignment(
+                slot=slot, draftkings_player_id=p.key, name=p.name, position=p.position, team=p.team, salary=p.salary,
+                projected_ownership=p.projected_ownership,
+            )
             for slot, p in result
         ]
         total_salary = sum(a.salary for a in assignments)

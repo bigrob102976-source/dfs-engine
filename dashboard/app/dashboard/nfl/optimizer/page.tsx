@@ -93,8 +93,9 @@ function OptimizerContent() {
         )}
         {buildError && <p className="mt-2 text-xs text-red">{buildError}</p>}
         <p className="mt-3 text-[11px] text-text-faint">
-          Advanced stacking/correlation controls are not built yet (M11's DST feature layer and M12 ownership come before that) -- this workspace intentionally omits them
-          rather than showing controls that do nothing.
+          Big Money Native ownership (nfl_ownership_v1) is available for decision support -- see the Players/Projections tabs' Ownership column and each built lineup's
+          per-player Ownership on the Lineups tab. Advanced stacking/correlation/leverage-aware objective controls are not built yet -- this workspace intentionally omits
+          them rather than showing controls that do nothing.
         </p>
       </DataCard>
 

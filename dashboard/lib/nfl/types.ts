@@ -30,6 +30,30 @@ export interface NflMatchupInfo {
   away_implied_total: number | null;
 }
 
+// NFL M12 -- Big Money Native ownership (nfl_ownership_v1). A
+// deterministic estimator, never a trained ML model -- see method
+// below, which is always "deterministic_estimator" until real
+// historical DK ownership exists to train against. null (not 0)
+// whenever the player has no usable projection to estimate from.
+export interface NflOwnershipInfo {
+  ownership_projection: number | null;
+  ownership_rank: number | null;
+  ownership_tier: string | null;
+  chalk_score: number | null;
+  leverage_score: number | null;
+  ownership_confidence: number | null;
+  value: number | null;
+  flex_ownership_component: number | null;
+  source: string;
+  method: string;
+  model_version: string;
+}
+
+export interface NflOwnershipCoverage {
+  total: number;
+  generated: number;
+}
+
 export interface NflUsageInfo {
   rolling: Record<string, number | null>;
   season_to_date: Record<string, number | null>;
@@ -51,6 +75,7 @@ export interface NflPlayerRow {
   identity_resolved: boolean;
   usage: NflUsageInfo | null;
   projection: NflProjectionInfo | null;
+  ownership: NflOwnershipInfo | null;
   matchup: NflMatchupInfo | null;
 }
 
@@ -76,6 +101,11 @@ export interface NflSlateData {
   identity: { total: number; resolved: number; unresolved: number };
   projection_coverage: Record<string, NflPositionCoverage>;
   projection_error: string | null;
+  ownership_coverage: Record<string, NflOwnershipCoverage>;
+  ownership_generated: number;
+  ownership_missing: number;
+  ownership_normalization: Record<string, unknown> | null;
+  ownership_model_version: string | null;
   vegas_configured: boolean;
   vegas_source_provenance: string;
   players: NflPlayerRow[];
@@ -89,6 +119,10 @@ export interface NflLineupAssignment {
   position: string;
   team: string;
   salary: number;
+  // NFL M12 -- null whenever Big Money Native has no ownership estimate
+  // for this player (or the lineup was generated in "roster_feasibility"
+  // mode, which doesn't fetch projections/ownership at all).
+  projected_ownership: number | null;
 }
 
 export interface NflLineup {

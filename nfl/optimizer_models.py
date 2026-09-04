@@ -39,12 +39,26 @@ class NflOptimizerPlayer:
     # player -- never 0.0 as a stand-in. See nfl/projection_merge.py for
     # how this gets populated from a NflProjectionRecord.
     projection: Optional[float] = None
+    # NFL M12: None until Big Money Native has a real ownership estimate
+    # for this player -- never 0.0 as a stand-in (see nfl/ownership_
+    # model.py). Display/decision-support only in M12 -- never read by
+    # nfl/solver.py's objective (see NflOptimizerSettings' own docstring
+    # for why no ownership-aware objective/constraint exists yet).
+    projected_ownership: Optional[float] = None
 
 
 @dataclass
 class NflOptimizerSettings:
     # "roster_feasibility" (M3, unchanged) or "projection" (M4) -- see
     # nfl/solver.py::generate_lineups() for the objective each mode uses.
+    # NFL M12: no "leverage"/ownership-aware mode exists yet -- ownership
+    # is carried as display/decision-support data only this milestone
+    # (see nfl/optimizer_models.py::NflOptimizerPlayer.projected_ownership
+    # and NflLineupSlotAssignment.projected_ownership). A future
+    # leverage objective or max/min ownership constraint is a real next
+    # step (mirrors optimizer/solver.py's MLB OWNERSHIP_SCALE pattern,
+    # see NFL M12 Phase 16's own audit) but is explicitly out of scope
+    # here.
     mode: str = "roster_feasibility"
     num_lineups: int = 1
     min_unique: int = 1
@@ -65,6 +79,10 @@ class NflLineupSlotAssignment:
     position: str
     team: str
     salary: int
+    # NFL M12: carried through from the NflOptimizerPlayer that filled
+    # this slot -- None when Big Money Native has no ownership estimate
+    # for this player, never 0.0. Display only, see NflOptimizerSettings.
+    projected_ownership: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)

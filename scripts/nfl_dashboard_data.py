@@ -16,6 +16,7 @@ Usage:
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -24,6 +25,8 @@ from draftkings_unofficial import collector
 from historical_nfl.identity_persistence import load_crosswalk
 from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
 from nfl.game_context_builder import build_nfl_game_context
+from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
+from nfl.ownership_models import NflOwnershipInputPlayer
 from nfl.pool_builder import NflPoolBuildError
 
 
@@ -81,6 +84,44 @@ def main(draft_group_id: int) -> int:
 
     usage_by_dk_id = {f.draftkings_player_id: f for f in ctx["join_result"].features}
 
+    # NFL M12: Big Money Native ownership -- reuses the SAME pool,
+    # projections, and game context already computed above (never a
+    # second fetch). Only players with a real, usable projection get an
+    # ownership record at all (see nfl/ownership_model.py's module
+    # docstring) -- every other player's row["ownership"] stays None,
+    # never a fabricated 0%.
+    team_implied_total = {}
+    for g in games_by_id.values():
+        if g.home_team:
+            team_implied_total[g.home_team] = g.home_implied_total
+        if g.away_team:
+            team_implied_total[g.away_team] = g.away_implied_total
+
+    ownership_input_players = []
+    for p in pool.players:
+        proj = projections_by_dk_id.get(p.draftkings_player_id)
+        if proj is None or proj.projection is None:
+            continue
+        usage = usage_by_dk_id.get(p.draftkings_player_id)
+        usage_share = _usage_share_for_player(
+            p.position, usage.rolling if usage else None, usage.season_to_date if usage else None,
+        )
+        ownership_input_players.append(NflOwnershipInputPlayer(
+            draftkings_player_id=p.draftkings_player_id, name=p.name, position=p.position, team=p.team,
+            opponent=p.opponent, salary=p.salary, projection=proj.projection, ceiling=proj.ceiling,
+            usage_share=usage_share, team_implied_total=team_implied_total.get(p.team),
+            opponent_implied_total=(team_implied_total.get(p.opponent) if p.opponent else None),
+        ))
+
+    ownership_records = []
+    ownership_normalization_report = {}
+    if ownership_input_players:
+        ownership_records, ownership_normalization_report = build_nfl_ownership_projections(
+            ownership_input_players, draft_group_id, slate_date, pool.source_provenance,
+            datetime.now(timezone.utc).isoformat(),
+        )
+    ownership_by_dk_id = {r.draftkings_player_id: r for r in ownership_records}
+
     # Real games list (from the canonical pool -- derived, not guessed)
     games = {}
     for p in pool.players:
@@ -118,6 +159,18 @@ def main(draft_group_id: int) -> int:
         else:
             row["projection"] = None
 
+        own = ownership_by_dk_id.get(p.draftkings_player_id)
+        if own is not None:
+            row["ownership"] = {
+                "ownership_projection": own.ownership_projection, "ownership_rank": own.ownership_rank,
+                "ownership_tier": own.ownership_tier, "chalk_score": own.chalk_score,
+                "leverage_score": own.leverage_score, "ownership_confidence": own.ownership_confidence,
+                "value": own.value, "flex_ownership_component": own.flex_ownership_component,
+                "source": own.source, "method": own.method, "model_version": own.model_version,
+            }
+        else:
+            row["ownership"] = None
+
         matched_game = games_by_id.get(p.game_id)
         row["matchup"] = {
             "spread_home": matched_game.spread if matched_game else None,
@@ -146,10 +199,15 @@ def main(draft_group_id: int) -> int:
     resolved_count = sum(1 for p in players if p["identity_resolved"] or p["is_team_entity"])
     projected_count = sum(1 for p in players if p["projection"] is not None)
     projection_coverage_by_position = {}
+    ownership_coverage_by_position = {}
     for pos in ("QB", "RB", "WR", "TE", "DST"):
         pos_players = [p for p in players if (("DST" if p["is_team_entity"] else p["position"]) == pos)]
         pos_projected = [p for p in pos_players if p["projection"] is not None]
         projection_coverage_by_position[pos] = {"total": len(pos_players), "projected": len(pos_projected)}
+        pos_owned = [p for p in pos_players if p["ownership"] is not None]
+        ownership_coverage_by_position[pos] = {"total": len(pos_players), "generated": len(pos_owned)}
+
+    ownership_generated_count = sum(1 for p in players if p["ownership"] is not None)
 
     output = {
         "draft_group_id": draft_group_id,
@@ -168,6 +226,11 @@ def main(draft_group_id: int) -> int:
         "identity": {"total": len(players), "resolved": resolved_count, "unresolved": len(players) - resolved_count},
         "projection_coverage": projection_coverage_by_position,
         "projection_error": projection_error,
+        "ownership_coverage": ownership_coverage_by_position,
+        "ownership_generated": ownership_generated_count,
+        "ownership_missing": len(players) - ownership_generated_count,
+        "ownership_normalization": ownership_normalization_report or None,
+        "ownership_model_version": ownership_records[0].model_version if ownership_records else None,
         "vegas_configured": game_ctx_result.odds_fetch.source_provenance != "not_configured",
         "vegas_source_provenance": game_ctx_result.odds_fetch.source_provenance,
         "players": players,

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { DangerButton, PrimaryButton, SearchInput, TableToolbar } from "@/components/ui";
-import { fmt, fmtSalary, fmtValue, identityLabel, projectionLabel } from "@/lib/nfl/format";
+import { fmt, fmtOwnership, fmtSalary, fmtValue, identityLabel, projectionLabel } from "@/lib/nfl/format";
 import { loadLockExcludeState, saveLockExcludeState } from "@/lib/nfl/lockExcludeStorage";
 import { NFL_POSITIONS, type NflPlayerRow } from "@/lib/nfl/types";
 
@@ -85,6 +85,8 @@ export function NflPlayerTable({ players, draftGroupId, variant = "players" }: {
             return p.projection?.ceiling ?? null;
           case "snap":
             return snapPct(p);
+          case "ownership":
+            return p.ownership?.ownership_projection ?? null;
           default:
             return p.salary;
         }
@@ -159,7 +161,7 @@ export function NflPlayerTable({ players, draftGroupId, variant = "players" }: {
               {variant !== "usage" && <th className="px-2 py-2">{sortButton("ceiling", "Ceiling")}</th>}
               {variant !== "usage" && <th className="px-2 py-2">Value</th>}
               {variant === "projections" && <th className="px-2 py-2">Model</th>}
-              {variant === "players" && <th className="px-2 py-2">Ownership</th>}
+              {(variant === "players" || variant === "projections") && <th className="px-2 py-2">{sortButton("ownership", "Ownership")}</th>}
               {variant === "players" && <th className="px-2 py-2">{sortButton("snap", "Snap %")}</th>}
               {variant === "players" && <th className="px-2 py-2">Recent Usage</th>}
               {variant === "matchups" && <th className="px-2 py-2">Home/Away</th>}
@@ -198,7 +200,11 @@ export function NflPlayerTable({ players, draftGroupId, variant = "players" }: {
                   {variant !== "usage" && <td className="px-2 py-1.5 text-text-muted">{fmt(p.projection?.ceiling)}</td>}
                   {variant !== "usage" && <td className="px-2 py-1.5 text-text-muted">{fmtValue(p.projection?.projection, p.salary)}</td>}
                   {variant === "projections" && <td className="px-2 py-1.5 text-[10px] text-text-faint">{projectionLabel(p.projection?.source)}</td>}
-                  {variant === "players" && <td className="px-2 py-1.5 text-text-faint">--</td>}
+                  {(variant === "players" || variant === "projections") && (
+                    <td className="px-2 py-1.5 text-text-muted" title={p.ownership?.ownership_tier ? `Tier: ${p.ownership.ownership_tier}` : undefined}>
+                      {fmtOwnership(p.ownership?.ownership_projection)}
+                    </td>
+                  )}
                   {variant === "players" && <td className="px-2 py-1.5 text-text-muted">{fmt(snapPct(p) !== null ? (snapPct(p) as number) * 100 : null, 0)}{snapPct(p) !== null ? "%" : ""}</td>}
                   {variant === "players" && <td className="px-2 py-1.5 text-text-muted">{recentUsageSummary(p)}</td>}
                   {variant === "matchups" && <td className="px-2 py-1.5 text-text-muted">--</td>}

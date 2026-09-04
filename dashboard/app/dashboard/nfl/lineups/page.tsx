@@ -5,7 +5,7 @@ import { useState } from "react";
 import { DataCard } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NFL_ROSTER_SLOT_ORDER } from "@/lib/nfl/types";
-import { fmtSalary, fmt } from "@/lib/nfl/format";
+import { fmtSalary, fmt, fmtOwnership } from "@/lib/nfl/format";
 import { loadOptimizeResult } from "@/lib/nfl/optimizeResultStorage";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
 
@@ -49,6 +49,7 @@ function LineupsContent() {
                 <th className="py-1.5 pr-3 font-medium">Player</th>
                 <th className="py-1.5 pr-3 font-medium">Team</th>
                 <th className="py-1.5 pr-3 font-medium">Salary</th>
+                <th className="py-1.5 pr-3 font-medium">Ownership</th>
               </tr>
             </thead>
             <tbody>
@@ -60,6 +61,7 @@ function LineupsContent() {
                     <td className="py-1.5 pr-3 font-medium text-text">{a?.name ?? "--"}</td>
                     <td className="py-1.5 pr-3 text-text-muted">{a?.team ?? "--"}</td>
                     <td className="py-1.5 pr-3 text-text-muted">{a ? fmtSalary(a.salary) : "--"}</td>
+                    <td className="py-1.5 pr-3 text-text-muted">{a ? fmtOwnership(a.projected_ownership) : "--"}</td>
                   </tr>
                 );
               })}
@@ -67,7 +69,11 @@ function LineupsContent() {
           </table>
         </DataCard>
       ))}
-      <p className="text-[11px] text-text-faint">Ownership unavailable -- aggregate lineup ownership omitted until real ownership data exists (M12).</p>
+      <p className="text-[11px] text-text-faint">
+        Per-player Ownership is Big Money Native's nfl_ownership_v1 deterministic estimate (see the Players/Projections tabs) -- null/-- whenever a player has no usable
+        projection, or the lineup was built in Roster Feasibility mode (which never fetches projections/ownership). No lineup-level aggregate ownership is shown -- the
+        optimizer has no existing sum/average-ownership convention to build on yet (see NFL M12 Phase 16's audit).
+      </p>
     </div>
   );
 }

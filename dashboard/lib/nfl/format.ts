@@ -23,6 +23,15 @@ export function fmtValue(projection: number | null | undefined, salary: number):
   return (projection / (salary / 1000)).toFixed(2);
 }
 
+// NFL M12 -- ownership_projection is ALREADY a 0-100 percentage
+// (unlike fmtPercent's 0-1 fraction input) -- see nfl/ownership_
+// models.py's module docstring. Renders -- for null/missing, never a
+// fabricated 0%.
+export function fmtOwnership(value: number | null | undefined, digits = 1): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  return `${value.toFixed(digits)}%`;
+}
+
 export function identityLabel(row: { is_team_entity: boolean; identity_resolved: boolean }): string {
   if (row.is_team_entity) return "Team";
   return row.identity_resolved ? "Resolved" : "Identity Unresolved";
