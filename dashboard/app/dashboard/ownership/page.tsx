@@ -1,6 +1,6 @@
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { loadLatestOwnershipSnapshot } from "@/lib/loaders";
 import { formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 
@@ -25,7 +25,7 @@ export default async function OwnershipPage(props: PageProps<"/dashboard/ownersh
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const snapshot = (await loadLatestOwnershipSnapshot(date, slateCtx.selected?.slateId ?? null)).data;
   const slateDescription = slateCtx.selected ? ` (${formatSlateLabel(slateCtx.selected)})` : "";

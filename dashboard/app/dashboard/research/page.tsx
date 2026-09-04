@@ -1,7 +1,7 @@
 import { MetricCard } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { loadResearchSlate } from "@/lib/loaders";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * from today's research build. Pure read of research_output/ -- no
  * research/scoring logic lives here. */
 export default async function ResearchPage() {
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slate = (await loadResearchSlate(date)).data;
 
   return (

@@ -3,7 +3,7 @@ import { VegasIntelligenceBoard } from "@/components/vegas/VegasIntelligenceBoar
 import { GenerateEnvironmentButton } from "@/components/environment/GenerateEnvironmentButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import { loadEnvironmentReportHistory, loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
@@ -30,7 +30,7 @@ export default async function VegasPage(props: PageProps<"/dashboard/vegas">) {
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
   const fullDayReport = await loadLatestEnvironmentReport(date);

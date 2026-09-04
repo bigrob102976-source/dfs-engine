@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
 
@@ -24,7 +24,7 @@ export async function POST() {
   const userOrRes = await requireAdminApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const result = await runPythonScript("scripts/build_game_environment_report.py", ["--date", date]);
   const doc = parseLastJsonLine(result.stdout) as unknown as GenerateResult | null;
 

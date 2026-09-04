@@ -95,7 +95,7 @@ describe("TopPitchersPage (Milestone 26 slate filtering)", () => {
       ],
     });
 
-    vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => DATE }));
+    vi.doMock("@/lib/currentDate", () => ({ getTodayEasternDate: () => DATE }));
     vi.resetModules();
     const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
     __setPythonRunnerForTests(async (script: string) => {

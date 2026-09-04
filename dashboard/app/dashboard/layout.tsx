@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopNavigation } from "@/components/TopNavigation";
 import { hasProductAccess } from "@/lib/auth/betaAccess";
 import { requireAuth } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import {
   latestKnownSlateDate,
   loadLatestBatterSnapshot,
@@ -44,7 +44,7 @@ export default async function DashboardLayout({ children }: LayoutProps<"/dashbo
   if (!hasProductAccess(user)) {
     redirect("/beta-access-required");
   }
-  const today = getTodayChicagoDate();
+  const today = getTodayEasternDate();
   const [searchDate, mockModeEnabled, slateCtx] = await Promise.all([
     latestKnownSlateDate(),
     getMockModeEnabled(),

@@ -129,25 +129,37 @@ export async function canonicalListSlates(date: string, sport: string = DEFAULT_
     };
   }
 
-  // Conservative: the OLDEST promotion among the matched slates decides
-  // the list's overall freshness disclosure -- a healthy sibling slate
-  // must never hide a stale one (M5F: stale data is served WITH
-  // disclosure, never silently).
-  let worst: ProviderDataStatus | "expired" | null = "fresh";
-  let oldestTimestamp: string | null = null;
-  let oldestAge = -Infinity;
-  for (const row of rows) {
-    const status = freshnessFor(row);
-    if (status === "expired" || (status === "stale" && worst !== "expired")) worst = status;
-    else if (status === null && worst === "fresh") worst = null;
-    const age = ageMs(mostRecentTimestamp(row));
-    if (age !== null && age > oldestAge) {
-      oldestAge = age;
-      oldestTimestamp = mostRecentTimestamp(row);
-    }
-  }
+  // MLB V1 CUSTOMER DASHBOARD COMPLETION: freshness is evaluated PER
+  // SLATE, never aggregated to "the worst slate for this date wins."
+  // The previous "conservative" policy (a single date-level status
+  // computed from the OLDEST slate) meant one early DraftGroup going
+  // quiet after its own games locked -- a normal, expected, honest
+  // end-of-day state, not a problem -- silently returned `slates: []`
+  // for the ENTIRE date, hiding an otherwise perfectly fresh, still-
+  // buildable later slate (e.g. a Night slate) underneath it. Confirmed
+  // live: exactly this happened for 2026-09-03 once its Featured/Early
+  // slates locked, even though the Night slate was still fresh.
+  //
+  // Only a genuinely EXPIRED slate (no real validation in over
+  // STALE_MAX_MS -- see freshnessFor's own thresholds) is excluded from
+  // the usable list; "stale" (real, reused, still within the safe reuse
+  // ceiling) stays fully usable WITH disclosure, exactly as it always
+  // has been for the date as a whole. The date-level status/freshness
+  // summary is now computed ONLY from the slates that actually survive
+  // -- so a returned "ready" list always genuinely reflects what's in
+  // it, never dragged down by a slate that isn't even being offered.
+  const usableRows = rows.filter((row) => freshnessFor(row) !== "expired");
 
-  if (worst === "expired") {
+  if (usableRows.length === 0) {
+    let oldestTimestamp: string | null = null;
+    let oldestAge = -Infinity;
+    for (const row of rows) {
+      const age = ageMs(mostRecentTimestamp(row));
+      if (age !== null && age > oldestAge) {
+        oldestAge = age;
+        oldestTimestamp = mostRecentTimestamp(row);
+      }
+    }
     return {
       status: "stale_expired",
       reason: "Canonical Postgres slate data was last promoted too long ago to serve safely -- the automatic worker appears to be delayed.",
@@ -164,6 +176,20 @@ export async function canonicalListSlates(date: string, sport: string = DEFAULT_
     };
   }
 
+  let worst: ProviderDataStatus | null = "fresh";
+  let oldestTimestamp: string | null = null;
+  let oldestAge = -Infinity;
+  for (const row of usableRows) {
+    const status = freshnessFor(row);
+    if (status === "stale") worst = "stale";
+    else if (status === null && worst === "fresh") worst = null;
+    const age = ageMs(mostRecentTimestamp(row));
+    if (age !== null && age > oldestAge) {
+      oldestAge = age;
+      oldestTimestamp = mostRecentTimestamp(row);
+    }
+  }
+
   return {
     status: "ready",
     reason: null,
@@ -172,8 +198,8 @@ export async function canonicalListSlates(date: string, sport: string = DEFAULT_
     isMock: false,
     isConnected: true,
     source: mapSourceProvenance(rows[0].source_provenance),
-    slates: rows.map(slateOptionFromRow),
-    slatesAvailable: rows.length,
+    slates: usableRows.map(slateOptionFromRow),
+    slatesAvailable: usableRows.length,
     dataStatus: worst === null ? "fresh" : worst,
     artifactAgeSeconds: oldestAge >= 0 ? Math.round(oldestAge / 1000) : null,
     lastUpdatedAt: oldestTimestamp,

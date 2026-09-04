@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAdminApi } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function GET() {
   const userOrRes = await requireAdminApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const status = await getExternalProjectionsStatus(date);
   if ("error" in status) {
     return NextResponse.json(status, { status: 502 });

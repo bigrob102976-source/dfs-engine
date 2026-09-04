@@ -159,6 +159,14 @@ interface OwnershipRefreshResult {
   slatesFound?: number;
   slatesUpdated?: number;
   slatesFailed?: number;
+  // MLB V1 CUSTOMER DASHBOARD COMPLETION: the real per-slate failure
+  // reason used to be computed (computeAndPersistOwnershipForSlate
+  // always returns one) and then immediately discarded here, leaving
+  // "N/M slate(s) failed" as the only trace anywhere -- no way to tell,
+  // from the worker's own log, WHY. This is observability only: no
+  // change to the ownership model, no fabricated data, just preserving
+  // a real message that already existed and was being thrown away.
+  failureReasons?: string[];
 }
 
 /** Real ownership generation across every real, currently-VALID
@@ -189,18 +197,31 @@ async function refreshOwnershipForDate(date: string, sport: string): Promise<Own
 
   let slatesUpdated = 0;
   let slatesFailed = 0;
+  const failureReasons: string[] = [];
   for (const slate of slates) {
     try {
       const pool = await canonicalGetSlatePool(date, slate.provider_slate_id, sport);
       const result = await computeAndPersistOwnershipForSlate(slate.internal_slate_id, pool);
-      if (result.status === "OK") slatesUpdated += 1;
-      else if (result.status !== "NO_USABLE_PLAYERS") slatesFailed += 1; // "no usable players yet" is honest, not a failure
-    } catch {
+      if (result.status === "OK") {
+        slatesUpdated += 1;
+      } else if (result.status !== "NO_USABLE_PLAYERS") {
+        // "no usable players yet" is honest, not a failure -- every
+        // other status (SLATE_NOT_FOUND, ERROR) is a real problem.
+        slatesFailed += 1;
+        failureReasons.push(`${slate.provider_slate_id}: ${result.status}${result.reason ? ` -- ${tail(result.reason, 300)}` : ""}`);
+      }
+    } catch (err) {
       slatesFailed += 1;
+      failureReasons.push(`${slate.provider_slate_id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return { ok: slatesFailed === 0, detail: slatesFailed === 0 ? "OK" : `${slatesFailed}/${slates.length} slate(s) failed`, slatesFound: slates.length, slatesUpdated, slatesFailed };
+  return {
+    ok: slatesFailed === 0,
+    detail: slatesFailed === 0 ? "OK" : `${slatesFailed}/${slates.length} slate(s) failed`,
+    slatesFound: slates.length, slatesUpdated, slatesFailed,
+    failureReasons: failureReasons.length > 0 ? failureReasons : undefined,
+  };
 }
 
 export interface RefreshSummary {
@@ -288,6 +309,14 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
     ownership = { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
   console.log(ownership.skipped ? ownership.detail : ownership.ok ? "OK" : `DEGRADED: ${ownership.detail}`);
+  // Observability fix: the real per-slate failure reason (already
+  // computed by computeAndPersistOwnershipForSlate, previously
+  // discarded by refreshOwnershipForDate) is now preserved -- print it
+  // so a future "N/M slate(s) failed" is diagnosable straight from this
+  // worker's own log, not just a bare count.
+  if (ownership.failureReasons) {
+    for (const reason of ownership.failureReasons) console.log(`  OWNERSHIP FAILURE: ${reason}`);
+  }
 
   const summary: RefreshSummary = { date, sport, research, identity, eligibility, pitcherAgent, batterAgent, nativeProjectionEngine, projections, ownership };
   console.log(`\nRESULT_JSON:${JSON.stringify(summary)}`);

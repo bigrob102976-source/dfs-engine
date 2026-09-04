@@ -2,7 +2,7 @@ import { EnvironmentTerminal } from "@/components/environment/EnvironmentTermina
 import { GenerateEnvironmentButton } from "@/components/environment/GenerateEnvironmentButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { effectiveGameIds, filterByGameIdField, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
 
@@ -29,7 +29,7 @@ export default async function EnvironmentPage(props: PageProps<"/dashboard/envir
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
   const fullDayReport = await loadLatestEnvironmentReport(date);

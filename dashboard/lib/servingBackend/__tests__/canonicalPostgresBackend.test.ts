@@ -144,6 +144,68 @@ describe("M5B: canonicalListSlates", () => {
     });
   });
 
+  describe("MLB V1 CUSTOMER DASHBOARD COMPLETION: freshness is evaluated PER SLATE, not by allowing one expired slate to invalidate every slate for the date", () => {
+    it("a fresh Night slate remains visible/usable even though an earlier Featured slate has expired (its own games already locked)", async () => {
+      insertSlate({
+        internal_slate_id: "featured-1", provider_slate_id: "dkunofficial-featured", slate_name: "Featured",
+        promoted_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3h old -- expired on its own
+      });
+      insertSlate({
+        internal_slate_id: "night-1", provider_slate_id: "dkunofficial-night", slate_name: "Night",
+        promoted_at: new Date().toISOString(), // fresh
+      });
+
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.status).toBe("ready");
+      expect(result.slates.map((s) => s.slateId)).toEqual(["dkunofficial-night"]);
+      expect(result.slatesAvailable).toBe(1);
+      // The date-level dataStatus reflects only the SURVIVING slate(s) -- never dragged down by the excluded expired one.
+      expect(result.dataStatus).toBe("fresh");
+    });
+
+    it("a stale (not yet expired) earlier slate stays usable alongside a fresh later slate -- stale is disclosed, not hidden", async () => {
+      insertSlate({
+        internal_slate_id: "early-1", provider_slate_id: "dkunofficial-early", slate_name: "Early",
+        promoted_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(), // 45 min -- stale, not expired
+      });
+      insertSlate({
+        internal_slate_id: "night-1", provider_slate_id: "dkunofficial-night", slate_name: "Night",
+        promoted_at: new Date().toISOString(),
+      });
+
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.status).toBe("ready");
+      expect(result.slates.map((s) => s.slateId).sort()).toEqual(["dkunofficial-early", "dkunofficial-night"]);
+      // Date-level disclosure still honestly reports the worst SURVIVING (usable) slate's status.
+      expect(result.dataStatus).toBe("stale");
+    });
+
+    it("when every slate for the date has genuinely expired, the date honestly reports stale_expired with an empty list", async () => {
+      insertSlate({
+        internal_slate_id: "featured-1", provider_slate_id: "dkunofficial-featured",
+        promoted_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      });
+      insertSlate({
+        internal_slate_id: "early-1", provider_slate_id: "dkunofficial-early",
+        promoted_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+      });
+
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.status).toBe("stale_expired");
+      expect(result.slates).toEqual([]);
+    });
+
+    it("never fakes freshness -- an expired slate's own timestamp is never rewritten or reused to make it look fresh", async () => {
+      const expiredPromotedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+      insertSlate({ internal_slate_id: "featured-1", provider_slate_id: "dkunofficial-featured", promoted_at: expiredPromotedAt });
+      insertSlate({ internal_slate_id: "night-1", provider_slate_id: "dkunofficial-night", promoted_at: new Date().toISOString() });
+
+      await canonicalListSlates("2026-08-31");
+      const row = getDb().prepare("SELECT promoted_at FROM slates WHERE provider_slate_id = 'dkunofficial-featured'").get() as { promoted_at: string };
+      expect(row.promoted_at).toBe(expiredPromotedAt); // untouched by the read path
+    });
+  });
+
   it("M5G: a slate promoted for a FUTURE date never appears in today's list", async () => {
     insertSlate({ internal_slate_id: "future-1", provider_slate_id: "dkunofficial-999", slate_date: "2026-09-01" });
     const result = await canonicalListSlates("2026-08-31");

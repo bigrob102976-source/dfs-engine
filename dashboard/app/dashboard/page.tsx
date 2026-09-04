@@ -38,7 +38,7 @@ import {
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
 import { getNativeProjectionByPlayerId } from "@/lib/nativeProjections";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getPublishedVersion } from "@/lib/db/slateStatus";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
@@ -83,7 +83,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   // Milestone 29: auto-select the sole published slate when the member
   // hasn't explicitly chosen one -- never silently default to the
   // unfiltered Full Day view when exactly one real published slate exists.

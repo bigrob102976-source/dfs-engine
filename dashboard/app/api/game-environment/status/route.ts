@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireAuthApi } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function GET() {
   const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const status = await getGameEnvironmentStatus(date);
   if ("error" in status) {
     return NextResponse.json(status, { status: 502 });

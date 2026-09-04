@@ -94,7 +94,7 @@ describe("StacksPage -- Milestone 32.6 Part 4: Use This Stack handoff", () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dfs-stacks-handoff-"));
     process.env.MLB_DFS_ROOT = tmpDir;
-    vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => DATE }));
+    vi.doMock("@/lib/currentDate", () => ({ getTodayEasternDate: () => DATE }));
     vi.resetModules();
   });
 

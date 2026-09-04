@@ -1,6 +1,6 @@
 import { RefreshStatusButton } from "@/components/RefreshStatusButton";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getPublishedVersion } from "@/lib/db/slateStatus";
 import { safeReadJson } from "@/lib/discovery";
 import { resolveSlateContext } from "@/lib/slateContext";
@@ -67,7 +67,7 @@ export default async function SlateManagerPage(props: PageProps<"/dashboard/slat
   // lets a member view a slate for a date other than Chicago-today; an
   // invalid explicit value falls back to today rather than erroring a
   // whole-page navigation.
-  const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
+  const date = dateResolution.ok ? dateResolution.date : getTodayEasternDate();
   const ctx = await resolveSlateContext(date);
 
   const rows: MemberSlateRow[] = await Promise.all(ctx.slates.map(async (s) => {

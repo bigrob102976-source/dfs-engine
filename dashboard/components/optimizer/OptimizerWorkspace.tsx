@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { MissingDataState } from "@/components/MissingDataState";
 import { PrimaryButton } from "@/components/ui/Button";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { LINEUP_COUNT_OPTIONS, OPTIMIZER_OBJECTIVES } from "@/lib/dkRosterRules";
 import { reconcileConstraintsWithPool } from "@/lib/optimizerWorkspace/reconcile";
 import { resolveExternalSourceLabel } from "@/lib/projectionLabels";
@@ -123,6 +124,12 @@ export function OptimizerWorkspace({
 
   const [selectedSlateId, setSelectedSlateId] = useState<string | null>(null);
   const [slateUnavailableMessage, setSlateUnavailableMessage] = useState<string | null>(null);
+  // MLB V1 CUSTOMER DASHBOARD COMPLETION: a persisted selectedDate from
+  // a previous session (or reached via an old ?date= link) that no
+  // longer equals the real current Eastern slate date must never be
+  // silently restored -- see the hydration effect below. Shown once,
+  // right after hydration; cleared on any manual date change.
+  const [staleDateMessage, setStaleDateMessage] = useState<string | null>(null);
   const [pool, setPool] = useState<OptimizerPoolResult | null>(null);
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolError, setPoolError] = useState<string | null>(null);
@@ -217,9 +224,30 @@ export function OptimizerWorkspace({
       // server-side from the URL) wins over whatever date was persisted
       // from a previous session; with neither, selectedDate stays null
       // and every /api/optimizer/* call below simply omits `date`,
-      // which the server resolves to Chicago-today -- identical to this
+      // which the server resolves to Eastern-today -- identical to this
       // component's behavior before M31.2C.
-      const initialSelectedDate = initialDate ?? persisted?.selectedDate ?? null;
+      //
+      // MLB V1 CUSTOMER DASHBOARD COMPLETION: a persisted selectedDate
+      // used to be restored HERE with no staleness check at all -- once
+      // a customer ever explicitly picked a date (or followed an old
+      // ?date= link), that exact date silently overrode "today" on
+      // every future visit, forever, with nothing to ever notice or
+      // correct it (the real, confirmed root cause of "the optimizer is
+      // showing the wrong date"). A persisted date is now only honored
+      // when it still equals the real current Eastern slate date;
+      // anything else is treated as if nothing had been persisted at
+      // all, falling through to the server's own today-default -- an
+      // explicit, visible notice (not a silent switch) is shown below.
+      let initialSelectedDate = initialDate ?? persisted?.selectedDate ?? null;
+      if (!initialDate && persisted?.selectedDate) {
+        const todayEastern = getTodayEasternDate();
+        if (persisted.selectedDate !== todayEastern) {
+          setStaleDateMessage(
+            `Your previously selected date (${persisted.selectedDate}) is no longer current -- showing today's slate (${todayEastern}) instead.`,
+          );
+          initialSelectedDate = null;
+        }
+      }
       setSelectedDate(initialSelectedDate);
       setDateInputValue(initialSelectedDate ?? "");
       if (persisted) {
@@ -729,6 +757,7 @@ export function OptimizerWorkspace({
   // re-fetches the slate list for that date (effect 3).
   function commitDateChange(nextDate: string) {
     if (!isValidSlateDateString(nextDate) || nextDate === selectedDate) return;
+    setStaleDateMessage(null);
     router.push(`/dashboard/optimizer?date=${encodeURIComponent(nextDate)}`);
   }
 
@@ -753,7 +782,7 @@ export function OptimizerWorkspace({
             onKeyDown={(e) => {
               if (e.key === "Enter" && dateInputValue) commitDateChange(dateInputValue);
             }}
-            title="Defaults to today's America/Chicago date -- set explicitly if DraftKings' live lobby has already rolled to the next calendar day"
+            title="Defaults to today's America/New_York (Eastern) slate date -- set explicitly to browse a different date"
             className="rounded border border-border bg-bg-panel-raised px-2 py-1 text-text"
           />
         </label>
@@ -1036,6 +1065,9 @@ export function OptimizerWorkspace({
       {slateUnavailableMessage && (
         <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{slateUnavailableMessage}</div>
       )}
+      {staleDateMessage && (
+        <div className="rounded border border-yellow bg-bg-panel-raised px-3 py-2 text-xs text-yellow">{staleDateMessage}</div>
+      )}
       {/* MLB FINISH MODE Phase L: Canonical Postgres is now kept current
           by the automatic worker (DK-fetch -> research/identity/
           eligibility -> Native projections -> ownership, unattended --
@@ -1224,6 +1256,7 @@ export function OptimizerWorkspace({
               onToggleExclude={toggleExclude}
               onExposureChange={setExposure}
               showProjectionComparison={showProjectionComparison}
+              hasAiProjections={pool.hasAiProjections}
             />
           ) : (
             <div className="rounded border border-border bg-bg-panel p-6 text-center text-sm text-text-faint">

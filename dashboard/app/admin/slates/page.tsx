@@ -5,7 +5,7 @@ import { SlateDateSelector } from "@/components/admin/SlateDateSelector";
 import { StatusCard } from "@/components/StatusCard";
 import { DataCard, MetricCard } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
@@ -40,7 +40,7 @@ export default async function AdminSlatesPage(props: PageProps<"/admin/slates">)
   // hard error on a whole-page navigation -- the date input itself only
   // ever produces valid YYYY-MM-DD values, so this only guards a
   // hand-edited URL.
-  const date = dateResolution.ok ? dateResolution.date : getTodayChicagoDate();
+  const date = dateResolution.ok ? dateResolution.date : getTodayEasternDate();
   const [summary, statuses, environmentReport, matchReportLoaded, environmentStatus] = await Promise.all([
     buildSlateSummary(date),
     buildPipelineStatuses(date),

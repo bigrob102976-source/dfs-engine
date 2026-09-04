@@ -1,5 +1,5 @@
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { qualityReportToRows, ratioHealth, type CompletenessRow, type HealthColor } from "@/lib/health";
 import { loadLatestBatterSnapshot, loadLatestDkMatchReport, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
@@ -38,7 +38,7 @@ export default async function ModelHealthPage(props: PageProps<"/dashboard/healt
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const [pitcherLoaded, batterLoaded, ownershipLoaded, matchReportLoaded] = await Promise.all([
     date ? loadLatestPitcherSnapshot(date) : null,

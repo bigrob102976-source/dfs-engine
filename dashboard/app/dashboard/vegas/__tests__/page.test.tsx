@@ -106,10 +106,10 @@ describe("VegasPage", () => {
     const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
     __setPythonRunnerForTests(makeStatusRunner(ok(STATUS_OK)));
 
-    // getTodayChicagoDate() must line up with the snapshot's folder date for
+    // getTodayEasternDate() must line up with the snapshot's folder date for
     // this fixture to be found; stub it via the module date helper instead
     // of relying on the real "today".
-    vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => "2026-08-13" }));
+    vi.doMock("@/lib/currentDate", () => ({ getTodayEasternDate: () => "2026-08-13" }));
     vi.resetModules();
     const { __setPythonRunnerForTests: setRunnerAgain } = await import("@/lib/orchestrator/pythonRunner");
     setRunnerAgain(makeStatusRunner(ok(STATUS_OK)));

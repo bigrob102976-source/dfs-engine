@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ARTIFACT_DIRS, artifactPath } from "../artifactRoot";
-import { getTodayChicagoDate } from "../currentDate";
+import { getTodayEasternDate } from "../currentDate";
 import { safeReadJson } from "../discovery";
 import type { BatterSnapshot, DKPlayerPool, PitcherSnapshot, SlateIndex } from "../types";
 import { getArtifactStatus, type ArtifactReadiness } from "./artifactStatus";
@@ -657,7 +657,7 @@ export function startRefresh(options?: StartRefreshOptions): StartRefreshResult 
 
   const state: RunState = {
     runId: crypto.randomUUID(),
-    slateDate: getTodayChicagoDate(),
+    slateDate: getTodayEasternDate(),
     status: "running",
     outcome: null,
     startedAt: new Date().toISOString(),

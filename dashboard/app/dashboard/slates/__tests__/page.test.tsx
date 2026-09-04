@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const DATE = "2026-08-17";
-vi.mock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => DATE }));
+vi.mock("@/lib/currentDate", () => ({ getTodayEasternDate: () => DATE }));
 
 const cookieStore = new Map<string, string>();
 vi.mock("next/headers", () => ({

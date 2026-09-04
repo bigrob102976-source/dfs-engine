@@ -3,7 +3,7 @@ import { MissingDataState } from "@/components/MissingDataState";
 import { PlayerTable } from "@/components/PlayerTable";
 import { PageHeader } from "@/components/ui/Header";
 import { getBlueCollarProjectionByPlayerId } from "@/lib/blueCollarProjections";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { HITTER_ELIGIBILITY_OPTIONS, filterHitterRowsByEligibility, isHitterEligibilityFilter } from "@/lib/eligibilityFilter";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
@@ -23,7 +23,7 @@ export default async function TopHittersPage(props: PageProps<"/dashboard/hitter
   const eligibilityParam = typeof searchParams.eligibility === "string" ? searchParams.eligibility : undefined;
   const eligibility = isHitterEligibilityFilter(eligibilityParam) ? eligibilityParam : "confirmed";
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const [batterLoaded, ownershipLoaded, poolLoaded, mlByPlayerId, blueCollarByPlayerId] = await Promise.all([
     date ? loadLatestBatterSnapshot(date) : null,

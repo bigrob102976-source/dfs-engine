@@ -103,7 +103,7 @@ describe("EnvironmentPage (slate filtering -- Milestone 32.6)", () => {
 
   it("shows every game for Full Day (no slate selected)", async () => {
     writeSnapshot();
-    vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => "2026-08-13" }));
+    vi.doMock("@/lib/currentDate", () => ({ getTodayEasternDate: () => "2026-08-13" }));
     vi.resetModules();
     const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
     __setPythonRunnerForTests(makeSlateRunner());
@@ -120,7 +120,7 @@ describe("EnvironmentPage (slate filtering -- Milestone 32.6)", () => {
 
   it("shows only the selected slate's games -- a Night slate never leaks a Main-only game", async () => {
     writeSnapshot();
-    vi.doMock("@/lib/currentDate", () => ({ getTodayChicagoDate: () => "2026-08-13" }));
+    vi.doMock("@/lib/currentDate", () => ({ getTodayEasternDate: () => "2026-08-13" }));
     vi.resetModules();
     const { __setPythonRunnerForTests } = await import("@/lib/orchestrator/pythonRunner");
     __setPythonRunnerForTests(

@@ -27,7 +27,7 @@ const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
-const { getTodayChicagoDate } = await import("@/lib/currentDate");
+const { getTodayEasternDate } = await import("@/lib/currentDate");
 const { GET } = await import("../route");
 
 function req(query = "") {
@@ -54,9 +54,9 @@ describe("GET /api/optimizer/slates -- Milestone 31.2C date handling", () => {
     await loginAsMember();
     const res = await GET(req());
     expect(res.status).toBe(200);
-    expect(mockListSlates).toHaveBeenCalledWith(getTodayChicagoDate());
+    expect(mockListSlates).toHaveBeenCalledWith(getTodayEasternDate());
     const body = await res.json();
-    expect(body.date).toBe(getTodayChicagoDate());
+    expect(body.date).toBe(getTodayEasternDate());
   });
 
   it("an explicit valid ?date= is used as-is", async () => {

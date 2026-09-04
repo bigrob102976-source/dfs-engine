@@ -1,7 +1,7 @@
 import { DataCard, MetricCard } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/Header";
 import { getStripeConfigStatus } from "@/lib/billing/stripeConfig";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { countWebhookEventsByStatus, getLastSuccessfulWebhookEvent, listRecentWebhookEvents } from "@/lib/db/stripeWebhookEvents";
 import { computeDbStats } from "@/lib/db/systemStats";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
@@ -26,7 +26,7 @@ function fmtDateTime(iso: string | null): string {
  * plus live counts from the membership DB -- never a second, parallel
  * definition of "is this connected." No READY is faked here. */
 export default async function AdminSystemPage() {
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const [
     mockModeEnabled,
     externalStatus,

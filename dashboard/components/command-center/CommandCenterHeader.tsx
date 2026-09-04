@@ -59,7 +59,7 @@ export function CommandCenterHeader({
         <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">Big Money DFS</div>
         <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-text">Today&apos;s Slate</h1>
         <p className="mt-0.5 text-xs text-text-faint">
-          America/Chicago · {date} · {gameCount} game{gameCount === 1 ? "" : "s"}
+          America/New_York · {date} · {gameCount} game{gameCount === 1 ? "" : "s"}
           {viewingSlateLabel ? <> · Viewing <span className="text-text-muted">{viewingSlateLabel}</span></> : ""}
         </p>
       </div>

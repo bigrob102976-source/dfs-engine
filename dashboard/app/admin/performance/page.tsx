@@ -1,7 +1,7 @@
 import { MlForwardHistoryPanel } from "@/components/admin/MlForwardHistoryPanel";
 import { MlForwardResultsPanel } from "@/components/admin/MlForwardResultsPanel";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { listMlForwardResultsDates, listMlForwardResultsSlateIds, loadLatestMlForwardResults } from "@/lib/mlForwardResults";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function AdminPerformancePage(props: PageProps<"/admin/perf
   const slateIdParam = typeof searchParams.slateId === "string" ? searchParams.slateId : undefined;
 
   const knownDates = await listMlForwardResultsDates();
-  const date = dateParam ?? knownDates[0] ?? getTodayChicagoDate();
+  const date = dateParam ?? knownDates[0] ?? getTodayEasternDate();
   const knownSlateIds = await listMlForwardResultsSlateIds(date);
   const slateId = slateIdParam ?? knownSlateIds[0] ?? "";
 

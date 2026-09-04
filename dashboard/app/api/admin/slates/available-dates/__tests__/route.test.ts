@@ -23,7 +23,7 @@ const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser, updateUserRole } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
-const { getTodayChicagoDate } = await import("@/lib/currentDate");
+const { getTodayEasternDate } = await import("@/lib/currentDate");
 const { GET } = await import("../route");
 
 async function loginAsAdmin() {
@@ -54,7 +54,7 @@ describe("GET /api/admin/slates/available-dates -- Milestone 31.2C", () => {
 
   it("smart default is today when today already has a usable slate", async () => {
     await loginAsAdmin();
-    const today = getTodayChicagoDate();
+    const today = getTodayEasternDate();
     mockRunPythonScript.mockResolvedValue({
       exitCode: 0,
       stdout: JSON.stringify({
@@ -71,7 +71,7 @@ describe("GET /api/admin/slates/available-dates -- Milestone 31.2C", () => {
 
   it("smart default is the nearest future usable date when today has none (the exact scenario this milestone fixes)", async () => {
     await loginAsAdmin();
-    const today = getTodayChicagoDate();
+    const today = getTodayEasternDate();
     // Computed relative to "today" (never hardcoded absolute dates) so
     // this test stays correct regardless of which real calendar date it
     // runs on -- a hardcoded future date eventually becomes the past.
@@ -103,7 +103,7 @@ describe("GET /api/admin/slates/available-dates -- Milestone 31.2C", () => {
 
   it("smart default falls back to today (normal empty-state) when no date has a usable slate", async () => {
     await loginAsAdmin();
-    const today = getTodayChicagoDate();
+    const today = getTodayEasternDate();
     mockRunPythonScript.mockResolvedValue({
       exitCode: 0,
       stdout: JSON.stringify({ status: "ok", provider_name: "draftkings_unofficial", dates: [] }),

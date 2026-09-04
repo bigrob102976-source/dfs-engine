@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getTodayChicagoDate } from "../../currentDate";
+import { getTodayEasternDate } from "../../currentDate";
 import type { PythonRunner, PythonRunResult } from "../pythonRunner";
 
 import { __resetStorageForTests } from "../../storage/getStorage";
@@ -45,11 +45,11 @@ function argValue(args: string[], flag: string): string | undefined {
 
 type Handler = (args: string[]) => PythonRunResult | Promise<PythonRunResult>;
 
-// startRefresh() always resolves the slate date via getTodayChicagoDate()
+// startRefresh() always resolves the slate date via getTodayEasternDate()
 // internally (never client-supplied) -- fixtures must use the SAME value
 // so the run's slateDate matches where these fake handlers write, or
 // every fingerprint check "sees" a different date and reports missing.
-const DATE = getTodayChicagoDate();
+const DATE = getTodayEasternDate();
 
 function defaultHandlers(): Record<string, Handler> {
   return {

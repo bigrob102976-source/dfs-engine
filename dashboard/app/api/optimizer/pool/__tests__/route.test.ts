@@ -22,7 +22,7 @@ const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createUser } = await import("@/lib/db/users");
 const { establishSession } = await import("@/lib/auth/session");
-const { getTodayChicagoDate } = await import("@/lib/currentDate");
+const { getTodayEasternDate } = await import("@/lib/currentDate");
 const { POST } = await import("../route");
 
 function req(body: unknown) {
@@ -51,7 +51,7 @@ describe("POST /api/optimizer/pool -- Milestone 31.2C date handling", () => {
     await loginAsMember();
     const res = await POST(req({ slateId: "dkunofficial-152400" }));
     expect(res.status).toBe(200);
-    expect(mockLoadPool).toHaveBeenCalledWith(getTodayChicagoDate(), "dkunofficial-152400", false);
+    expect(mockLoadPool).toHaveBeenCalledWith(getTodayEasternDate(), "dkunofficial-152400", false);
   });
 
   it("an explicit valid date is used as-is, not forced to today", async () => {

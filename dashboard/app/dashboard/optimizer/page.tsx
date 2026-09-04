@@ -1,7 +1,7 @@
 import { OptimizerView } from "@/components/OptimizerView";
 import { OptimizerWorkspace } from "@/components/optimizer/OptimizerWorkspace";
 import { getCurrentUser } from "@/lib/auth/session";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { userCanSelectBigMoneyMlOptimizerSource, userCanSelectBlueCollarOptimizerSource } from "@/lib/entitlements/featureVisibility";
 import { listLineupSets } from "@/lib/loaders";
 import { userCanUseCanonicalServing } from "@/lib/servingBackend/config";
@@ -18,8 +18,8 @@ export const dynamic = "force-dynamic";
  * like the CLI always has) remains browsable below for reference.
  * Milestone 31.2C: an explicit ?date= param (e.g. linked from
  * /admin/slates when DraftKings' live lobby has rolled to the next
- * calendar day ahead of Chicago-today) seeds OptimizerWorkspace's own
- * date selector; "Past Runs" below always stays scoped to Chicago-today
+ * calendar day ahead of Eastern-today) seeds OptimizerWorkspace's own
+ * date selector; "Past Runs" below always stays scoped to Eastern-today
  * specifically, since past lineup builds are inherently a same-day
  * concept, not per-selected-date. */
 export default async function OptimizerPage(props: PageProps<"/dashboard/optimizer">) {
@@ -31,7 +31,7 @@ export default async function OptimizerPage(props: PageProps<"/dashboard/optimiz
   // preserving pre-M31.2C behavior for a bare /dashboard/optimizer visit.
   const initialDate = isValidSlateDateString(dateParam) ? dateParam : null;
 
-  const today = getTodayChicagoDate();
+  const today = getTodayEasternDate();
   const loaded = await listLineupSets(today);
   const runs = loaded
     .filter((r): r is typeof r & { data: LineupSet } => r.data !== null)

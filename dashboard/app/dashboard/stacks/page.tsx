@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { MissingDataState } from "@/components/MissingDataState";
 import { PageHeader } from "@/components/ui/Header";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestBatterSnapshot } from "@/lib/loaders";
 import { buildHitterRows } from "@/lib/normalize";
 import { effectiveGameIds, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
@@ -33,7 +33,7 @@ export default async function StacksPage(props: PageProps<"/dashboard/stacks">) 
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const [batterLoaded, ownershipLoaded, dkPoolLoaded] = await Promise.all([
     date ? loadLatestBatterSnapshot(date) : null,

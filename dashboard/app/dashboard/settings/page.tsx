@@ -4,7 +4,7 @@ import { EnvironmentSectionToggles } from "@/components/environment/EnvironmentS
 import { MockModeToggle } from "@/components/MockModeToggle";
 import { PageHeader } from "@/components/ui/Header";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getExternalProjectionsStatus } from "@/lib/externalProjectionsStatus";
 import { getGameEnvironmentStatus } from "@/lib/gameEnvironmentStatus";
 import { getMockModeEnabled } from "@/lib/mockMode";
@@ -34,7 +34,7 @@ function formatTimestamp(iso: string | null): string {
  * front of a member who'd just get redirected. */
 export default async function SettingsPage() {
   await requireAdmin();
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const [status, environmentStatus, mockModeEnabled] = await Promise.all([
     getExternalProjectionsStatus(date),
     getGameEnvironmentStatus(date),

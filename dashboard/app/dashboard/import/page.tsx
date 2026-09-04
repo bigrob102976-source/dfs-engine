@@ -1,7 +1,7 @@
 import { ImportCenter } from "@/components/import/ImportCenter";
 import { PageHeader } from "@/components/ui/Header";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * is defense-in-depth, not the only enforcement). */
 export default async function ImportPage() {
   await requireAdmin();
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   return (
     <div>
       <PageHeader

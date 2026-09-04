@@ -233,6 +233,47 @@ describe("OptimizerWorkspace", () => {
     expect(body.slateId).not.toBe("yesterday-slate-152902");
   });
 
+  it("MLB V1 CUSTOMER DASHBOARD COMPLETION: a persisted date from a previous day is discarded, with a visible notice, never silently overriding today", async () => {
+    window.localStorage.setItem(
+      "mlb-dfs-optimizer-workspace-v1",
+      JSON.stringify({
+        selectedSlateId: null, selectedDate: "2020-01-01", locks: [], exclusions: [], maxExposure: {}, stackSize: null,
+        stackTeam: null, allowPitcherVsHitter: false, minSalary: null, minUnique: 1, lineups: 20, objective: "projection",
+      }),
+    );
+    const { calls } = installFetchMock();
+    render(<OptimizerWorkspace />);
+
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/previously selected date \(2020-01-01\) is no longer current/i)).toBeInTheDocument();
+
+    // The stale date must never reach any /api/optimizer/* request --
+    // every call either omits `date` (server resolves Eastern-today) or
+    // uses today's real value, but never "2020-01-01".
+    for (const call of calls) {
+      if (!call.init?.body) continue;
+      const body = JSON.parse(call.init.body as string);
+      if ("date" in body) expect(body.date).not.toBe("2020-01-01");
+    }
+    const slatesCall = calls.find((c) => c.url.startsWith("/api/optimizer/slates"));
+    expect(slatesCall?.url).not.toContain("2020-01-01");
+  });
+
+  it("MLB V1 CUSTOMER DASHBOARD COMPLETION: an explicit ?date= URL param always wins, even over a persisted date, and shows no stale-date notice", async () => {
+    window.localStorage.setItem(
+      "mlb-dfs-optimizer-workspace-v1",
+      JSON.stringify({
+        selectedSlateId: null, selectedDate: "2020-01-01", locks: [], exclusions: [], maxExposure: {}, stackSize: null,
+        stackTeam: null, allowPitcherVsHitter: false, minSalary: null, minUnique: 1, lineups: 20, objective: "projection",
+      }),
+    );
+    installFetchMock();
+    render(<OptimizerWorkspace initialDate="2026-08-12" />);
+
+    await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.queryByText(/is no longer current/i)).not.toBeInTheDocument();
+  });
+
   it("worker-reliability fix: shows no stale-data notice when the pool is fresh", async () => {
     installFetchMock({
       "/api/optimizer/pool": () => jsonResponse({ pool: { ...POOL_RESULT, dataStatus: "fresh", artifactAgeSeconds: 30, lastUpdatedAt: "2026-08-12T18:00:00.000Z" } }),
@@ -651,7 +692,7 @@ describe("OptimizerWorkspace", () => {
       expect(screen.getByRole("button", { name: "Legacy" })).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("the player table always shows BM AI/AI Δ/AI Conf/AI Grade columns", async () => {
+    it("the player table shows BM AI/AI Δ/AI Conf/AI Grade columns when the pool has real AI coverage", async () => {
       installFetchMock({ "/api/optimizer/pool": () => jsonResponse({ pool: POOL_WITH_AI }) });
       render(<OptimizerWorkspace />);
       await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
@@ -660,6 +701,24 @@ describe("OptimizerWorkspace", () => {
       expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: "AI Conf" })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: "AI Grade" })).toBeInTheDocument();
+    });
+
+    // MLB V1 CUSTOMER DASHBOARD COMPLETION: canonical Postgres (the
+    // production MLB serving backend) has no real AI data source at
+    // all -- pool.hasAiProjections is always false there. Showing 4
+    // columns of bare "--" for a feature that structurally can never
+    // have a value reads as broken, not "unavailable"; the columns are
+    // now hidden entirely rather than filled with placeholders, driven
+    // by the same real pool.hasAiProjections flag the selector already used.
+    it("the player table hides the AI columns entirely when the pool has no real AI coverage (e.g. canonical production)", async () => {
+      installFetchMock(); // default POOL_RESULT -- hasAiProjections: false
+      render(<OptimizerWorkspace />);
+      await waitFor(() => expect(screen.getByText("Leadoff Hitter")).toBeInTheDocument(), { timeout: 5000 });
+
+      expect(screen.queryByRole("columnheader", { name: "BM AI" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "AI Δ" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "AI Conf" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "AI Grade" })).not.toBeInTheDocument();
     });
   });
 

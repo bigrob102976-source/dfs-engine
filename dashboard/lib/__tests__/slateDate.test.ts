@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getTodayChicagoDate } from "../currentDate";
+import { getTodayEasternDate } from "../currentDate";
 import { isValidSlateDateString, resolveSlateDate } from "../slateDate";
 
 describe("isValidSlateDateString", () => {
@@ -30,10 +30,10 @@ describe("isValidSlateDateString", () => {
 });
 
 describe("resolveSlateDate", () => {
-  it("falls back to Chicago-today when absent", () => {
-    expect(resolveSlateDate(undefined)).toEqual({ ok: true, date: getTodayChicagoDate() });
-    expect(resolveSlateDate(null)).toEqual({ ok: true, date: getTodayChicagoDate() });
-    expect(resolveSlateDate("")).toEqual({ ok: true, date: getTodayChicagoDate() });
+  it("falls back to Eastern-today when absent", () => {
+    expect(resolveSlateDate(undefined)).toEqual({ ok: true, date: getTodayEasternDate() });
+    expect(resolveSlateDate(null)).toEqual({ ok: true, date: getTodayEasternDate() });
+    expect(resolveSlateDate("")).toEqual({ ok: true, date: getTodayEasternDate() });
   });
 
   it("uses a valid explicit date as-is", () => {

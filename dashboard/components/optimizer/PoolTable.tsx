@@ -52,10 +52,6 @@ const COLUMNS: Column[] = [
   { key: "value", label: "Value", sortKey: "value", align: "right" },
   { key: "nativeProjection", label: "BM Native", sortKey: "nativeProjection", align: "right" },
   { key: "nativeDelta", label: "Native Δ", sortKey: "nativeDelta", align: "right" },
-  { key: "aiProjection", label: "BM AI", sortKey: "aiProjection", align: "right" },
-  { key: "aiDelta", label: "AI Δ", sortKey: "aiDelta", align: "right" },
-  { key: "aiConfidence", label: "AI Conf", sortKey: "aiConfidence", align: "right" },
-  { key: "aiGrade", label: "AI Grade", sortKey: "aiGrade", align: "right" },
   { key: "ownership", label: "Own%", sortKey: "ownership", align: "right" },
   { key: "leverage", label: "Lev", sortKey: "leverage", align: "right" },
   { key: "risk", label: "Risk", sortKey: "risk", align: "right" },
@@ -72,6 +68,24 @@ const COMPARISON_COLUMNS: Column[] = [
   { key: "adjustmentDelta", label: "BC Δ", sortKey: "adjustmentDelta", align: "right" },
 ];
 
+// MLB V1 CUSTOMER DASHBOARD COMPLETION: Big Money AI has no real source
+// under canonical Postgres serving (the production MLB backend) --
+// poolPlayerRowFromCanonical() honestly leaves every ai* field null,
+// never fabricated. Filling every row with "--" across 4 columns for a
+// feature that structurally cannot ever have a value under the current
+// serving backend reads as broken, not "unavailable" -- spliced in only
+// when the pool itself reports real AI coverage (pool.hasAiProjections,
+// the same real flag the Projection Source selector already uses),
+// rather than hardcoding "always hidden": if AI data is ever wired up
+// under canonical serving in a future milestone, these columns
+// reappear automatically, with zero further change here.
+const AI_COLUMNS: Column[] = [
+  { key: "aiProjection", label: "BM AI", sortKey: "aiProjection", align: "right" },
+  { key: "aiDelta", label: "AI Δ", sortKey: "aiDelta", align: "right" },
+  { key: "aiConfidence", label: "AI Conf", sortKey: "aiConfidence", align: "right" },
+  { key: "aiGrade", label: "AI Grade", sortKey: "aiGrade", align: "right" },
+];
+
 function fmt(v: number | null, digits = 1): string {
   return v === null ? "--" : v.toFixed(digits);
 }
@@ -85,6 +99,7 @@ export function PoolTable({
   onToggleExclude,
   onExposureChange,
   showProjectionComparison = false,
+  hasAiProjections = false,
 }: {
   players: PoolPlayerRow[];
   locks: Set<string>;
@@ -94,6 +109,7 @@ export function PoolTable({
   onToggleExclude: (dkPlayerId: string) => void;
   onExposureChange: (dkPlayerId: string, fraction: number) => void;
   showProjectionComparison?: boolean;
+  hasAiProjections?: boolean;
 }) {
   const [positionTab, setPositionTab] = useState<PoolTableTab>("ALL");
   const [teamFilter, setTeamFilter] = useState(ALL_TEAMS);
@@ -105,10 +121,17 @@ export function PoolTable({
   const [detailPlayer, setDetailPlayer] = useState<PoolPlayerRow | null>(null);
 
   const columns = useMemo(() => {
-    if (!showProjectionComparison) return COLUMNS;
-    const projIndex = COLUMNS.findIndex((c) => c.key === "projection");
-    return [...COLUMNS.slice(0, projIndex + 1), ...COMPARISON_COLUMNS, ...COLUMNS.slice(projIndex + 1)];
-  }, [showProjectionComparison]);
+    let cols = COLUMNS;
+    if (hasAiProjections) {
+      const nativeDeltaIndex = cols.findIndex((c) => c.key === "nativeDelta");
+      cols = [...cols.slice(0, nativeDeltaIndex + 1), ...AI_COLUMNS, ...cols.slice(nativeDeltaIndex + 1)];
+    }
+    if (showProjectionComparison) {
+      const projIndex = cols.findIndex((c) => c.key === "projection");
+      cols = [...cols.slice(0, projIndex + 1), ...COMPARISON_COLUMNS, ...cols.slice(projIndex + 1)];
+    }
+    return cols;
+  }, [showProjectionComparison, hasAiProjections]);
 
   const teamOptions = useMemo(() => distinctValues(players, (p) => p.team), [players]);
   // "TEAM @ OPP" labeled by (alphabetically-lower team) @ (alphabetically-higher team),
@@ -322,12 +345,16 @@ export function PoolTable({
                   <td className={`px-2 py-1 text-right ${p.nativeDelta !== null && p.nativeDelta >= 0 ? "text-green" : p.nativeDelta !== null ? "text-red" : "text-text-muted"}`}>
                     {p.nativeDelta !== null ? `${p.nativeDelta >= 0 ? "+" : ""}${fmt(p.nativeDelta, 2)}` : "--"}
                   </td>
-                  <td className="px-2 py-1 text-right text-purple">{fmt(p.aiProjection)}</td>
-                  <td className={`px-2 py-1 text-right ${p.aiDelta !== null && p.aiDelta >= 0 ? "text-green" : p.aiDelta !== null ? "text-red" : "text-text-muted"}`}>
-                    {p.aiDelta !== null ? `${p.aiDelta >= 0 ? "+" : ""}${fmt(p.aiDelta, 2)}` : "--"}
-                  </td>
-                  <td className="px-2 py-1 text-right text-text-muted">{fmt(p.aiConfidence, 0)}</td>
-                  <td className="px-2 py-1 text-right text-purple">{p.aiGrade ?? "--"}</td>
+                  {hasAiProjections && (
+                    <>
+                      <td className="px-2 py-1 text-right text-purple">{fmt(p.aiProjection)}</td>
+                      <td className={`px-2 py-1 text-right ${p.aiDelta !== null && p.aiDelta >= 0 ? "text-green" : p.aiDelta !== null ? "text-red" : "text-text-muted"}`}>
+                        {p.aiDelta !== null ? `${p.aiDelta >= 0 ? "+" : ""}${fmt(p.aiDelta, 2)}` : "--"}
+                      </td>
+                      <td className="px-2 py-1 text-right text-text-muted">{fmt(p.aiConfidence, 0)}</td>
+                      <td className="px-2 py-1 text-right text-purple">{p.aiGrade ?? "--"}</td>
+                    </>
+                  )}
                   <td className="px-2 py-1 text-right text-text-muted">{p.ownership !== null ? `${fmt(p.ownership)}%` : "--"}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.leverage)}</td>
                   <td className="px-2 py-1 text-right text-text-muted">{fmt(p.risk)}</td>

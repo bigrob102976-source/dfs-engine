@@ -311,14 +311,21 @@ describe("PoolTable", () => {
   });
 
   // Milestone 20: AI Projection Engine columns + Player Detail section.
-  it("always shows BM AI/AI Δ/AI Conf/AI Grade columns and renders each player's AI values", () => {
+  // MLB V1 CUSTOMER DASHBOARD COMPLETION: no longer unconditional -- see
+  // hasAiProjections's own docstring in PoolTable.tsx. Explicitly opted
+  // in here via hasAiProjections={true} (the caller only ever passes
+  // that when the pool itself reports real AI coverage).
+  it("shows BM AI/AI Δ/AI Conf/AI Grade columns and renders each player's AI values when hasAiProjections is true", () => {
     const aiPlayers = [
       player({
         dkPlayerId: "d1", name: "Judge", projection: 12, aiProjection: 14.02, aiDelta: 2.02, aiConfidence: 81.2, aiGrade: "A+",
       }),
     ];
     render(
-      <PoolTable players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}} onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} />,
+      <PoolTable
+        players={aiPlayers} locks={new Set()} exclusions={new Set()} maxExposure={{}}
+        onToggleLock={vi.fn()} onToggleExclude={vi.fn()} onExposureChange={vi.fn()} hasAiProjections
+      />,
     );
     expect(screen.getByRole("columnheader", { name: "BM AI" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "AI Δ" })).toBeInTheDocument();
@@ -329,6 +336,14 @@ describe("PoolTable", () => {
     expect(row.textContent).toContain("+2.02");
     expect(row.textContent).toContain("81");
     expect(row.textContent).toContain("A+");
+  });
+
+  it("hides the AI columns entirely when hasAiProjections is false (default) -- e.g. canonical production, which has no real AI source", () => {
+    renderTable();
+    expect(screen.queryByRole("columnheader", { name: "BM AI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "AI Δ" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "AI Conf" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "AI Grade" })).not.toBeInTheDocument();
   });
 
   // Milestone 27: Native Projection columns -- always shown (never
@@ -348,8 +363,8 @@ describe("PoolTable", () => {
     expect(row.textContent).toContain("+1.4");
   });
 
-  it("AI columns render '--' for a player with no AI Projection yet", () => {
-    renderTable();
+  it("AI columns render '--' for a player with no AI Projection yet, when hasAiProjections is true", () => {
+    renderTable({ hasAiProjections: true });
     const row = screen.getByText("Bravo Hitter").closest("tr")!;
     // Salary/Value/Own% etc. also render "--" for missing data, so this
     // just confirms the new columns don't throw or render a stray "null".

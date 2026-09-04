@@ -5,7 +5,7 @@ import { ProjectionLabTable } from "@/components/projections/ProjectionLabTable"
 import { loadActualDkPointsByPlayerId } from "@/lib/actualResults";
 import { getAiProjectionByPlayerId } from "@/lib/aiProjections";
 import { getBlueCollarProjectionByPlayerId } from "@/lib/blueCollarProjections";
-import { getTodayChicagoDate } from "@/lib/currentDate";
+import { getTodayEasternDate } from "@/lib/currentDate";
 import { getFantasyProsProjectionByPlayerId } from "@/lib/fantasyProsProjections";
 import { loadLatestBatterSnapshot, loadLatestDKPlayerPool, loadLatestOwnershipSnapshot, loadLatestPitcherSnapshot } from "@/lib/loaders";
 import { getMlProjectionByPlayerId } from "@/lib/mlProjections";
@@ -30,7 +30,7 @@ export default async function ProjectionLabPage(props: PageProps<"/dashboard/pro
   const searchParams = await props.searchParams;
   const slateId = typeof searchParams.slate === "string" ? searchParams.slate : undefined;
 
-  const date = getTodayChicagoDate();
+  const date = getTodayEasternDate();
   const slateCtx = await resolveSlateContext(date, slateId);
   const gameIds = effectiveGameIds(slateCtx);
 
