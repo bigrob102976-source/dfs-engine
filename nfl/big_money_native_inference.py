@@ -131,8 +131,14 @@ def build_current_nfl_projection_features(draft_group_id: int, slate_date: str):
     }
 
 
-def generate_projections(draft_group_id: int, slate_date: str) -> List[NflProjectionRecord]:
-    ctx = build_current_nfl_projection_features(draft_group_id, slate_date)
+def generate_projections(draft_group_id: int, slate_date: str, ctx: Optional[dict] = None) -> List[NflProjectionRecord]:
+    """NFL UI M1: accepts an optional pre-built `ctx` (from
+    build_current_nfl_projection_features()) so a caller that also needs
+    the raw usage/matchup context (e.g. scripts/nfl_dashboard_data.py)
+    can build it ONCE and reuse it here, rather than this function
+    re-fetching the entire real historical dataset a second time."""
+    if ctx is None:
+        ctx = build_current_nfl_projection_features(draft_group_id, slate_date)
     current_week = ctx["current_week"]
 
     generated_at = datetime.now(timezone.utc).isoformat()

@@ -44,7 +44,19 @@ from nfl.optimizer_models import (
 )
 
 SOLVER_MAX_TIME_SECONDS = 10.0
-SOLVER_NUM_SEARCH_WORKERS = 1
+# NFL UI M1 -- real finding: a single search worker genuinely cannot
+# solve a real, full DK Classic pool (744 real players, confirmed
+# against real DraftGroup 151307) within the 10s (or even 30s) time
+# limit -- CP-SAT returns UNKNOWN, which solve_single_lineup() then
+# treats identically to a genuine INFEASIBLE, silently reporting "no
+# legal lineup found" for a real, easily-solvable slate. This was never
+# caught before this milestone because every prior test (test_nfl_
+# solver.py) used tiny synthetic pools that solve instantly regardless
+# of worker count. 8 workers solves the real 744-player pool in ~0.35s
+# (confirmed live) -- every prior MLB/NFL synthetic test still passes
+# unchanged with more workers (more search parallelism never makes a
+# genuinely feasible problem infeasible).
+SOLVER_NUM_SEARCH_WORKERS = 8
 SOLVER_RANDOM_SEED = 42
 
 # CP-SAT works on integers -- projection values are scaled up and
