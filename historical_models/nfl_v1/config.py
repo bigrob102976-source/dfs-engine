@@ -24,6 +24,16 @@ SPLIT_TRAIN = "train"
 SPLIT_VALIDATION = "validation"
 SPLIT_TEST = "test"
 
+# NFL M11 -- per-position artifact version pointer. QB/RB/WR/TE remain
+# v1 (unchanged, per M11's explicit "do not retrain offense unless
+# required" instruction); DST moved to v2 (M11's opponent-context
+# feature layer + honest baseline-fallback selection -- see
+# historical_models/nfl_v1/train.py's module docstring). Never silently
+# overwritten -- a position's prior version directory is left on disk.
+CURRENT_ARTIFACT_VERSION_BY_POSITION = {
+    "QB": "v1", "RB": "v1", "WR": "v1", "TE": "v1", "DST": "v2",
+}
+
 DEFAULT_SEED = 42
 
 TARGET_COLUMN = "target_dk_points"
@@ -35,5 +45,5 @@ NON_FEATURE_ROLLING_KEYS = ("weeks_of_history",)
 __all__ = [
     "MODEL_VERSION", "DATASET_SCHEMA_VERSION", "TARGET_SCORING_VERSION", "DEFAULT_ARTIFACT_ROOT",
     "OFFENSE_POSITIONS", "DST_POSITION", "ALL_POSITIONS", "SPLIT_TRAIN", "SPLIT_VALIDATION", "SPLIT_TEST",
-    "DEFAULT_SEED", "TARGET_COLUMN", "NON_FEATURE_ROLLING_KEYS",
+    "DEFAULT_SEED", "TARGET_COLUMN", "NON_FEATURE_ROLLING_KEYS", "CURRENT_ARTIFACT_VERSION_BY_POSITION",
 ]

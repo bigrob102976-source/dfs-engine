@@ -15,7 +15,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from historical_models.nfl_v1.config import DEFAULT_ARTIFACT_ROOT, DST_POSITION, MODEL_VERSION, OFFENSE_POSITIONS, TARGET_SCORING_VERSION
+from historical_models.nfl_v1.config import (
+    CURRENT_ARTIFACT_VERSION_BY_POSITION, DEFAULT_ARTIFACT_ROOT, DST_POSITION, MODEL_VERSION, OFFENSE_POSITIONS, TARGET_SCORING_VERSION,
+)
 from historical_models.nfl_v1.persistence import load_all_artifacts
 
 
@@ -33,11 +35,12 @@ class LoadedNflModel:
     metadata: dict
 
 
-def load_position_model(position: str, artifact_root: Path = DEFAULT_ARTIFACT_ROOT) -> LoadedNflModel:
+def load_position_model(position: str, artifact_root: Path = DEFAULT_ARTIFACT_ROOT, version: Optional[str] = None) -> LoadedNflModel:
     if position not in OFFENSE_POSITIONS and position != DST_POSITION:
         raise NflModelArtifactError(f"{position!r} is not a supported NFL model position.")
 
-    output_dir = Path(artifact_root) / position.lower() / "v1"
+    resolved_version = version or CURRENT_ARTIFACT_VERSION_BY_POSITION.get(position, "v1")
+    output_dir = Path(artifact_root) / position.lower() / resolved_version
     try:
         artifacts = load_all_artifacts(output_dir)
     except FileNotFoundError as exc:

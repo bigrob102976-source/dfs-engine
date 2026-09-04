@@ -31,6 +31,8 @@ from historical_nfl.dk_actual_scoring import calculate_actual_dst_dk_points, cal
 from historical_nfl.dst_rolling import compute_dst_rolling_features
 from historical_nfl.dst_usage_models import NflDstUsageRecord
 from historical_nfl.injury_status import build_injury_status_lookup
+from historical_nfl.team_offense_models import NflTeamOffenseRecord
+from historical_nfl.team_offense_rolling import compute_team_offense_rolling_features
 from historical_nfl.usage_models import NflUsageRecord
 from historical_nfl.usage_rolling import compute_player_rolling_features, compute_season_to_date_features
 
@@ -177,7 +179,13 @@ def build_dst_training_rows(
     season: int, week: int,
     team_stats_rows: List[dict], all_dst_records: List[NflDstUsageRecord],
     pbp_rows: List[dict], schedule_rows: List[dict],
+    all_team_offense_records: Optional[List[NflTeamOffenseRecord]] = None,
 ) -> List[NflDstTrainingRow]:
+    """NFL M11: `all_team_offense_records` (optional, backward compatible)
+    attaches the row's UPCOMING OPPONENT's own trailing offensive form
+    (opponent_* keys merged into rolling_features) -- see historical_nfl/
+    team_offense_rolling.py's module docstring for why M10's DST model
+    was missing this real, leakage-safe signal."""
     schedule_by_game = {r["game_id"]: r for r in schedule_rows if r.get("game_id")}
     scores_by_game = {r["game_id"]: (r.get("home_score"), r.get("away_score")) for r in schedule_rows if r.get("game_id")}
     by_team_stats = {r["team"]: r for r in team_stats_rows if r.get("team")}
@@ -186,6 +194,7 @@ def build_dst_training_rows(
     for team, stats_row in by_team_stats.items():
         game_id = stats_row.get("game_id")
         home_away, _ = _home_away_and_rest(team, game_id, schedule_by_game)
+        opponent = stats_row.get("opponent_team")
 
         points_allowed = None
         if game_id in schedule_by_game and game_id in scores_by_game:
@@ -196,7 +205,9 @@ def build_dst_training_rows(
             elif team == sched.get("away_team"):
                 points_allowed = home_score
 
-        rolling = compute_dst_rolling_features(all_dst_records, team, week)
+        rolling = dict(compute_dst_rolling_features(all_dst_records, team, week))
+        if all_team_offense_records is not None and opponent:
+            rolling.update(compute_team_offense_rolling_features(all_team_offense_records, opponent, week))
         weeks_of_history = rolling.get("weeks_of_history", 0)
 
         target = calculate_actual_dst_dk_points(team, stats_row, pbp_rows, points_allowed)
@@ -204,7 +215,7 @@ def build_dst_training_rows(
         rows.append(NflDstTrainingRow(
             schema_version=SCHEMA_VERSION, target_scoring_version=TARGET_SCORING_VERSION,
             season=season, week=week, game_id=game_id, canonical_player_id=f"dst:{team}",
-            team=team, opponent=stats_row.get("opponent_team"), home_away=home_away,
+            team=team, opponent=opponent, home_away=home_away,
             feature_as_of_season=season, feature_as_of_week=week,
             rolling_features=rolling, has_prior_week=weeks_of_history > 0, weeks_of_history=weeks_of_history,
             target_dk_points=target["dfs_points"], target_scored=target["scored"],
