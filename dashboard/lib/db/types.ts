@@ -236,7 +236,7 @@ export interface PublishedSlateVersion {
 }
 
 // Milestone 30: background job persistence (lib/jobs/*).
-export type JobType = "PROCESS_SLATE" | "REFRESH_SLATE" | "BUILD_LINEUPS" | "RESULTS_COLLECTION" | "MODEL_EVALUATION";
+export type JobType = "PROCESS_SLATE" | "REFRESH_SLATE" | "BUILD_LINEUPS" | "RESULTS_COLLECTION" | "MODEL_EVALUATION" | "REFRESH_CANONICAL_DATE";
 export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 
 export interface JobRow {

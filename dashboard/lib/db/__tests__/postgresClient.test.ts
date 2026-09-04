@@ -39,7 +39,7 @@ describe("listPostgresMigrationFiles", () => {
       "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql", "0012_canonical_shadow_status.sql",
       "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
       "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql",
-      "0017_probable_starters.sql",
+      "0017_probable_starters.sql", "0018_admin_csv_import_job_type.sql",
     ]);
   });
 });
@@ -68,6 +68,7 @@ describe("runPostgresMigrations", () => {
       "0009_ordering_sequence_columns.sql", "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql",
       "0012_canonical_shadow_status.sql", "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
       "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql", "0017_probable_starters.sql",
+      "0018_admin_csv_import_job_type.sql",
     ]);
   });
 

@@ -102,6 +102,7 @@ function slateOptionFromRow(row: CanonicalSlateRow): SlateOption {
     startTime: row.first_game_start_utc,
     gameIds: parseJsonArray(row.game_ids_json),
     playerCount: row.player_count,
+    provider: row.provider,
   };
 }
 

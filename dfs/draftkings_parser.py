@@ -51,7 +51,10 @@ def _parse_salary(raw: str) -> int:
     cleaned = (raw or "").replace("$", "").replace(",", "").strip()
     if not cleaned:
         raise DraftKingsCSVFormatError(f"Row has an empty/unparseable Salary value: {raw!r}")
-    return int(float(cleaned))
+    try:
+        return int(float(cleaned))
+    except ValueError:
+        raise DraftKingsCSVFormatError(f"Row has an empty/unparseable Salary value: {raw!r}") from None
 
 
 def _parse_avg_points(raw: Optional[str]) -> Optional[float]:

@@ -11,6 +11,7 @@ file is never saved and never silently degrades the pipeline later.
 """
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -38,6 +39,11 @@ def main() -> None:
         dk_rows = parse_salary_csv(csv_path)
     except DraftKingsCSVFormatError as e:
         print(json.dumps({"status": "error", "reason": str(e)}))
+        return
+    except (UnicodeDecodeError, csv.Error):
+        # Not text/CSV at all -- e.g. an executable or other binary file
+        # renamed with a .csv extension. Never saved, never executed.
+        print(json.dumps({"status": "error", "reason": "This file is not readable as CSV text -- it may be a binary/executable file, not a real DraftKings export."}))
         return
 
     if not dk_rows:

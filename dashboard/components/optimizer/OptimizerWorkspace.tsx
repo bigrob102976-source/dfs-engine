@@ -801,6 +801,7 @@ export function OptimizerWorkspace({
             <option value="">{slatesLoading ? "Loading slates..." : slates.length === 0 ? "No slates available" : "Select a slate"}</option>
             {slates.map((s) => (
               <option key={s.slateId} value={s.slateId}>
+                {s.provider === "draftkings_csv" ? "[Admin CSV] " : ""}
                 {s.slateName ?? s.slateId}
                 {s.startTime ? ` -- ${s.startTime}` : ""}
                 {s.gameCount != null ? ` -- ${s.gameCount} games` : ""}

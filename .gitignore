@@ -78,6 +78,14 @@ dashboard/next-env.d.ts
 # (unauthenticated) endpoints, never source. See draftkings_unofficial/.
 /data/draftkings_unofficial/
 
+# M2B/M2G: canonical shadow-ingestion RAW/NORMALIZED artifacts (local
+# LocalArtifactStorage backend only -- production uses S3ArtifactStorage,
+# never this local tree) -- reproducible by re-running the canonical
+# ingestion pipeline (canonical_ingestion/), never source. Same reason
+# as every other generated-artifact entry above.
+/raw/
+/normalized/
+
 # Milestone 32.0: historical MLB research/proof-of-concept output --
 # reproducible by re-running scripts/run_historical_poc_join.py against
 # live sources, never source. See historical_mlb/.

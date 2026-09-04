@@ -73,6 +73,13 @@ export interface SlateOption {
   // filter to exactly this slate without a second round trip.
   gameIds: string[];
   playerCount: number | null;
+  // BREAK-GLASS ADMIN CSV UPLOAD Phase 8: the canonical `slates.provider`
+  // column, when this slate came from the canonical backend (undefined
+  // for legacy-backend slates, which are never admin-CSV-sourced). Used
+  // both for the "Admin CSV" UI badge and as an explicit, independent
+  // member-visibility exclusion (lib/memberSlateVisibility.ts) --
+  // `"draftkings_csv"` must never reach a non-admin viewer.
+  provider?: string | null;
 }
 
 /** Minimal shape lib/slateFilters.ts's pure helpers need -- just the

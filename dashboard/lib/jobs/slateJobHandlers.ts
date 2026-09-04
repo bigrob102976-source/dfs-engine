@@ -1,4 +1,5 @@
 import { runSlatePipeline } from "../slatePipeline";
+import { runRefresh } from "../canonicalRefresh";
 import { registerJobHandler, type JobHandler } from "./worker";
 
 // Milestone 30: registers the PROCESS_SLATE/REFRESH_SLATE job handlers.
@@ -31,4 +32,26 @@ export function ensureSlateJobHandlersRegistered(): void {
 
   registerJobHandler("PROCESS_SLATE", handler);
   registerJobHandler("REFRESH_SLATE", handler);
+
+  // BREAK-GLASS ADMIN CSV UPLOAD Phase 7: date-level (not slate-level --
+  // job.slate_id is deliberately null for this job type, see
+  // dashboard/lib/jobs/queue.ts's own support for a null slateId), runs
+  // the SAME research/identity/eligibility/Native-projection/ownership
+  // sequence the automatic path already runs after every real DK fetch
+  // (lib/canonicalRefresh.ts::runRefresh, reused unmodified) so a newly
+  // imported admin CSV slate gets real downstream data without any
+  // separate, divergent code path.
+  const refreshCanonicalDateHandler: JobHandler = async (job) => {
+    if (!job.slate_date) {
+      throw new Error(`${job.job_type} job ${job.id} is missing slate_date.`);
+    }
+    const payload = job.payload_json ? (JSON.parse(job.payload_json) as { sport?: string }) : {};
+    await runRefresh(job.slate_date, payload.sport ?? "MLB");
+    // runRefresh() never throws -- every step is independently isolated
+    // and its own failure is captured in the returned summary rather
+    // than surfaced here. The job always SUCCEEDS once genuinely
+    // attempted; a partial/degraded summary is not a job failure, same
+    // as the CLI wrapper's own "always exits 0" contract.
+  };
+  registerJobHandler("REFRESH_CANONICAL_DATE", refreshCanonicalDateHandler);
 }

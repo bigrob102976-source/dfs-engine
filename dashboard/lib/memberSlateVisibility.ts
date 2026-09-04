@@ -16,6 +16,14 @@ import type { SlateOption } from "./orchestrator/types";
 export async function filterSlatesForCurrentViewer(slates: SlateOption[], date: string): Promise<SlateOption[]> {
   const user = await getCurrentUser();
   if (user && isAdminRole(user.role)) return slates;
+  // BREAK-GLASS ADMIN CSV UPLOAD Phase 8: explicit, independent
+  // exclusion -- an admin-CSV-imported canonical slate must never reach
+  // a non-admin viewer. Nothing ever calls the legacy `slate_status`
+  // publish flow for one (so the check below would already exclude it
+  // today too), but that's this OTHER mechanism's job to guarantee, not
+  // this one's -- a future change to the legacy publish flow must not be
+  // able to silently expose admin-CSV data by accident.
+  const nonAdminCsvSlates = slates.filter((s) => s.provider !== "draftkings_csv");
   const publishedIds = new Set(await listPublishedSlateIds(date));
-  return slates.filter((s) => publishedIds.has(s.slateId));
+  return nonAdminCsvSlates.filter((s) => publishedIds.has(s.slateId));
 }

@@ -92,7 +92,7 @@ describe("M5B: canonicalListSlates", () => {
     expect(result.isMock).toBe(false);
     expect(result.source).toBe("draftkings_unofficial_live");
     expect(result.slates).toEqual([
-      { slateId: "dkunofficial-152904", slateName: "Main", gameCount: 8, startTime: "2026-08-31T23:05:00Z", gameIds: [], playerCount: 1 },
+      { slateId: "dkunofficial-152904", slateName: "Main", gameCount: 8, startTime: "2026-08-31T23:05:00Z", gameIds: [], playerCount: 1, provider: "draftkings_unofficial" },
     ]);
     expect(result.dataStatus).toBe("fresh");
   });
@@ -221,7 +221,7 @@ describe("M5B: canonicalListSlates", () => {
     const afterRollover = await canonicalListSlates("2026-09-01"); // Eastern midnight has now passed
     expect(afterRollover.status).toBe("ready");
     expect(afterRollover.slates).toEqual([
-      { slateId: "dkunofficial-rollover", slateName: "Main", gameCount: 8, startTime: "2026-08-31T23:05:00Z", gameIds: [], playerCount: 1 },
+      { slateId: "dkunofficial-rollover", slateName: "Main", gameCount: 8, startTime: "2026-08-31T23:05:00Z", gameIds: [], playerCount: 1, provider: "draftkings_unofficial" },
     ]);
 
     const rows = getDb().prepare("SELECT COUNT(*) as c FROM slates WHERE provider_slate_id = 'dkunofficial-rollover'").get() as { c: number };
