@@ -9,18 +9,21 @@ milestone's product decision: FantasyPros/BlueCollar are external
 benchmarks, never a production NFL projection source, and never
 implement this interface).
 
-BigMoneyNativeNflProvider is a deliberately honest stub for M4: no real
-NFL projection model exists yet (that's NFL M5+ research work), so
-get_projections() always raises NflProjectionProviderNotConfiguredError
-rather than fabricating a number, guessing from salary, or returning an
-empty-but-successful list that a caller might mistake for "zero
-players project positively." A future real model implementation slots
-into this exact same interface with no changes needed elsewhere.
-"""
+NFL M10: BigMoneyNativeNflProvider is now a REAL provider, backed by
+historical_models/nfl_v1's trained models (offline inference only --
+no Railway/live-website wiring yet, per M10's explicit scope). It never
+falls back to salary, FantasyPros, BlueCollar, or a synthetic value: a
+position with no trained artifact, or a player unresolvable to a real
+GSIS identity, is simply absent from get_projections()'s result, never
+assigned a guessed number. Still raises NflProjectionProviderNotConfiguredError
+if literally no model artifacts exist at all (e.g. a fresh checkout
+before NFL M10's training has ever been run locally)."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List, Optional
 
+from historical_models.nfl_v1.config import DEFAULT_ARTIFACT_ROOT, MODEL_VERSION
 from nfl.projection_models import NflProjectionRecord
 
 
@@ -65,17 +68,16 @@ class NflProjectionProvider(ABC):
 
 
 class BigMoneyNativeNflProvider(NflProjectionProvider):
-    """M4's honest placeholder: the interface Big Money's real NFL model
-    will eventually implement, wired all the way through to the
-    optimizer, but with no real model behind it yet. Always reports
-    is_configured() == False and get_projections() always raises --
-    this is the correct, truthful state until NFL M5+ produces a real
-    model, not a bug to work around."""
+    """NFL M10: real provider backed by historical_models/nfl_v1's
+    trained, persisted models. is_configured() checks that at least one
+    position's model.joblib actually exists on disk (or in object
+    storage) before ever claiming to be usable."""
 
     name = "big_money_native_nfl"
 
-    def __init__(self, model_version: Optional[str] = None):
-        self._model_version = model_version
+    def __init__(self, model_version: Optional[str] = None, artifact_root: Path = DEFAULT_ARTIFACT_ROOT):
+        self._model_version = model_version or MODEL_VERSION
+        self._artifact_root = Path(artifact_root)
 
     def provider_name(self) -> str:
         return "Big Money Native"
@@ -84,11 +86,13 @@ class BigMoneyNativeNflProvider(NflProjectionProvider):
         return self._model_version
 
     def is_configured(self) -> bool:
-        return False
+        return any((self._artifact_root / pos.lower() / "v1" / "model.joblib").exists() for pos in ("qb", "rb", "wr", "te", "dst"))
 
     def get_projections(self, draft_group_id: int, slate_date: str) -> List[NflProjectionRecord]:
-        raise NflProjectionProviderNotConfiguredError(
-            f"No Big Money Native NFL projection model exists yet (DraftGroup {draft_group_id}, {slate_date}). "
-            f"This is expected until NFL M5+ ships a real trained model -- never falls back to salary, "
-            f"FantasyPros, BlueCollar, or a synthetic value."
-        )
+        if not self.is_configured():
+            raise NflProjectionProviderNotConfiguredError(
+                f"No Big Money Native NFL model artifacts found under {self._artifact_root} (DraftGroup {draft_group_id}, {slate_date}). "
+                f"Run historical_models.nfl_v1.train locally first -- never falls back to salary, FantasyPros, BlueCollar, or a synthetic value."
+            )
+        from nfl.big_money_native_inference import generate_projections
+        return generate_projections(draft_group_id, slate_date)

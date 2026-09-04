@@ -1,0 +1,1 @@
+BIG_MONEY_NFL_MODEL_VERSION = "nfl_v1"
