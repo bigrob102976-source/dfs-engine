@@ -100,10 +100,54 @@ def test_run_canonical_promotion_invokes_resolved_railway_ssh_with_correct_args(
     assert captured["argv"][1:] == [
         "ssh", "--service", fetch_dfs_slate.CANONICAL_PROMOTION_RAILWAY_SERVICE,
         "--environment", fetch_dfs_slate.CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
-        "--", "npx", "tsx", "scripts/promote-canonical-slate.ts", "--key", "normalized/MLB/x.json",
+        "--", "timeout", "--signal=TERM", f"--kill-after={fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_KILL_AFTER_SECONDS}",
+        str(fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_TIMEOUT_SECONDS),
+        "npx", "tsx", "scripts/promote-canonical-slate.ts", "--key", "normalized/MLB/x.json",
     ]
     assert captured["cwd"] == fetch_dfs_slate.REPO_ROOT
     assert captured["timeout"] == fetch_dfs_slate.CANONICAL_PROMOTION_TIMEOUT_SECONDS
+
+
+def test_run_canonical_promotion_batch_wraps_remote_command_in_timeout_regardless_of_key_count(monkeypatch):
+    """MLB WORKER ORPHAN PROCESS HARDENING: `railway ssh -- <cmd>` does not
+    tie the remote command's lifetime to this local connection -- a remote
+    hang used to leave the promotion script (and its DB connections)
+    running on the container forever, confirmed live. Wrapping the REMOTE
+    command in GNU coreutils `timeout` (present on the deployed image,
+    confirmed live to correctly signal the whole descendant process tree
+    via its own process-group handling) makes the remote side self-
+    terminate before the local timeout would otherwise fire. TERM first
+    (graceful), KILL after a short grace only if still alive -- and this
+    must hold for a real multi-slate batch call, not just the single-key
+    path the previous test covers."""
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return _FakeCompletedProcess(returncode=0, stdout='RESULT_JSON:{"promoted": true}\nRESULT_JSON:{"promoted": false}')
+
+    monkeypatch.setattr(fetch_dfs_slate.shutil, "which", lambda name: "/usr/bin/railway")
+    monkeypatch.setattr(fetch_dfs_slate.subprocess, "run", fake_run)
+
+    results = fetch_dfs_slate._run_canonical_promotion_batch(["normalized/MLB/a.json", "normalized/MLB/b.json"])
+
+    assert len(results) == 2
+    ssh_prefix_end = captured["argv"].index("--") + 1
+    assert captured["argv"][ssh_prefix_end:ssh_prefix_end + 4] == [
+        "timeout", "--signal=TERM", f"--kill-after={fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_KILL_AFTER_SECONDS}",
+        str(fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_TIMEOUT_SECONDS),
+    ]
+    # The real remote command (npx tsx ...) still follows the timeout
+    # wrapper, with BOTH --key args intact.
+    assert captured["argv"][ssh_prefix_end + 4:] == [
+        "npx", "tsx", "scripts/promote-canonical-slate.ts",
+        "--key", "normalized/MLB/a.json", "--key", "normalized/MLB/b.json",
+    ]
+    # Sized so the remote self-stop (TERM+grace) always resolves well
+    # before the local Python timeout would otherwise fire -- a real
+    # margin, not a coincidence.
+    remote_worst_case = fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_TIMEOUT_SECONDS + fetch_dfs_slate.CANONICAL_PROMOTION_REMOTE_KILL_AFTER_SECONDS
+    assert remote_worst_case < fetch_dfs_slate.CANONICAL_PROMOTION_TIMEOUT_SECONDS
 
 
 def test_run_canonical_promotion_reports_nonzero_exit_without_raising(monkeypatch):

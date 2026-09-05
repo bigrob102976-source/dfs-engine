@@ -46,6 +46,28 @@ DEFAULT_OUTPUT_ROOT = "dfs_input"
 # this budget with margin -- see that script's own comment on
 # FETCH_TIMEOUT_SECONDS for why.
 CANONICAL_PROMOTION_TIMEOUT_SECONDS = 60
+# MLB WORKER ORPHAN PROCESS HARDENING: `railway ssh --service X -- <cmd>`
+# has no built-in mechanism tying the REMOTE command's lifetime to this
+# LOCAL client connection -- confirmed live: killing (or, as here, Python's
+# own subprocess.run(timeout=...) auto-killing) the LOCAL `railway.exe`
+# process on timeout does NOT stop the remote `npx tsx
+# scripts/promote-canonical-slate.ts` process or its own DB connections,
+# which keep running (or hanging) on the container indefinitely. Wrapping
+# the REMOTE command itself in GNU coreutils `timeout` (confirmed present
+# on the deployed Debian 12 image, and confirmed live to correctly signal
+# the ENTIRE remote descendant process tree, not just its direct child --
+# GNU timeout puts the monitored command in its own process group and
+# signals the whole group on expiry) makes the remote side self-terminate
+# BEFORE this local timeout would otherwise fire, so no orphan is ever
+# created by a promotion that genuinely hangs. TERM first (graceful --
+# lets the promotion script's own DB transaction roll back cleanly),
+# KILL after a short grace period if TERM didn't work. Sized well under
+# CANONICAL_PROMOTION_TIMEOUT_SECONDS (worst case 40+10=50s vs local 60s)
+# so this remote self-stop is what normally resolves a hang; the local
+# timeout above remains a pure backup for the pathological case where the
+# remote `timeout` binary itself is somehow unavailable.
+CANONICAL_PROMOTION_REMOTE_TIMEOUT_SECONDS = 40
+CANONICAL_PROMOTION_REMOTE_KILL_AFTER_SECONDS = 10
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # M3 architecture finding: this Windows worker machine has real DK
 # network access but NOT network access to Railway's private network
@@ -326,7 +348,8 @@ def _run_canonical_promotion_batch(normalized_keys: List[str]) -> List[dict]:
     print(f"\n--- canonical shadow promotion (via railway ssh, {len(normalized_keys)} slate(s) in one round trip) ---")
     argv = [
         railway_path, "ssh", "--service", CANONICAL_PROMOTION_RAILWAY_SERVICE, "--environment", CANONICAL_PROMOTION_RAILWAY_ENVIRONMENT,
-        "--", "npx", "tsx", "scripts/promote-canonical-slate.ts",
+        "--", "timeout", "--signal=TERM", f"--kill-after={CANONICAL_PROMOTION_REMOTE_KILL_AFTER_SECONDS}",
+        str(CANONICAL_PROMOTION_REMOTE_TIMEOUT_SECONDS), "npx", "tsx", "scripts/promote-canonical-slate.ts",
     ]
     for key in normalized_keys:
         argv.extend(["--key", key])
