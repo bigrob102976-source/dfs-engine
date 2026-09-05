@@ -23,6 +23,8 @@ function player(overrides: Partial<NflPlayerRow>): NflPlayerRow {
     projection: { projection: 12.5, floor: 8.0, ceiling: 20.0, source: "BIG_MONEY_NATIVE", model_name: "m", model_version: "v1" },
     ownership: null,
     matchup: null,
+    status_info: { normalized_status: "ACTIVE", raw_status: null, excluded_by_default: false, warn: false },
+    game_lock: null,
     ...overrides,
   };
 }
@@ -75,5 +77,25 @@ describe("NflPlayerTable -- Ownership column (NFL M12)", () => {
     const noneIdx = namesInOrder.findIndex((t) => t?.includes("No Own"));
     expect(highIdx).toBeLessThan(lowIdx);
     expect(lowIdx).toBeLessThan(noneIdx);
+  });
+});
+
+describe("NflPlayerTable -- real status badge (NFL M14)", () => {
+  it("shows no badge at all for an ACTIVE player -- never a fabricated green badge", () => {
+    const rows = [player({ name: "Healthy Guy", status_info: { normalized_status: "ACTIVE", raw_status: "None", excluded_by_default: false, warn: false } })];
+    render(<NflPlayerTable players={rows} draftGroupId={151307} variant="players" />);
+    expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
+  });
+
+  it("shows a Q badge for QUESTIONABLE", () => {
+    const rows = [player({ name: "Q Guy", status_info: { normalized_status: "QUESTIONABLE", raw_status: "Q", excluded_by_default: false, warn: true } })];
+    render(<NflPlayerTable players={rows} draftGroupId={151307} variant="players" />);
+    expect(screen.getByText("Q")).toBeInTheDocument();
+  });
+
+  it("shows an OUT badge for OUT", () => {
+    const rows = [player({ name: "Out Guy", status_info: { normalized_status: "OUT", raw_status: "OUT", excluded_by_default: true, warn: false } })];
+    render(<NflPlayerTable players={rows} draftGroupId={151307} variant="players" />);
+    expect(screen.getByText("OUT")).toBeInTheDocument();
   });
 });

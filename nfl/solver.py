@@ -204,15 +204,40 @@ def solve_single_lineup(
     forced_locks: Set[str] = frozenset(),
     forced_excludes: Set[str] = frozenset(),
     previous_lineups: Optional[List[List[str]]] = None,
+    forced_slot_assignments: Optional[Dict[str, str]] = None,
 ) -> Optional[List[Tuple[str, NflOptimizerPlayer]]]:
     """Returns a list of (instance_label, NflOptimizerPlayer) covering
     every roster slot, or None if no legal lineup exists under these
-    constraints."""
+    constraints.
+
+    `forced_slot_assignments` (NFL M14 late swap, see nfl/late_swap.py):
+    {slot_instance_label: player_key}, pinning a SPECIFIC player to a
+    SPECIFIC roster slot instance (e.g. "FLEX" -> "12345"), not just
+    "used somewhere" the way forced_locks does -- late swap needs this
+    because a locked player's exact DK roster column (e.g. FLEX vs WR1)
+    must be preserved for upload consistency (Phase 6), which a plain
+    player-level lock can't guarantee. Reuses the SAME `x` slot-
+    assignment variables the rest of this function already builds --
+    not a second model or a different solver.
+
+    A player named in forced_locks or forced_slot_assignments is never
+    excluded from the candidate pool by the current objective mode's
+    data-eligibility filter (player_is_eligible_for_mode) -- a locked
+    player must remain in the lineup regardless of whether they have a
+    fresh projection/ceiling right now (NFL M14 Phase 6: a locked
+    player can never be excluded or replaced)."""
     previous_lineups = previous_lineups or []
+    forced_slot_assignments = forced_slot_assignments or {}
+    always_included_keys = set(forced_locks) | set(forced_slot_assignments.values())
+
     candidate_pool = [p for p in players if p.key not in forced_excludes]
-    candidate_pool = [p for p in candidate_pool if player_is_eligible_for_mode(p, settings.mode)]
+    candidate_pool = [
+        p for p in candidate_pool
+        if player_is_eligible_for_mode(p, settings.mode) or p.key in always_included_keys
+    ]
     by_key = {p.key: p for p in candidate_pool}
     slot_instances = _expand_slot_instances()
+    label_to_slot_index = {label: i for i, (label, _base) in enumerate(slot_instances)}
 
     model = cp_model.CpModel()
 
@@ -237,6 +262,12 @@ def solve_single_lineup(
         model.Add(sum(var_list) == u)
         used[player.key] = u
 
+    for slot_label, player_key in forced_slot_assignments.items():
+        slot_index = label_to_slot_index.get(slot_label)
+        if slot_index is None or (slot_index, player_key) not in x:
+            return None  # the slot label is invalid, or this player isn't eligible for it -- can't satisfy
+        model.Add(x[(slot_index, player_key)] == 1)
+
     for key in forced_locks:
         if key not in used:
             return None
@@ -257,9 +288,18 @@ def solve_single_lineup(
         # lineup, only a legal one.
         model.Maximize(sum(used[k] * by_key[k].salary for k in used))
     else:
-        # Real data only -- candidate_pool was already filtered to
-        # player_is_eligible_for_mode() above, so every term here is real.
-        model.Maximize(sum(used[k] * scaled_objective_value(by_key[k], settings.mode) for k in used))
+        # Real data only. candidate_pool was filtered to
+        # player_is_eligible_for_mode() OR always_included_keys above --
+        # a force-locked/pinned player (NFL M14 late swap) can be in
+        # `used` WITHOUT the data this mode needs, so this only scores
+        # players who actually have it, never fabricating a value for
+        # the rest (they still count toward salary/slot/stack
+        # constraints via `used`, just contribute 0 to the objective).
+        objective_terms = [
+            used[k] * scaled_objective_value(by_key[k], settings.mode)
+            for k in used if player_is_eligible_for_mode(by_key[k], settings.mode)
+        ]
+        model.Maximize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = SOLVER_NUM_SEARCH_WORKERS
@@ -309,8 +349,13 @@ def _build_lineup(index: int, assignment: List[Tuple[str, NflOptimizerPlayer]], 
     ]
     total_salary = sum(a.salary for a in assignments)
 
+    # NFL M14: a force-locked/pinned player (late swap) can be present
+    # with no real projection -- only sum when EVERY assigned player has
+    # one, exactly like total_ceiling/sum_ownership below, never a
+    # partial sum silently presented as the whole lineup's total.
     is_scoring_mode = settings.mode in NFL_SCORING_OBJECTIVE_MODES
-    total_projection = round(sum(p.projection for _, p in assignment), 2) if is_scoring_mode else None
+    projections = [p.projection for _, p in assignment if p.projection is not None]
+    total_projection = round(sum(projections), 2) if is_scoring_mode and len(projections) == len(assignment) else None
 
     ceilings = [p.ceiling for _, p in assignment if p.ceiling is not None]
     total_ceiling = round(sum(ceilings), 2) if len(ceilings) == len(assignment) else None

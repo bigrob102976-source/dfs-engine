@@ -12,6 +12,7 @@ export interface NflGameRow {
   total: number | null;
   home_implied_total: number | null;
   away_implied_total: number | null;
+  lock: NflGameLockInfo | null;
 }
 
 export interface NflProjectionInfo {
@@ -59,6 +60,31 @@ export interface NflUsageInfo {
   season_to_date: Record<string, number | null>;
 }
 
+// NFL M14 -- real, normalized player status (nfl/status.py). Never a
+// fabricated "Active" badge -- UNKNOWN means DK returned a raw status
+// string this project hasn't seen before, not "assumed healthy".
+export type NflNormalizedStatus = "ACTIVE" | "QUESTIONABLE" | "DOUBTFUL" | "OUT" | "INACTIVE" | "IR" | "UNKNOWN";
+
+export interface NflStatusInfo {
+  normalized_status: NflNormalizedStatus;
+  raw_status: string | null;
+  excluded_by_default: boolean;
+  warn: boolean;
+}
+
+// NFL M14 -- real per-game lock state (nfl/game_lock.py), computed from
+// DraftKings' own real game_start_time. null only when DK hasn't
+// published a start time for this game yet.
+export interface NflGameLockInfo {
+  game_id: string;
+  start_time_utc: string;
+  start_time_eastern: string;
+  home_team: string | null;
+  away_team: string | null;
+  lock_state: "PRELOCK" | "LOCKED";
+  locked: boolean;
+}
+
 export interface NflPlayerRow {
   draftkings_player_id: string;
   name: string;
@@ -77,6 +103,8 @@ export interface NflPlayerRow {
   projection: NflProjectionInfo | null;
   ownership: NflOwnershipInfo | null;
   matchup: NflMatchupInfo | null;
+  status_info: NflStatusInfo;
+  game_lock: NflGameLockInfo | null;
 }
 
 export interface NflPositionCoverage {
@@ -184,3 +212,63 @@ export type NflPosition = (typeof NFL_POSITIONS)[number];
 // selector itself always calls the real discovery API, never hardcodes
 // this as the only option.
 export const DEFAULT_NFL_DRAFT_GROUP_ID = 151307;
+
+// ---------------------------------------------------------------------------
+// NFL M14 -- saved lineups / late swap / export
+// ---------------------------------------------------------------------------
+
+// Mirrors nfl/saved_lineup_models.py::NflSavedLineupSlot exactly.
+export interface NflSavedLineupSlot {
+  roster_slot: string;
+  draftkings_player_id: string;
+  name: string;
+  team: string;
+  opponent: string | null;
+  game_id: string;
+  game_start_utc: string | null;
+  position: string;
+  salary: number;
+  projection_snapshot: number | null;
+  ceiling_snapshot: number | null;
+  ownership_snapshot: number | null;
+}
+
+export interface NflSavedLineup {
+  id: string;
+  draft_group_id: number;
+  slate_date: string;
+  mode: string;
+  stack_config: Partial<NflStackConfig>;
+  slots: NflSavedLineupSlot[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NflLateSwapAssignment extends NflLineupAssignment {
+  locked: boolean;
+}
+
+export interface NflLateSwapLineup {
+  total_salary: number;
+  remaining_salary: number;
+  total_projection: number | null;
+  total_ceiling: number | null;
+  sum_ownership: number | null;
+  average_ownership: number | null;
+  total_leverage_score: number | null;
+  qb_stack_team: string | null;
+  qb_stack_receiver_count: number;
+  bring_back_player: string | null;
+  rb_dst_team: string | null;
+  assignments: NflLateSwapAssignment[];
+}
+
+export interface NflLateSwapResult {
+  locked_slots: string[];
+  unlocked_slots: string[];
+  changed_player_keys: string[];
+  fully_locked: boolean;
+  error: string | null;
+  lineup: NflLateSwapLineup | null;
+  error_type?: string;
+}

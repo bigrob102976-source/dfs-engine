@@ -25,9 +25,11 @@ from draftkings_unofficial import collector
 from historical_nfl.identity_persistence import load_crosswalk
 from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
 from nfl.game_context_builder import build_nfl_game_context
+from nfl.game_lock import GameStartTimeMissingError, build_game_lock_info
 from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
 from nfl.ownership_models import NflOwnershipInputPlayer
 from nfl.pool_builder import NflPoolBuildError
+from nfl.status import build_status_info
 
 
 def _player_dict(player) -> dict:
@@ -129,16 +131,35 @@ def main(draft_group_id: int) -> int:
             games[p.game_id] = {
                 "game_id": p.game_id, "game_description": p.game_description, "game_start_time": p.game_start_time,
             }
+    now_utc = datetime.now(timezone.utc)
     game_rows = []
     for game_id, g in games.items():
         matched = games_by_id.get(game_id)
+        # NFL M14 -- real per-game lock state (nfl/game_lock.py), never a
+        # blanket slate-wide cutoff. None only when DK hasn't published a
+        # start time for this game yet.
+        # home_team/away_team: prefer the odds-provider match when
+        # configured, else parse DK's own real "AWAY @ HOME"
+        # game_description (always available, no Vegas credentials
+        # needed) -- never guessed if that string is absent/malformed.
+        home_team, away_team = (matched.home_team, matched.away_team) if matched else (None, None)
+        if home_team is None and away_team is None and g.get("game_description") and " @ " in g["game_description"]:
+            away_team, home_team = g["game_description"].split(" @ ", 1)
+        try:
+            lock_info = build_game_lock_info(
+                game_id, g["game_start_time"], now_utc, home_team=home_team, away_team=away_team,
+            ).to_dict()
+        except GameStartTimeMissingError:
+            lock_info = None
         game_rows.append({
             **g,
             "spread_home": matched.spread if matched else None,
             "total": matched.total if matched else None,
             "home_implied_total": matched.home_implied_total if matched else None,
             "away_implied_total": matched.away_implied_total if matched else None,
+            "lock": lock_info,
         })
+    game_lock_by_id = {g["game_id"]: g["lock"] for g in game_rows}
 
     players = []
     for p in pool.players:
@@ -146,6 +167,10 @@ def main(draft_group_id: int) -> int:
         crosswalk_row = crosswalk.get(p.draftkings_player_id)
         row["gsis_id"] = crosswalk_row.gsis_id if crosswalk_row else None
         row["identity_resolved"] = bool(crosswalk_row and crosswalk_row.gsis_id)
+        # NFL M14 -- real DK status normalized into a standard status
+        # vocabulary + the default exclusion/warning policy (nfl/status.py).
+        row["status_info"] = build_status_info(p.status).to_dict()
+        row["game_lock"] = game_lock_by_id.get(p.game_id)
 
         usage = usage_by_dk_id.get(p.draftkings_player_id)
         row["usage"] = {"rolling": usage.rolling, "season_to_date": usage.season_to_date} if usage else None

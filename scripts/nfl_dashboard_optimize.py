@@ -47,6 +47,7 @@ from nfl.ownership_models import NflOwnershipInputPlayer
 from nfl.pool_builder import NflPoolBuildError, build_pool
 from nfl.solver import NflProjectionCoverageError, generate_lineups
 from nfl.constraints import NflOptimizerConfigError
+from nfl.status import DEFAULT_EXCLUDE_BY_STATUS, normalize_status
 
 SCORING_MODES = ("projection", "ceiling", "leverage")
 
@@ -137,15 +138,28 @@ def main(draft_group_id: int, settings_raw: dict) -> int:
             ceiling=(projections_by_dk_id[p.draftkings_player_id].ceiling if p.draftkings_player_id in projections_by_dk_id else None),
             projected_ownership=(ownership_by_dk_id[p.draftkings_player_id].ownership_projection if p.draftkings_player_id in ownership_by_dk_id else None),
             leverage_score=(ownership_by_dk_id[p.draftkings_player_id].leverage_score if p.draftkings_player_id in ownership_by_dk_id else None),
+            raw_status=p.status, game_start_time=p.game_start_time,
         )
         for p in pool.players
     ]
 
+    locks = settings_raw.get("locks", [])
+    explicit_excludes = set(settings_raw.get("excludes", []))
+    # NFL M14 Phase 9/10 -- OUT/INACTIVE/IR excluded by default (never a
+    # locked player, whose explicit lock always wins -- see nfl/status.py's
+    # module docstring for the full real-status-vocabulary rationale).
+    # QUESTIONABLE/UNKNOWN stay eligible, flagged in the UI via status_info
+    # on /api/nfl/data, never silently dropped here.
+    status_excludes = {
+        p.draftkings_player_id for p in pool.players
+        if p.draftkings_player_id not in locks and DEFAULT_EXCLUDE_BY_STATUS.get(normalize_status(p.status), False)
+    }
+
     settings = NflOptimizerSettings(
         mode=mode,
         num_lineups=settings_raw.get("numLineups", 1),
-        locks=settings_raw.get("locks", []),
-        excludes=settings_raw.get("excludes", []),
+        locks=locks,
+        excludes=list(explicit_excludes | status_excludes),
         stack=_parse_stack(settings_raw.get("stack", {})),
         max_exposure=settings_raw.get("maxExposure", {}),
         max_exposure_default=settings_raw.get("maxExposureDefault", 1.0),
@@ -160,7 +174,7 @@ def main(draft_group_id: int, settings_raw: dict) -> int:
 
     output = {
         "requested": result.requested, "generated": result.generated, "stopped_reason": result.stopped_reason,
-        "mode": mode,
+        "mode": mode, "status_excluded_count": len(status_excludes),
         "lineups": [
             {
                 "index": lu.index, "total_salary": lu.total_salary, "remaining_salary": lu.remaining_salary,

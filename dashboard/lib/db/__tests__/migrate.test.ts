@@ -13,7 +13,7 @@ describe("migrations", () => {
     expect(rows.map((r) => r.filename)).toEqual([
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
       "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql",
-      "0008_slate_change_report.sql",
+      "0008_slate_change_report.sql", "0009_nfl_saved_lineups.sql",
     ]);
   });
 
@@ -24,7 +24,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(8);
+    expect(rows.c).toBe(9);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {

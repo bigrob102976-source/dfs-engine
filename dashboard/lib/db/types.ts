@@ -268,3 +268,19 @@ export interface WorkerHeartbeatRow {
   status: string;
   metadata_json: string | null;
 }
+
+// NFL M14: saved lineups for the late-swap / game-day workflow.
+// slots_json/stack_config_json hold JSON-encoded NflSavedLineupSlot[]/
+// NflStackConfig (see lib/nfl/types.ts) -- mutable, updated in place by
+// late swap, never an append-only log (see the migration's own docstring).
+export interface NflSavedLineupRow {
+  id: string;
+  user_id: string;
+  draft_group_id: number;
+  slate_date: string;
+  mode: string;
+  stack_config_json: string;
+  slots_json: string;
+  created_at: string;
+  updated_at: string;
+}

@@ -37,6 +37,31 @@ function snapPct(p: NflPlayerRow): number | null {
   return p.usage?.rolling["snap_share_mean_last3"] ?? null;
 }
 
+// NFL M14 -- concise real status badge (nfl/status.py). ACTIVE renders
+// nothing at all (never a fabricated green "Active" badge for the
+// common case) -- only a real non-active status is ever shown.
+const STATUS_BADGE_LABEL: Record<string, string> = {
+  QUESTIONABLE: "Q", DOUBTFUL: "D", OUT: "OUT", INACTIVE: "INACTIVE", IR: "IR", UNKNOWN: "?",
+};
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  QUESTIONABLE: "bg-yellow/15 text-yellow", DOUBTFUL: "bg-yellow/20 text-yellow",
+  OUT: "bg-red/15 text-red", INACTIVE: "bg-red/15 text-red", IR: "bg-red/15 text-red",
+  UNKNOWN: "bg-border-subtle text-text-faint",
+};
+
+function StatusBadge({ p }: { p: NflPlayerRow }) {
+  const status = p.status_info.normalized_status;
+  if (status === "ACTIVE") return null;
+  return (
+    <span
+      className={`ml-1.5 rounded-[var(--radius-control)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${STATUS_BADGE_CLASS[status]}`}
+      title={`${status}${p.status_info.raw_status ? ` (DK: ${p.status_info.raw_status})` : ""}${p.status_info.excluded_by_default ? " -- excluded from lineups by default" : ""}`}
+    >
+      {STATUS_BADGE_LABEL[status]}
+    </span>
+  );
+}
+
 export function NflPlayerTable({ players, draftGroupId, variant = "players" }: { players: NflPlayerRow[]; draftGroupId: number; variant?: Variant }) {
   const [search, setSearch] = useState("");
   const [position, setPosition] = useState<string>("ALL");
@@ -191,7 +216,10 @@ export function NflPlayerTable({ players, draftGroupId, variant = "players" }: {
                     </td>
                   )}
                   <td className="px-2 py-1.5 text-text-muted">{positionOf(p)}</td>
-                  <td className="px-2 py-1.5 font-medium text-text">{p.name}</td>
+                  <td className="px-2 py-1.5 font-medium text-text">
+                    {p.name}
+                    <StatusBadge p={p} />
+                  </td>
                   <td className="px-2 py-1.5 text-text-muted">{p.team}</td>
                   <td className="px-2 py-1.5 text-text-muted">{p.opponent ?? "--"}</td>
                   {variant !== "usage" && <td className="px-2 py-1.5 text-text-muted">{fmtSalary(p.salary)}</td>}

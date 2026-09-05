@@ -57,6 +57,17 @@ class NflOptimizerPlayer:
     # None whenever ownership wasn't computed for this player. Only
     # "leverage" objective mode reads this; every other mode ignores it.
     leverage_score: Optional[float] = None
+    # NFL M14: DraftKings' own real raw status string ("None"/"Q"/"OUT"/
+    # "IR"/etc., verbatim from NflPlayer.status) -- None means the field
+    # itself was never populated (treated as ACTIVE by nfl/status.py,
+    # same as a real "None"). Used for status-based exclusion (see
+    # nfl/status.py) and UI display; never fabricated.
+    raw_status: Optional[str] = None
+    # NFL M14: real ISO-8601 UTC game start time (verbatim from
+    # NflPlayer.game_start_time) -- used for late-swap lock-state
+    # computation (nfl/game_lock.py). None only when DK itself hasn't
+    # published a start time yet.
+    game_start_time: Optional[str] = None
 
 
 @dataclass

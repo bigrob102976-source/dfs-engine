@@ -10,6 +10,7 @@ function player(overrides: Partial<NflPlayerRow>): NflPlayerRow {
     draftkings_player_id: "1", name: "Test Player", position: "WR", team: "BUF", opponent: "MIA", game_id: "100",
     salary: 6000, roster_slots: ["WR", "FLEX"], is_team_entity: false, status: null, injury_status: null,
     gsis_id: null, identity_resolved: true, usage: null, projection: null, ownership: null, matchup: null,
+    status_info: { normalized_status: "ACTIVE", raw_status: null, excluded_by_default: false, warn: false }, game_lock: null,
     ...overrides,
   };
 }

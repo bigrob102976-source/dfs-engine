@@ -11,6 +11,7 @@ const TABS = [
   { href: "/dashboard/nfl/projections", label: "Projections" },
   { href: "/dashboard/nfl/optimizer", label: "Optimizer" },
   { href: "/dashboard/nfl/lineups", label: "Lineups" },
+  { href: "/dashboard/nfl/saved", label: "Saved / Late Swap" },
 ];
 
 /** NFL UI M1 -- the NFL workspace's own tab bar. Lives INSIDE each NFL
