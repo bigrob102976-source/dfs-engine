@@ -5,10 +5,25 @@ import { SectionHeader } from "@/components/ui/Header";
 import type { GameEnvironmentReport } from "@/lib/gameEnvironment";
 import type { AiRankedPlayer, AiValuedPlayer, LineMovementEntry, LockTimeEntry, MlCoverageSummary, NativeRankedPlayer, NativeValuedPlayer } from "@/lib/commandCenter";
 import type { PlayerRow } from "@/lib/types";
-import type { StackSummary } from "@/lib/stacks";
+import type { ScoredStackCandidate, StackCandidate, StackSummary } from "@/lib/stacks";
 
 function fmt(v: number | null, digits = 1): string {
   return v === null ? "--" : v.toFixed(digits);
+}
+function fmtMoney(v: number | null): string {
+  return v === null ? "--" : `$${v.toLocaleString()}`;
+}
+function fmtPct(v: number | null): string {
+  return v === null ? "--" : `${v.toFixed(1)}%`;
+}
+/** MLB DASHBOARD INTELLIGENCE: probable-vs-confirmed label shown next to
+ * a pitcher/hitter name -- reads the SAME eligibilityStatus every other
+ * eligibility-aware section of this dashboard already reads (Milestone
+ * 30.1/PROBABLE FIX), never a new status classification. */
+function starterStatusLabel(eligibilityStatus: string | null): string | null {
+  if (eligibilityStatus === "STARTING_PITCHER" || eligibilityStatus === "STARTING_HITTER") return "Confirmed";
+  if (eligibilityStatus === "PROBABLE_HITTER") return "Probable";
+  return null;
 }
 function matchup(game: GameEnvironmentReport): string {
   return `${game.away_team} @ ${game.home_team}`;
@@ -106,6 +121,95 @@ function NativePlayerList({ rows, metric }: { rows: NativeRankedPlayer[]; metric
   );
 }
 
+/** MLB DASHBOARD INTELLIGENCE: "Top Stacks" -- ranked by the Big Money
+ * Stack Score (lib/stacks.ts::rankStackCandidatesByScore), never
+ * fabricated when there aren't enough real eligible hitters to rank
+ * (Phase 13). */
+function TopStacksList({ candidates }: { candidates: ScoredStackCandidate[] }) {
+  if (candidates.length === 0) return <p className="text-xs text-text-faint">Not enough eligible hitters to rank stacks yet.</p>;
+  return (
+    <ol className="flex flex-col gap-3">
+      {candidates.map((c, i) => (
+        <li key={c.team} className="border-b border-border pb-2.5 last:border-b-0 last:pb-0">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="flex items-center gap-2 font-semibold text-text">
+              <span className="w-4 shrink-0 text-text-faint">{i + 1}</span>
+              {c.team}
+              {c.status === "WAITING_FOR_LINEUP" && <span className="text-[10px] font-normal text-yellow">Probable</span>}
+            </span>
+            <span className="shrink-0 font-semibold text-purple">{fmt(c.score, 1)}</span>
+          </div>
+          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-text-faint sm:grid-cols-4">
+            <span>Proj: <span className="text-text">{fmt(c.totalProjection)}</span></span>
+            <span>Ceil: <span className="text-text">{fmt(c.totalCeiling)}</span></span>
+            <span>Own: <span className="text-text">{fmtPct(c.averageOwnership)}</span></span>
+            <span>Value: <span className="text-text">{fmt(c.value, 2)}</span></span>
+          </div>
+          <p className="mt-1 truncate text-[11px] text-text-faint">
+            {c.eligibleHitterCount} eligible · {c.hitters.map((h) => h.name).join(", ")}
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** MLB DASHBOARD INTELLIGENCE: "Best Value Pitcher" -- one highlighted
+ * card, never fabricated when no eligible pitcher has both a real
+ * projection and salary yet (Phase 13). */
+function BestValuePitcherCard({ pitcher }: { pitcher: (PlayerRow & { value: number }) | null }) {
+  if (!pitcher) return <p className="text-xs text-text-faint">No projected starting pitchers available yet.</p>;
+  const status = starterStatusLabel(pitcher.eligibilityStatus);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-sm font-semibold text-text">{pitcher.name}</span>
+        <span className="shrink-0 text-lg font-semibold text-purple">{pitcher.value.toFixed(2)}</span>
+      </div>
+      <p className="text-[11px] text-text-faint">
+        {pitcher.team}
+        {pitcher.opponent ? ` vs ${pitcher.opponent}` : ""}
+        {status ? ` · ${status}` : ""}
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
+        <span className="text-text-faint">Salary <span className="block text-text">{fmtMoney(pitcher.salary)}</span></span>
+        <span className="text-text-faint">Projection <span className="block text-text">{fmt(pitcher.projection)}</span></span>
+        <span className="text-text-faint">Ceiling <span className="block text-text">{fmt(pitcher.ceiling)}</span></span>
+        <span className="text-text-faint">Ownership <span className="block text-text">{fmtPct(pitcher.ownership)}</span></span>
+      </div>
+    </div>
+  );
+}
+
+/** MLB DASHBOARD INTELLIGENCE: "Best Value Stack" -- one highlighted
+ * card with its real hitters listed, never fabricated when there aren't
+ * enough real eligible hitters to rank (Phase 13). */
+function BestValueStackCard({ stack }: { stack: StackCandidate | null }) {
+  if (!stack) return <p className="text-xs text-text-faint">Not enough eligible hitters to rank stacks yet.</p>;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-semibold text-text">{stack.team} -- {stack.stackSize}-man</span>
+        <span className="shrink-0 text-lg font-semibold text-purple">{stack.value?.toFixed(2) ?? "--"} pts/$1k</span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
+        <span className="text-text-faint">Salary <span className="block text-text">{fmtMoney(stack.totalSalary)}</span></span>
+        <span className="text-text-faint">Projection <span className="block text-text">{fmt(stack.totalProjection)}</span></span>
+        <span className="text-text-faint">Ceiling <span className="block text-text">{fmt(stack.totalCeiling)}</span></span>
+        <span className="text-text-faint">Ownership <span className="block text-text">{fmtPct(stack.averageOwnership)}</span></span>
+      </div>
+      <ul className="mt-2 flex flex-col gap-0.5 text-[11px]">
+        {stack.hitters.map((h) => (
+          <li key={h.id} className="flex items-center justify-between text-text-faint">
+            <span className="truncate text-text">{h.name}</span>
+            <span>{fmtMoney(h.salary)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function MovementList({ entries, tone }: { entries: LineMovementEntry[]; tone: "positive" | "negative" }) {
   if (entries.length === 0) return <p className="text-xs text-text-faint">No movement yet.</p>;
   return (
@@ -132,6 +236,9 @@ export function BottomInsights({
   topHitters,
   topPitchers,
   topStacks,
+  topStackCandidates,
+  bestValueStack,
+  bestValuePitcher,
   highestLeverage,
   risers,
   fallers,
@@ -152,6 +259,9 @@ export function BottomInsights({
   topHitters: PlayerRow[];
   topPitchers: PlayerRow[];
   topStacks: StackSummary[];
+  topStackCandidates: ScoredStackCandidate[];
+  bestValueStack: StackCandidate | null;
+  bestValuePitcher: (PlayerRow & { value: number }) | null;
   highestLeverage: PlayerRow[];
   risers: LineMovementEntry[];
   fallers: LineMovementEntry[];
@@ -195,6 +305,19 @@ export function BottomInsights({
               ))}
             </ul>
           )}
+        </DataCard>
+      </div>
+
+      <SectionHeader title="Stack & Value Intelligence" />
+      <div className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <DataCard title="Top Stacks">
+          <TopStacksList candidates={topStackCandidates} />
+        </DataCard>
+        <DataCard title="Best Value Pitcher">
+          <BestValuePitcherCard pitcher={bestValuePitcher} />
+        </DataCard>
+        <DataCard title="Best Value Stack">
+          <BestValueStackCard stack={bestValueStack} />
         </DataCard>
       </div>
 

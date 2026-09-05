@@ -81,3 +81,135 @@ export function buildStackSummaries(
 
   return summaries.sort((a, b) => (b.averageProjection ?? -Infinity) - (a.averageProjection ?? -Infinity));
 }
+
+// ---------------------------------------------------------------------------
+// MLB DASHBOARD INTELLIGENCE: Top Stacks / Best Value Stack. Built ONLY on
+// top of StackSummary.top5 (already the best-projected optimizer-eligible
+// hitters for the team, confirmed/probable only, never bench/out/scratched
+// -- see buildStackSummaries above) -- never a second team-grouping or
+// hitter-selection algorithm. A "candidate" is the real N-man combination
+// (default 5, DK MLB's own primary stack size) actually usable right now;
+// its size honestly reflects however many eligible hitters the team has
+// (e.g. 3 when only 3 are confirmed/probable) rather than fabricating
+// placeholder players to reach N.
+// ---------------------------------------------------------------------------
+
+export interface StackCandidate {
+  team: string;
+  requestedSize: number;
+  stackSize: number; // hitters.length -- may be < requestedSize if the team doesn't have that many eligible hitters
+  hitters: PlayerRow[];
+  totalSalary: number | null; // null unless every included hitter has a real salary
+  totalProjection: number | null; // null unless every included hitter has a real projection
+  totalCeiling: number | null; // sum of whichever hitters have a real ceiling (never fabricated for the rest)
+  averageOwnership: number | null;
+  averageLeverage: number | null;
+  eligibleHitterCount: number; // StackSummary.confirmedHitterCount -- ALL eligible hitters on the team, not just the ones in `hitters`
+  status: "CONFIRMED" | "WAITING_FOR_LINEUP";
+  /** points per $1,000 of totalSalary -- same "value" convention as
+   * commandCenter.ts::valueScore, applied to the whole stack instead of
+   * one player. Computed from this candidate's OWN totals (not
+   * commandCenter.ts::rankStacksByValue's mixed all-confirmed-average /
+   * top5-average denominator), so numerator and denominator always
+   * describe the exact same set of hitters. */
+  value: number | null;
+}
+
+function sumIfComplete(values: Array<number | null>): number | null {
+  if (values.length === 0) return null;
+  const present = values.filter((v): v is number => v !== null);
+  return present.length === values.length ? Math.round(present.reduce((a, b) => a + b, 0) * 100) / 100 : null;
+}
+function sumAvailable(values: Array<number | null>): number | null {
+  const present = values.filter((v): v is number => v !== null);
+  return present.length === 0 ? null : Math.round(present.reduce((a, b) => a + b, 0) * 100) / 100;
+}
+
+/** Builds a real, usable N-man (default 5, DK MLB's own primary stack
+ * size -- Phase 5) stack candidate per team from each StackSummary's
+ * already-selected top5 -- a 4-man/3-man view (Phase 5) is just a
+ * cheaper re-slice of the SAME array, never a new selection pass. Teams
+ * with zero eligible hitters are dropped entirely (never a fabricated
+ * empty "stack"); a team with 1 eligible hitter is kept (stackSize
+ * reflects reality) but excluded downstream by the ranking functions'
+ * own minimum-size floor. */
+export function buildStackCandidates(stacks: StackSummary[], size = 5): StackCandidate[] {
+  return stacks
+    .filter((s) => s.top5.length > 0)
+    .map((s) => {
+      const hitters = s.top5.slice(0, size);
+      const totalSalary = sumIfComplete(hitters.map((h) => h.salary));
+      const totalProjection = sumIfComplete(hitters.map((h) => h.projection));
+      const totalCeiling = sumAvailable(hitters.map((h) => h.ceiling));
+      const ownerships = hitters.map((h) => h.ownership).filter((v): v is number => v !== null);
+      const leverages = hitters.map((h) => h.leverage).filter((v): v is number => v !== null);
+      const averageOwnership = ownerships.length ? Math.round((ownerships.reduce((a, b) => a + b, 0) / ownerships.length) * 100) / 100 : null;
+      const averageLeverage = leverages.length ? Math.round((leverages.reduce((a, b) => a + b, 0) / leverages.length) * 100) / 100 : null;
+      const value = totalProjection !== null && totalSalary ? Math.round((totalProjection / totalSalary) * 1000 * 100) / 100 : null;
+      return {
+        team: s.team,
+        requestedSize: size,
+        stackSize: hitters.length,
+        hitters,
+        totalSalary,
+        totalProjection,
+        totalCeiling,
+        averageOwnership,
+        averageLeverage,
+        eligibleHitterCount: s.confirmedHitterCount,
+        status: s.status,
+        value,
+      };
+    });
+}
+
+/** A real stack (Phase 3/13: "not enough eligible hitters" is honestly
+ * distinct from "no stacks at all") needs at least 2 hitters -- a
+ * 1-player "stack" isn't a stack in DFS terms. */
+const MINIMUM_STACK_SIZE = 2;
+
+/** "Big Money Stack Score" -- documented here in full (Phase 4): rewards
+ * projected production AND ceiling equally (their average, so neither
+ * alone can dominate), plus two small, bounded secondary bonuses: usable
+ * lineup depth (extra real eligible hitters beyond the requested stack
+ * size -- a more resilient stack if a player gets scratched) and value
+ * (points per $1k) -- deliberately NOT ownership/leverage, per this
+ * milestone's explicit "do NOT make low ownership automatically better
+ * than actual projection quality" rule; ownership/leverage stay
+ * display-only fields (Phase 8), never a ranking input here. Both bonus
+ * terms are small relative to the primary production/ceiling average
+ * (typically 25-55 for a real 5-man MLB stack) so they can only ever
+ * break near-ties, never override real production quality. */
+export function stackScore(candidate: StackCandidate): number | null {
+  if (candidate.totalProjection === null || candidate.totalCeiling === null) return null;
+  const productionCeilingAverage = (candidate.totalProjection + candidate.totalCeiling) / 2;
+  const depthBonus = Math.max(0, candidate.eligibleHitterCount - candidate.stackSize) * 0.5;
+  const valueBonus = candidate.value !== null ? candidate.value * 2 : 0;
+  return Math.round((productionCeilingAverage + depthBonus + valueBonus) * 100) / 100;
+}
+
+export interface ScoredStackCandidate extends StackCandidate {
+  score: number;
+}
+
+/** Ranks real stack candidates (>= MINIMUM_STACK_SIZE hitters) by the Big
+ * Money Stack Score -- this is what powers the "Top Stacks" list (Phase
+ * 4). A candidate stackScore() can't compute for (missing totals) is
+ * excluded, never ranked with a fabricated/zero score. */
+export function rankStackCandidatesByScore(candidates: StackCandidate[]): ScoredStackCandidate[] {
+  return candidates
+    .filter((c) => c.stackSize >= MINIMUM_STACK_SIZE)
+    .map((c) => ({ ...c, score: stackScore(c) }))
+    .filter((c): c is ScoredStackCandidate => c.score !== null)
+    .sort((a, b) => b.score - a.score);
+}
+
+/** Ranks real stack candidates by DFS value (points per $1k) -- this is
+ * "Best Value Stack" (Phase 6): NOT necessarily the #1 scored stack,
+ * just whichever real, usable stack gives the strongest production per
+ * dollar. */
+export function rankStackCandidatesByValue(candidates: StackCandidate[]): StackCandidate[] {
+  return candidates
+    .filter((c) => c.stackSize >= MINIMUM_STACK_SIZE && c.value !== null)
+    .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
+}

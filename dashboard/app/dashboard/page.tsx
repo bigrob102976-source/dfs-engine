@@ -16,6 +16,7 @@ import { SectionHeader } from "@/components/ui/Header";
 import { loadLatestBlueCollarSnapshot } from "@/lib/blueCollarProjections";
 import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import {
+  bestValuePitcher,
   buildGameRankings,
   buildLineMovementFeed,
   buildMlCoverageSummary,
@@ -55,7 +56,7 @@ import { buildPipelineStatuses, buildSlateSummary } from "@/lib/pipelineStatus";
 import { loadLatestProjectionSourceComparison } from "@/lib/projectionSourceComparison";
 import { buildSlateReadinessSummary, buildTeamReadinessRows, computeSlateCompletionStage } from "@/lib/slateReadiness";
 import { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel, resolveSlateContext } from "@/lib/slateContext";
-import { buildStackSummaries } from "@/lib/stacks";
+import { buildStackCandidates, buildStackSummaries, rankStackCandidatesByScore, rankStackCandidatesByValue } from "@/lib/stacks";
 import { recomputeVegasSlateAnalysis } from "@/lib/vegasIntelligence";
 import { buildYesterdaySummary, findLatestEvaluatedDate } from "@/lib/yesterday";
 
@@ -194,6 +195,18 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
     .sort((a, b) => (b.leverage ?? 0) - (a.leverage ?? 0))
     .slice(0, 10);
 
+  // MLB DASHBOARD INTELLIGENCE: Top Stacks / Best Value Pitcher / Best
+  // Value Stack -- pure aggregation over `stacks`/`pitcherRows` already
+  // built above (same real, currently-selected-slate data every other
+  // Command Center section reads), never a second data source. Recomputes
+  // on every request (this page is `force-dynamic`), so a slate switch,
+  // a projection/ownership refresh, or a lineup posting automatically
+  // changes these the next time the page renders -- no manual step.
+  const stackCandidates = buildStackCandidates(stacks);
+  const topStacks5 = rankStackCandidatesByScore(stackCandidates).slice(0, 5);
+  const bestValueStackCandidate = rankStackCandidatesByValue(stackCandidates)[0] ?? null;
+  const bestValuePitcherRow = bestValuePitcher(pitcherRows);
+
   const kpis = buildSlateKpis({ report: environmentReport, ownership, pitcherRows, stacks });
   const rankings = buildGameRankings(environmentReport, ownership);
   const aiSummaryBullets = buildSlateAiSummary({ report: environmentReport, ownership, pitcherRows, hitterRows, stacks });
@@ -286,6 +299,9 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         topHitters={topHitters10}
         topPitchers={topPitchers10}
         topStacks={stacks.slice(0, 10)}
+        topStackCandidates={topStacks5}
+        bestValueStack={bestValueStackCandidate}
+        bestValuePitcher={bestValuePitcherRow}
         highestLeverage={highestLeverage10}
         risers={movement.risers}
         fallers={movement.fallers}

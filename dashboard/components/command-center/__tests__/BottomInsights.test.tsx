@@ -38,6 +38,9 @@ const EMPTY_PROPS = {
   topHitters: [],
   topPitchers: [],
   topStacks: [],
+  topStackCandidates: [],
+  bestValueStack: null,
+  bestValuePitcher: null,
   highestLeverage: [],
   risers: [],
   fallers: [],
@@ -166,6 +169,64 @@ describe("BottomInsights", () => {
     );
     expect(screen.getByText("Confident Native Player").closest("li")!.textContent).toContain("88");
     expect(screen.getByText("Uncertain Native Player").closest("li")!.textContent).toContain("22");
+  });
+
+  it("renders 'Not enough eligible hitters to rank stacks yet.' when there are no real stack candidates", () => {
+    render(<BottomInsights {...EMPTY_PROPS} />);
+    expect(screen.getAllByText("Not enough eligible hitters to rank stacks yet.").length).toBe(2); // Top Stacks + Best Value Stack
+  });
+
+  it("renders 'No projected starting pitchers available yet.' when there's no best value pitcher", () => {
+    render(<BottomInsights {...EMPTY_PROPS} />);
+    expect(screen.getByText("No projected starting pitchers available yet.")).toBeInTheDocument();
+  });
+
+  it("renders the Best Value Pitcher card with its full real fields", () => {
+    render(
+      <BottomInsights
+        {...EMPTY_PROPS}
+        bestValuePitcher={{ ...playerRow({ id: "bvp", name: "Value Ace", team: "DET", opponent: "CLE", salary: 6000, projection: 24, ceiling: 34, ownership: 12, eligibilityStatus: "STARTING_PITCHER" }), value: 4.0 }}
+      />,
+    );
+    expect(screen.getByText("Value Ace")).toBeInTheDocument();
+    expect(screen.getByText("4.00")).toBeInTheDocument();
+    expect(screen.getByText(/DET vs CLE/)).toBeInTheDocument();
+    expect(screen.getByText(/Confirmed/)).toBeInTheDocument();
+    expect(screen.getByText("$6,000")).toBeInTheDocument();
+  });
+
+  it("renders the Top Stacks list with its rich per-team fields", () => {
+    render(
+      <BottomInsights
+        {...EMPTY_PROPS}
+        topStackCandidates={[
+          {
+            team: "LAD", requestedSize: 5, stackSize: 2, hitters: [playerRow({ id: "l1", name: "Ohtani" }), playerRow({ id: "l2", name: "Betts" })],
+            totalSalary: 15000, totalProjection: 44.8, totalCeiling: 61.2, averageOwnership: 7.4, averageLeverage: 3, eligibleHitterCount: 2,
+            status: "CONFIRMED", value: 2.99, score: 55.2,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("LAD")).toBeInTheDocument();
+    expect(screen.getByText("55.2")).toBeInTheDocument();
+    expect(screen.getByText(/Ohtani, Betts/)).toBeInTheDocument();
+  });
+
+  it("renders the Best Value Stack card with its hitters listed", () => {
+    render(
+      <BottomInsights
+        {...EMPTY_PROPS}
+        bestValueStack={{
+          team: "SEA", requestedSize: 5, stackSize: 2, hitters: [playerRow({ id: "s1", name: "Julio Rodriguez", salary: 5200 }), playerRow({ id: "s2", name: "Cal Raleigh", salary: 4600 })],
+          totalSalary: 18700, totalProjection: 44.8, totalCeiling: 61.2, averageOwnership: 7.4, averageLeverage: 2, eligibleHitterCount: 2, status: "CONFIRMED", value: 2.4,
+        }}
+      />,
+    );
+    expect(screen.getByText(/SEA -- 2-man/)).toBeInTheDocument();
+    expect(screen.getByText("Julio Rodriguez")).toBeInTheDocument();
+    expect(screen.getByText("Cal Raleigh")).toBeInTheDocument();
+    expect(screen.getByText("$18,700")).toBeInTheDocument();
   });
 
   it("still renders the pre-existing Top 10 / Leverage / Movement / Lock Times sections unchanged", () => {

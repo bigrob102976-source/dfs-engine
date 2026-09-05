@@ -84,6 +84,22 @@ export function rankPlayersByValue(rows: PlayerRow[]): Array<PlayerRow & { value
   return rows.map((r) => ({ ...r, value: valueScore(r) })).sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
 }
 
+/** MLB DASHBOARD INTELLIGENCE (Phase 2): real, optimizer-eligible
+ * pitchers only (STARTING_PITCHER/PROBABLE-equivalent -- BENCH/OUT/
+ * RELIEF/SCRATCHED/UNMATCHED never optimizerEligible, see
+ * dfs/eligibility.py's OPTIMIZER_ELIGIBLE_STATUSES, mirrored 1:1 by this
+ * boolean field). "Best Value Pitcher" is deliberately NOT "highest
+ * projected" (that's Top Pitcher, already a separate KPI) and NOT
+ * "cheapest" -- it's whichever eligible pitcher has the best points-per-
+ * $1k ratio, reusing valueScore/rankPlayersByValue unchanged (no second
+ * value formula). Returns null (never fabricated) when no eligible
+ * pitcher has both a real projection and a real salary yet. */
+export function bestValuePitcher(pitcherRows: PlayerRow[]): (PlayerRow & { value: number }) | null {
+  const eligible = pitcherRows.filter((r) => r.playerType === "pitcher" && r.optimizerEligible);
+  const ranked = rankPlayersByValue(eligible).find((r): r is PlayerRow & { value: number } => r.value !== null);
+  return ranked ?? null;
+}
+
 function highestOwnedTeam(ownership: OwnershipSnapshot | null): { team: string; popularity: TeamPopularity } | null {
   if (!ownership) return null;
   const entries = Object.values(ownership.team_popularity ?? {});

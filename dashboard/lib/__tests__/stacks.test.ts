@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStackSummaries } from "../stacks";
+import { buildStackCandidates, buildStackSummaries, rankStackCandidatesByScore, rankStackCandidatesByValue, stackScore } from "../stacks";
 import type { PlayerRow } from "../types";
 
 function row(overrides: Partial<PlayerRow> = {}): PlayerRow {
@@ -140,5 +140,147 @@ describe("buildStackSummaries", () => {
     const summaries = buildStackSummaries(rows, {});
     const phi = summaries.find((s) => s.team === "PHI")!;
     expect(phi.top5[0].name).toBe("High Proj Low Salary");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MLB DASHBOARD INTELLIGENCE: Top Stacks / Best Value Stack
+// ---------------------------------------------------------------------------
+
+describe("buildStackCandidates", () => {
+  it("builds a real N-man candidate from each team's already-selected top5, with totals matching the exact hitters included", () => {
+    const rows = [
+      row({ id: "1", team: "PHI", name: "A", salary: 4000, projection: 10, ceiling: 18, ownership: 20, leverage: 5 }),
+      row({ id: "2", team: "PHI", name: "B", salary: 3000, projection: 8, ceiling: 14, ownership: 10, leverage: 3 }),
+    ];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    expect(candidate.team).toBe("PHI");
+    expect(candidate.stackSize).toBe(2);
+    expect(candidate.totalSalary).toBe(7000);
+    expect(candidate.totalProjection).toBe(18);
+    expect(candidate.totalCeiling).toBe(32);
+    expect(candidate.averageOwnership).toBe(15);
+    expect(candidate.averageLeverage).toBe(4);
+    expect(candidate.value).toBeCloseTo((18 / 7000) * 1000, 2);
+  });
+
+  it("honestly reflects fewer than the requested size rather than fabricating placeholder hitters", () => {
+    const rows = [row({ id: "1", team: "PHI", projection: 10 })];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks, 5);
+    expect(candidate.requestedSize).toBe(5);
+    expect(candidate.stackSize).toBe(1);
+    expect(candidate.hitters).toHaveLength(1);
+  });
+
+  it("a 3-man/4-man view is just a re-slice of the same top5, never a new selection", () => {
+    const rows = Array.from({ length: 5 }, (_, i) => row({ id: String(i), team: "PHI", projection: 10 - i }));
+    const stacks = buildStackSummaries(rows, {});
+    const [c5] = buildStackCandidates(stacks, 5);
+    const [c3] = buildStackCandidates(stacks, 3);
+    expect(c3.hitters.map((h) => h.id)).toEqual(c5.hitters.slice(0, 3).map((h) => h.id));
+  });
+
+  it("drops teams with zero eligible hitters entirely -- never a fabricated empty stack", () => {
+    const rows = [row({ id: "1", team: "LAD", optimizerEligible: false, projection: null, eligibilityStatus: "LINEUP_UNCONFIRMED" })];
+    const stacks = buildStackSummaries(rows, {});
+    expect(buildStackCandidates(stacks)).toEqual([]);
+  });
+
+  it("totalSalary/totalProjection are null (never partially fabricated) unless every included hitter has a real value", () => {
+    const rows = [
+      row({ id: "1", team: "PHI", salary: 4000, projection: 10 }),
+      row({ id: "2", team: "PHI", salary: null, projection: null, eligibilityStatus: "PROBABLE_HITTER" }),
+    ];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    expect(candidate.totalSalary).toBeNull();
+    expect(candidate.totalProjection).toBeNull();
+    expect(candidate.value).toBeNull();
+  });
+});
+
+describe("buildStackCandidates -- probable starters and bench/out exclusion (Phase 3/12)", () => {
+  it("includes a real PROBABLE_HITTER before official lineups post (optimizerEligible is the authoritative signal)", () => {
+    const rows = [row({ id: "1", team: "LAD", name: "Probable Guy", eligibilityStatus: "PROBABLE_HITTER", optimizerEligible: true, projection: 9 })];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    expect(candidate.hitters.map((h) => h.name)).toEqual(["Probable Guy"]);
+  });
+
+  it("never includes a BENCH/OUT/SCRATCHED hitter in the stack, even if their raw projection would otherwise rank #1", () => {
+    const rows = [
+      row({ id: "1", team: "LAD", name: "Confirmed Starter", eligibilityStatus: "STARTING_HITTER", optimizerEligible: true, projection: 8 }),
+      row({ id: "2", team: "LAD", name: "Scratched Star", eligibilityStatus: "SCRATCHED", optimizerEligible: false, projection: 30 }),
+    ];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    expect(candidate.hitters.map((h) => h.name)).toEqual(["Confirmed Starter"]);
+  });
+});
+
+describe("stackScore -- the Big Money Stack Score", () => {
+  it("rewards production and ceiling equally as its primary component", () => {
+    const rows = [row({ id: "1", team: "PHI", salary: 4000, projection: 20, ceiling: 40 })];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    // (20 + 40) / 2 = 30 primary, plus a value bonus (5.0 pts/$1k * 2 = 10); no depth bonus (exactly 1 eligible hitter for 1 stack slot)
+    expect(stackScore(candidate)).toBe(40);
+  });
+
+  it("never lets ownership/leverage alone change the score -- it isn't a ranking input", () => {
+    const lowOwned = buildStackCandidates(buildStackSummaries([row({ id: "1", team: "A", salary: 4000, projection: 20, ceiling: 40, ownership: 2 })], {}))[0];
+    const highOwned = buildStackCandidates(buildStackSummaries([row({ id: "1", team: "B", salary: 4000, projection: 20, ceiling: 40, ownership: 90 })], {}))[0];
+    expect(stackScore(lowOwned)).toBe(stackScore(highOwned));
+  });
+
+  it("returns null (never a fabricated 0) when production/ceiling totals are unavailable", () => {
+    const rows = [row({ id: "1", team: "PHI", salary: null, projection: null, ceiling: null, eligibilityStatus: "PROBABLE_HITTER" })];
+    const stacks = buildStackSummaries(rows, {});
+    const [candidate] = buildStackCandidates(stacks);
+    expect(stackScore(candidate)).toBeNull();
+  });
+});
+
+describe("rankStackCandidatesByScore -- Top Stacks", () => {
+  it("ranks a real, higher-production stack above a cheaper but weaker one", () => {
+    const strongStack = buildStackSummaries(
+      [row({ id: "1", team: "STRONG", salary: 5000, projection: 15, ceiling: 25 }), row({ id: "2", team: "STRONG", salary: 5000, projection: 15, ceiling: 25 })],
+      {},
+    );
+    const weakStack = buildStackSummaries(
+      [row({ id: "3", team: "WEAK", salary: 3000, projection: 5, ceiling: 9 }), row({ id: "4", team: "WEAK", salary: 3000, projection: 5, ceiling: 9 })],
+      {},
+    );
+    const candidates = [...buildStackCandidates(strongStack), ...buildStackCandidates(weakStack)];
+    const ranked = rankStackCandidatesByScore(candidates);
+    expect(ranked.map((c) => c.team)).toEqual(["STRONG", "WEAK"]);
+  });
+
+  it("excludes a single-hitter 'stack' -- not a real stack in DFS terms", () => {
+    const rows = [row({ id: "1", team: "SOLO", projection: 50, ceiling: 80 })];
+    const candidates = buildStackCandidates(buildStackSummaries(rows, {}));
+    expect(rankStackCandidatesByScore(candidates)).toEqual([]);
+  });
+
+  it("returns an empty list (never fabricated) when there are no real stack candidates yet", () => {
+    expect(rankStackCandidatesByScore([])).toEqual([]);
+  });
+});
+
+describe("rankStackCandidatesByValue -- Best Value Stack", () => {
+  it("ranks the strongest production-per-dollar stack first, even when it isn't the top-scored stack", () => {
+    const bigButExpensive = buildStackSummaries(
+      [row({ id: "1", team: "EXPENSIVE", salary: 10000, projection: 40, ceiling: 60 }), row({ id: "2", team: "EXPENSIVE", salary: 10000, projection: 40, ceiling: 60 })],
+      {},
+    );
+    const cheapAndEfficient = buildStackSummaries(
+      [row({ id: "3", team: "VALUE", salary: 3000, projection: 20, ceiling: 30 }), row({ id: "4", team: "VALUE", salary: 3000, projection: 20, ceiling: 30 })],
+      {},
+    );
+    const candidates = [...buildStackCandidates(bigButExpensive), ...buildStackCandidates(cheapAndEfficient)];
+    const ranked = rankStackCandidatesByValue(candidates);
+    expect(ranked[0].team).toBe("VALUE");
   });
 });

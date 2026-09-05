@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bestValuePitcher,
   buildGameRankings,
   buildLineMovementFeed,
   buildSlateAiSummary,
@@ -79,6 +80,32 @@ describe("valueScore / rankPlayersByValue / rankStacksByValue", () => {
   it("gives a null value (never a guess) when a stack's top5 has no salary data", () => {
     const stack = stackSummary({ top5: [] });
     expect(rankStacksByValue([stack])[0].value).toBeNull();
+  });
+});
+
+describe("bestValuePitcher -- MLB DASHBOARD INTELLIGENCE", () => {
+  it("picks the best points-per-$1k eligible pitcher, not simply the highest projected one", () => {
+    const highestProjected = playerRow({ id: "top", playerType: "pitcher", projection: 40, salary: 10000, optimizerEligible: true }); // 4.0 pts/$1k
+    const bestValue = playerRow({ id: "value", playerType: "pitcher", projection: 20, salary: 4000, optimizerEligible: true }); // 5.0 pts/$1k
+    const result = bestValuePitcher([highestProjected, bestValue]);
+    expect(result?.id).toBe("value");
+  });
+
+  it("never picks a BENCH/OUT/RELIEF pitcher, even one with a better raw value ratio", () => {
+    const ineligibleButCheaper = playerRow({ id: "bench", playerType: "pitcher", projection: 30, salary: 3000, optimizerEligible: false }); // 10 pts/$1k
+    const eligible = playerRow({ id: "starter", playerType: "pitcher", projection: 20, salary: 5000, optimizerEligible: true }); // 4 pts/$1k
+    const result = bestValuePitcher([ineligibleButCheaper, eligible]);
+    expect(result?.id).toBe("starter");
+  });
+
+  it("never selects a hitter row even if playerType is inconsistent with the rows array's intent", () => {
+    const hitter = playerRow({ id: "h1", playerType: "hitter", projection: 50, salary: 1000, optimizerEligible: true });
+    expect(bestValuePitcher([hitter])).toBeNull();
+  });
+
+  it("returns null (never fabricated) when no eligible pitcher has both a real projection and salary", () => {
+    expect(bestValuePitcher([])).toBeNull();
+    expect(bestValuePitcher([playerRow({ playerType: "pitcher", optimizerEligible: true, projection: null })])).toBeNull();
   });
 });
 
