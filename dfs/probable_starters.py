@@ -46,6 +46,8 @@ place that combines this module's real output with the rest of the
 eligibility picture.
 """
 
+import sys
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -342,7 +344,20 @@ def build_probable_hitters_map(date: str, package: dict) -> Dict[Tuple[str, str]
     posted_team_games = {(str(b["game_id"]), str(b["team_abbr"])) for b in batters}
     throws_by_game_team = {(str(p["game_id"]), str(p["team_abbr"])): p.get("throws") for p in pitchers}
 
+    # MLB AUTOMATIC PIPELINE RELIABILITY Phase 1 diagnostic timing:
+    # per-team elapsed time for the REAL MLB Stats API work this function
+    # does (fetch_team_recent_schedule/fetch_team_roster/fetch_boxscore,
+    # each cached in research/cache.py but only after the first real
+    # fetch) -- printed to stderr (captured in the worker log, never
+    # stdout, so it can never be mistaken for this script's own
+    # RESULT_JSON contract) so a genuine slow/uncached team is visible
+    # per-invocation, not just as one opaque total. Kept permanently
+    # (cheap -- one print per team needing inference, never per player)
+    # rather than removed after diagnosis, matching this milestone's own
+    # "explicit per-slate progress" bounded-execution requirement.
     result: Dict[Tuple[str, str], ProbableHitterInfo] = {}
+    teams_needing_inference = 0
+    inference_seconds_total = 0.0
     for game in games:
         game_id = str(game.get("game_id"))
         for side_team_key, side_team_id_key, opponent_team_key in (
@@ -358,15 +373,25 @@ def build_probable_hitters_map(date: str, package: dict) -> Dict[Tuple[str, str]
                 continue  # official lineup already posted -- never compute or use a probable guess here
 
             opposing_throws = throws_by_game_team.get((game_id, str(opponent_abbr)))
+            team_started = time.monotonic()
             try:
                 team_probables = infer_probable_hitters_for_team(str(team_id), date, opposing_pitcher_throws=opposing_throws)
             except Exception:  # noqa: BLE001 -- one team's real-evidence lookup failing must never block the slate
                 team_probables = {}
+            team_elapsed = time.monotonic() - team_started
+            teams_needing_inference += 1
+            inference_seconds_total += team_elapsed
+            print(f"[probable_hitters] team={team_abbr} game={game_id} elapsed={team_elapsed:.2f}s", file=sys.stderr, flush=True)
             for mlb_player_id, info in team_probables.items():
                 result[(game_id, mlb_player_id)] = replace(
                     info, team_abbr=str(team_abbr), opponent_abbr=str(opponent_abbr) if opponent_abbr else None, game_id=game_id,
                 )
 
+    print(
+        f"[probable_hitters] date={date} teams_needing_inference={teams_needing_inference} "
+        f"total_inference_seconds={inference_seconds_total:.2f}",
+        file=sys.stderr, flush=True,
+    )
     return result
 
 

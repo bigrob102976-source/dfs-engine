@@ -50,6 +50,7 @@ are the only inputs read).
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -107,23 +108,40 @@ def _build_dfs_player(p: dict, game_id: Optional[str]) -> DFSPlayer:
 
 
 def compute_for_payload(payload: dict) -> dict:
+    # MLB AUTOMATIC PIPELINE RELIABILITY Phase 1: explicit per-stage
+    # timing to stderr (never stdout -- this script's RESULT_JSON
+    # contract on stdout must stay exactly one line) so a slow/hanging
+    # invocation is diagnosable from the worker log alone, not just an
+    # opaque "it took a while." Kept permanently (cheap -- a handful of
+    # prints per invocation) per this milestone's own bounded-execution
+    # observability requirement.
+    stage_started = time.monotonic()
     date = payload["date"]
     players_in = payload.get("players") or []
+    print(f"[eligibility] date={date} players_in={len(players_in)}", file=sys.stderr, flush=True)
 
+    t0 = time.monotonic()
     try:
         package = ensure_research_package(date, "research_output")
     except ResearchPackageNotFoundError as exc:
         return {"status": "NO_RESEARCH_PACKAGE", "date": date, "reason": str(exc), "results": []}
     except Exception as exc:  # noqa: BLE001 -- a real research-build failure is honestly reported, never crashes the caller
         return {"status": "NO_RESEARCH_PACKAGE", "date": date, "reason": f"{type(exc).__name__}: {exc}", "results": []}
+    print(f"[eligibility] research_package_load elapsed={time.monotonic() - t0:.2f}s games={len(package.get('games', []))}", file=sys.stderr, flush=True)
 
+    t0 = time.monotonic()
     games = package.get("games", [])
     game_id_by_provider_id = _resolve_game_ids(players_in, games)
-
     dfs_players = [_build_dfs_player(p, game_id_by_provider_id.get(p["providerPlayerId"])) for p in players_in]
+    print(f"[eligibility] game_id_resolution elapsed={time.monotonic() - t0:.2f}s", file=sys.stderr, flush=True)
 
+    t0 = time.monotonic()
     probable_hitters = build_probable_hitters_map(date, package)
+    print(f"[eligibility] probable_hitters_map elapsed={time.monotonic() - t0:.2f}s entries={len(probable_hitters)}", file=sys.stderr, flush=True)
+
+    t0 = time.monotonic()
     compute_eligibility(dfs_players, package.get("pitchers", []), package.get("batters", []), probable_hitters=probable_hitters)
+    print(f"[eligibility] compute_eligibility elapsed={time.monotonic() - t0:.2f}s", file=sys.stderr, flush=True)
 
     results = [
         {
@@ -139,6 +157,7 @@ def compute_for_payload(payload: dict) -> dict:
         }
         for player in dfs_players
     ]
+    print(f"[eligibility] total elapsed={time.monotonic() - stage_started:.2f}s players_out={len(results)}", file=sys.stderr, flush=True)
     return {"status": "OK", "date": date, "results": results}
 
 

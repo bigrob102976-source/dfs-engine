@@ -282,3 +282,99 @@ describe("M7L: automatic canonical eligibility refresh adds zero DraftKings call
     for (const script of invokedScripts) expect(script).toBe("scripts/compute_canonical_eligibility.py");
   });
 });
+
+describe("MLB AUTOMATIC PIPELINE RELIABILITY: eligibility is computed ONCE per date, not once per slate", () => {
+  it("invokes scripts/compute_canonical_eligibility.py exactly ONCE for a 3-slate date -- never N times", async () => {
+    // Root-caused live: dfs/probable_starters.py::build_probable_hitters_map
+    // iterates the WHOLE date's research package regardless of which
+    // slate's players were passed in, so the OLD once-per-slate design
+    // redundantly repeated the same real ~90-170s network-bound
+    // computation N times for an N-slate date -- measured live: 30 teams
+    // x ~3-6s each, every time. This is the regression test that proves
+    // it now runs exactly once.
+    insertSlate({ internal_slate_id: "s1" });
+    getDb().prepare("INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at) VALUES ('s1','1','Player One','BOS','TOR',4500,'[\"OF\"]','UNRESOLVED','x','x')").run();
+    getDb()
+      .prepare(
+        `INSERT INTO slates (internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc, schema_version, validation_state, source_provenance, created_at, updated_at)
+         VALUES ('s2', 'MLB', 'draftkings', 'draftkings_unofficial', 'dkunofficial-2', 'Turbo', '2026-08-31', '2026-08-31T23:05:00Z', 'slate_normalized_v1', 'VALID', 'DRAFTKINGS_UNOFFICIAL_LIVE', 'x', 'x')`,
+      )
+      .run();
+    getDb().prepare("INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at) VALUES ('s2','2','Player Two','NYY','BAL',5200,'[\"1B\"]','UNRESOLVED','x','x')").run();
+    getDb()
+      .prepare(
+        `INSERT INTO slates (internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc, schema_version, validation_state, source_provenance, created_at, updated_at)
+         VALUES ('s3', 'MLB', 'draftkings', 'draftkings_unofficial', 'dkunofficial-3', 'Night', '2026-08-31', '2026-08-31T23:05:00Z', 'slate_normalized_v1', 'VALID', 'DRAFTKINGS_UNOFFICIAL_LIVE', 'x', 'x')`,
+      )
+      .run();
+    getDb().prepare("INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at) VALUES ('s3','3','Player Three','LAD','SD',4800,'[\"OF\"]','UNRESOLVED','x','x')").run();
+
+    let invocationCount = 0;
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(async () => {
+      invocationCount += 1;
+      return {
+        exitCode: 0,
+        stdout: 'RESULT_JSON:{"status":"OK","date":"2026-08-31","results":[' +
+          '{"providerPlayerId":"1","gameId":"g1","eligibilityStatus":"STARTING_HITTER","optimizerEligible":true,"battingOrder":1},' +
+          '{"providerPlayerId":"2","gameId":"g2","eligibilityStatus":"STARTING_HITTER","optimizerEligible":true,"battingOrder":2},' +
+          '{"providerPlayerId":"3","gameId":"g3","eligibilityStatus":"STARTING_HITTER","optimizerEligible":true,"battingOrder":3}' +
+          ']}',
+        stderr: "", command: [],
+      };
+    });
+
+    const result = await refreshCanonicalEligibilityForDate("2026-08-31");
+    expect(invocationCount).toBe(1);
+    expect(result.slatesFound).toBe(3);
+    expect(result.slatesUpdated).toBe(3);
+    expect(result.slatesFailed).toBe(0);
+
+    // Every slate's OWN row got the real, shared result -- not just the
+    // first slate processed.
+    const s1 = getDb().prepare("SELECT eligibility_status, optimizer_eligible FROM slate_players WHERE internal_slate_id='s1'").get() as any;
+    const s2 = getDb().prepare("SELECT eligibility_status, optimizer_eligible FROM slate_players WHERE internal_slate_id='s2'").get() as any;
+    const s3 = getDb().prepare("SELECT eligibility_status, optimizer_eligible FROM slate_players WHERE internal_slate_id='s3'").get() as any;
+    expect(s1.eligibility_status).toBe("STARTING_HITTER");
+    expect(s2.eligibility_status).toBe("STARTING_HITTER");
+    expect(s3.eligibility_status).toBe("STARTING_HITTER");
+  });
+
+  it("the SAME real player appearing on two different slates gets the identical shared result persisted onto BOTH slates' own rows", async () => {
+    insertSlate({ internal_slate_id: "s1" });
+    getDb()
+      .prepare(
+        `INSERT INTO slates (internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc, schema_version, validation_state, source_provenance, created_at, updated_at)
+         VALUES ('s2', 'MLB', 'draftkings', 'draftkings_unofficial', 'dkunofficial-2', 'Turbo', '2026-08-31', '2026-08-31T23:05:00Z', 'slate_normalized_v1', 'VALID', 'DRAFTKINGS_UNOFFICIAL_LIVE', 'x', 'x')`,
+      )
+      .run();
+    // The SAME real player (providerPlayerId "shared-1") on BOTH slates --
+    // e.g. a real Main/Turbo overlap.
+    getDb().prepare("INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at) VALUES ('s1','shared-1','Shared Player','BOS','TOR',4500,'[\"OF\"]','UNRESOLVED','x','x')").run();
+    getDb().prepare("INSERT INTO slate_players (internal_slate_id, provider_player_id, name, team, opponent, salary, position_eligibility_json, identity_status, created_at, updated_at) VALUES ('s2','shared-1','Shared Player','BOS','TOR',4500,'[\"OF\"]','UNRESOLVED','x','x')").run();
+
+    let capturedPayload: any = null;
+    const { __setPythonRunnerForTests } = await import("../../orchestrator/pythonRunner");
+    __setPythonRunnerForTests(async (_script, args) => {
+      const inputPath = args[args.indexOf("--input") + 1];
+      capturedPayload = JSON.parse(fs.readFileSync(inputPath, "utf-8"));
+      return {
+        exitCode: 0,
+        stdout: 'RESULT_JSON:{"status":"OK","date":"2026-08-31","results":[{"providerPlayerId":"shared-1","gameId":"g1","eligibilityStatus":"STARTING_HITTER","optimizerEligible":true,"battingOrder":4}]}',
+        stderr: "", command: [],
+      };
+    });
+
+    await refreshCanonicalEligibilityForDate("2026-08-31");
+
+    // The shared player was sent to Python exactly ONCE, not twice.
+    expect(capturedPayload.players.filter((p: any) => p.providerPlayerId === "shared-1")).toHaveLength(1);
+
+    const onS1 = getDb().prepare("SELECT eligibility_status, batting_order FROM slate_players WHERE internal_slate_id='s1' AND provider_player_id='shared-1'").get() as any;
+    const onS2 = getDb().prepare("SELECT eligibility_status, batting_order FROM slate_players WHERE internal_slate_id='s2' AND provider_player_id='shared-1'").get() as any;
+    expect(onS1.eligibility_status).toBe("STARTING_HITTER");
+    expect(onS1.batting_order).toBe(4);
+    expect(onS2.eligibility_status).toBe("STARTING_HITTER");
+    expect(onS2.batting_order).toBe(4);
+  });
+});

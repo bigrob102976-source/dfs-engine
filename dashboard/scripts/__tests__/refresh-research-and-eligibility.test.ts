@@ -6,7 +6,32 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __resetDbForTests, getDb } from "../../lib/db/client";
 import { __resetExecutorForTests } from "../../lib/db/executor";
 import { __resetStorageForTests } from "../../lib/storage/getStorage";
+import type { SqlExecutor } from "../../lib/db/sqlExecutor";
 import { parseArgs, runRefresh } from "../refresh-research-and-eligibility";
+
+/** MLB AUTOMATIC PIPELINE RELIABILITY: a thin pass-through SqlExecutor
+ * wrapper that fails every write whose bind params mention
+ * `poisonSlateId` -- proves real per-slate DB-write isolation
+ * (persistEligibilityResultsForSlate's own try/catch per slate) without
+ * depending on any particular SQLite driver's bind-type quirks. Injected
+ * via the same __setExecutorForTests() seam lib/db/__tests__ already
+ * uses for dual-backend contract testing. */
+async function makeFailingSlateExecutor(poisonSlateId: string): Promise<SqlExecutor> {
+  const { getExecutor } = await import("../../lib/db/executor");
+  const wrap = (exec: SqlExecutor): SqlExecutor => ({
+    backend: exec.backend,
+    get: (sql, params) => exec.get(sql, params),
+    all: (sql, params) => exec.all(sql, params),
+    run: (sql, params = []) => {
+      if (params.includes(poisonSlateId)) {
+        return Promise.reject(new Error(`simulated DB write failure for slate ${poisonSlateId}`));
+      }
+      return exec.run(sql, params);
+    },
+    transaction: (fn) => exec.transaction((tx) => fn(wrap(tx))),
+  });
+  return wrap(getExecutor());
+}
 
 let tmpDir: string;
 
@@ -133,27 +158,39 @@ describe("T3: runRefresh -- the automatic research/identity/eligibility orchestr
     insertCanonicalSlate("s2", "dkunofficial-2");
     insertCanonicalPlayer("s2", "2");
     const { __setPythonRunnerForTests } = await import("../../lib/orchestrator/pythonRunner");
-    let callIndex = 0;
-    __setPythonRunnerForTests(async (script, args) => {
+    // MLB AUTOMATIC PIPELINE RELIABILITY: eligibility is now computed ONCE
+    // per date with a combined, deduplicated player payload (see
+    // lib/db/canonicalEligibility.ts::computeEligibilityForDate) -- a
+    // per-slate COMPUTE failure is no longer a real, reachable scenario
+    // (there is only one shared subprocess call left to fail or succeed
+    // for the whole date). The real remaining per-slate isolation
+    // boundary is PERSISTENCE (persistEligibilityResultsForSlate's own
+    // try/catch per slate) -- simulated here by injecting a wrapped
+    // executor that fails only s2's own DB write, proving s1's persist
+    // (a genuinely separate real DB write) is entirely unaffected.
+    let callCount = 0;
+    __setPythonRunnerForTests(async (script) => {
       if (script === "scripts/build_research_package.py") return { exitCode: 0, stdout: "ok", stderr: "", command: [] };
       if (script === "scripts/refresh_player_identity.py") return { exitCode: 0, stdout: "ok", stderr: "", command: [] };
       if (script === "scripts/compute_canonical_eligibility.py") {
-        callIndex += 1;
-        // Fail the first slate's eligibility compute, succeed the second --
-        // proves per-slate isolation from inside this orchestration script,
-        // not just inside refreshCanonicalEligibilityForDate in isolation.
-        const inputPath = args[args.indexOf("--input") + 1];
-        const fs = await import("node:fs");
-        const payload = JSON.parse(fs.readFileSync(inputPath, "utf-8"));
-        if (payload.date === "2026-09-02" && callIndex === 1) {
-          return { exitCode: 1, stdout: "", stderr: "crash", command: [] };
-        }
-        return { exitCode: 0, stdout: 'RESULT_JSON:{"status":"OK","date":"2026-09-02","results":[]}', stderr: "", command: [] };
+        callCount += 1;
+        return {
+          exitCode: 0,
+          stdout: 'RESULT_JSON:{"status":"OK","date":"2026-09-02","results":[' +
+            '{"providerPlayerId":"1","gameId":null,"eligibilityStatus":"UNMATCHED","optimizerEligible":false,"battingOrder":null},' +
+            '{"providerPlayerId":"2","gameId":null,"eligibilityStatus":"UNMATCHED","optimizerEligible":false,"battingOrder":null}' +
+          ']}',
+          stderr: "",
+          command: [],
+        };
       }
       throw new Error(`Unexpected script: ${script}`);
     });
+    const { __setExecutorForTests } = await import("../../lib/db/executor");
+    __setExecutorForTests(await makeFailingSlateExecutor("s2"));
 
     const summary = await runRefresh("2026-09-02", "MLB");
+    expect(callCount).toBe(1); // ONE shared compute call for the whole date, not one per slate
     expect(summary.eligibility.slatesFound).toBe(2);
     expect(summary.eligibility.slatesFailed).toBe(1);
     expect(summary.eligibility.slatesUpdated).toBe(1);
