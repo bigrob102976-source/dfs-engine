@@ -140,6 +140,63 @@ class ArtifactStorage(ABC):
         persistence, which never deletes anything."""
 
 
+def _atomic_write_bytes(path: Path, data: bytes, allow_overwrite: bool) -> None:
+    """MLB FILE LOCK / DUPLICATE ARTIFACT WRITER RACE hardening: the
+    previous LocalArtifactStorage implementation did a plain
+    `path.exists()` check followed by a SEPARATE `path.open("w")` --
+    two concurrent writers could both pass the check before either
+    wrote (a real TOCTOU race, confirmed live for the ownership writer
+    -- see ownership/persistence.py's own top-of-file note), and even a
+    single writer's plain `open("w")` truncates the file in place, so a
+    reader could observe a genuinely partial/corrupt document mid-write.
+
+    Fixed with two real OS-level atomicity guarantees instead of a
+    Python-level check:
+      - allow_overwrite=False: `os.open(..., O_CREAT | O_EXCL)` is an
+        atomic "create only if it doesn't already exist" kernel
+        operation -- there is no window between "check" and "create"
+        because there is no separate check; the OS performs both as one
+        indivisible step and raises FileExistsError itself if the name
+        already exists.
+      - allow_overwrite=True: write to a unique temp file in the SAME
+        directory (guaranteeing the eventual rename is on the same
+        filesystem, required for atomicity), flush, close, then
+        `os.replace()` -- an atomic rename on both POSIX and Windows.
+        A reader can only ever see the complete OLD file or the
+        complete NEW file, never a partially-written one."""
+    if not allow_overwrite:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except BaseException:
+            # A failure after the atomic create (e.g. disk full mid-write)
+            # must not leave a half-written file masquerading as a real,
+            # complete artifact -- clean it up and re-raise the real error.
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise
+        return
+
+    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{id(data)}")
+    try:
+        with tmp_path.open("wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp_path), str(path))
+    finally:
+        # os.replace() already removed tmp_path on success; this only
+        # cleans up a leftover temp file if the write/replace itself
+        # failed partway through.
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
 class LocalArtifactStorage(ArtifactStorage):
     """Local disk, relative to `root` -- the exact same layout every
     artifact directory in this repo already uses (research_output/,
@@ -153,11 +210,9 @@ class LocalArtifactStorage(ArtifactStorage):
 
     def write_json(self, relative_path: str, data: Any, allow_overwrite: bool = False) -> None:
         path = self._resolve(relative_path)
-        if not allow_overwrite and path.exists():
-            raise FileExistsError(f"Refusing to overwrite existing artifact: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        body = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+        _atomic_write_bytes(path, body, allow_overwrite=allow_overwrite)
 
     def read_json(self, relative_path: str) -> Optional[Any]:
         path = self._resolve(relative_path)
@@ -189,10 +244,8 @@ class LocalArtifactStorage(ArtifactStorage):
 
     def write_bytes(self, relative_path: str, data: bytes, allow_overwrite: bool = False) -> None:
         path = self._resolve(relative_path)
-        if not allow_overwrite and path.exists():
-            raise FileExistsError(f"Refusing to overwrite existing artifact: {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        _atomic_write_bytes(path, data, allow_overwrite=allow_overwrite)
 
     def write_text(self, relative_path: str, text: str, allow_overwrite: bool = False) -> None:
         self.write_bytes(relative_path, text.encode("utf-8"), allow_overwrite=allow_overwrite)

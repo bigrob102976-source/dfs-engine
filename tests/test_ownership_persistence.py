@@ -41,14 +41,39 @@ def test_players_carry_dk_and_mlb_ids_for_future_join():
         assert "mlb_player_id" in p
 
 
-def test_save_and_no_overwrite(tmp_path):
+def test_save_creates_a_content_hash_qualified_immutable_filename(tmp_path):
     doc = _document()
     path = save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)
     assert path.exists()
-    assert path.name == "ownership_20260811T180000.json"
+    assert path.name.startswith("ownership_20260811T180000_")
+    assert path.name.endswith(".json")
 
-    with pytest.raises(FileExistsError):
-        save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)
+
+def test_saving_the_identical_document_twice_is_an_idempotent_no_op_not_a_crash(tmp_path):
+    # MLB FILE LOCK / DUPLICATE ARTIFACT WRITER RACE: a real production
+    # incident had two duplicate (orphaned) writer processes compute the
+    # SAME real ownership result for the same slate at the same second --
+    # this must never raise FileExistsError or corrupt anything; it's a
+    # true no-op duplicate of the identical content.
+    doc = _document()
+    first_path = save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)
+    second_path = save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)
+    assert second_path == first_path
+    assert json.loads(first_path.read_text(encoding="utf-8")) == doc
+
+
+def test_two_genuinely_different_documents_at_the_same_timestamp_never_collide(tmp_path):
+    # A real, different result for the SAME (date, timestamp) -- e.g. a
+    # genuine recompute within the same wall-clock second -- must land
+    # at a DIFFERENT key, never silently overwrite the earlier one.
+    doc_a = _document(generated_at="2026-08-11T18:00:00+00:00")
+    doc_b = _document(generated_at="2026-08-11T18:00:00+00:00", slate_id="dkcsv-main-2026-08-11")
+    path_a = save_ownership_document(doc_a, "2026-08-11", "20260811T180000", output_root=tmp_path)
+    path_b = save_ownership_document(doc_b, "2026-08-11", "20260811T180000", output_root=tmp_path, slate_id="dkcsv-main-2026-08-11")
+    assert path_a != path_b
+    assert path_a.exists() and path_b.exists()
+    assert json.loads(path_a.read_text(encoding="utf-8"))["slate_id"] is None
+    assert json.loads(path_b.read_text(encoding="utf-8"))["slate_id"] == "dkcsv-main-2026-08-11"
 
 
 def test_list_and_load_latest_snapshot(tmp_path):
@@ -98,13 +123,15 @@ def test_document_slate_id_defaults_to_none_for_backward_compatibility():
 def test_slate_scoped_save_path_includes_slate_id(tmp_path):
     doc = _document(slate_id="dkcsv-main-2026-08-11")
     path = save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path, slate_id="dkcsv-main-2026-08-11")
-    assert path == tmp_path / "2026-08-11" / "dkcsv-main-2026-08-11" / "ownership_20260811T180000.json"
+    assert path.parent == tmp_path / "2026-08-11" / "dkcsv-main-2026-08-11"
+    assert path.name.startswith("ownership_20260811T180000_") and path.name.endswith(".json")
 
 
 def test_omitting_slate_id_preserves_exact_legacy_date_only_path(tmp_path):
     doc = _document()
     path = save_ownership_document(doc, "2026-08-11", "20260811T180000", output_root=tmp_path)
-    assert path == tmp_path / "2026-08-11" / "ownership_20260811T180000.json"
+    assert path.parent == tmp_path / "2026-08-11"
+    assert path.name.startswith("ownership_20260811T180000_") and path.name.endswith(".json")
 
 
 def test_two_slates_sharing_a_date_never_collide_or_leak(tmp_path):

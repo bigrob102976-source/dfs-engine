@@ -28,13 +28,15 @@ evaluator is built yet; this only preserves enough provenance for one
 to exist later.
 """
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
 # Reuses the exact same UTC/local/timezone metadata helper the Pitcher,
 # Batter, and lineup-set outputs already use (America/Chicago,
 # tzdata-backed) instead of re-deriving the same logic a fourth time.
-from research.artifact_storage import raise_if_exists
+from research.artifact_storage import ARTIFACT_ROOT, resolve_artifact_storage, to_artifact_key
 from research.prediction_snapshot import _timezone_metadata
 from research.storage import save_json
 
@@ -42,11 +44,58 @@ from ownership.models import OwnershipProjection, TeamPopularity
 
 DEFAULT_OWNERSHIP_ROOT = Path(__file__).resolve().parent.parent / "ownership_predictions"
 
+# MLB FILE LOCK / DUPLICATE ARTIFACT WRITER RACE: real production
+# incident (2026-09-05) -- two duplicate orphaned refresh processes (see
+# the separate worker-orphan-hardening fix; that fix is the actual root
+# cause remedy, this is defense in depth for the artifact writer itself)
+# computed ownership for the SAME slate within the SAME wall-clock
+# second, both passing a naive path.exists()-then-write check before
+# either had written -- confirmed live: the second writer's
+# save_ownership_document() raised FileExistsError, correctly refusing
+# to overwrite, but a slightly different timing could equally have let
+# it silently clobber the first writer's real data instead (a plain
+# "check, then write with overwrite allowed" has no ordering guarantee
+# either way). timestamp_tag() is SECOND resolution by design (matches
+# every other immutable snapshot in this project) -- not the actual
+# defect; the defect is relying on a non-atomic existence check as the
+# ONLY thing standing between two writers and the SAME key.
+#
+# Fix: the persisted filename itself now includes a deterministic
+# content hash (never a random/run-ID suffix -- "do not introduce
+# random naming if a deterministic content hash is cleaner"). Two
+# writers computing the SAME real ownership result (the actual race
+# above) now derive the IDENTICAL key -- so even if both pass the
+# existence check and both write, they write byte-for-byte identical
+# JSON to the identical key, which is a true no-op duplicate, never
+# corruption, never data loss. Two writers computing GENUINELY
+# DIFFERENT content (a real distinct result) now land at DIFFERENT
+# keys by construction -- no collision is even possible, so nothing is
+# ever silently overwritten. This is the SAME "does the new artifact
+# differ from the last one" question canonical_ingestion's own
+# isSemanticDuplicate/normalizedHash mechanism already answers for
+# canonical slate artifacts -- reused here as the identical concept for
+# a different artifact type, not a new idea.
+_VOLATILE_OWNERSHIP_FIELDS = frozenset({"generated_at", "generated_at_utc", "generated_at_local"})
 
-def _no_overwrite(path: Path) -> None:
-    # Milestone 33.2: storage-aware (see bluecollar/persistence.py's
-    # identical comment for why this replaced a local path.exists() check).
-    raise_if_exists(path)
+
+def _content_hash(document: dict) -> str:
+    """Deterministic SHA-256 (first 12 hex chars -- short but still
+    collision-resistant enough for this project's real slate sizes,
+    matching canonical/hashing.py's own precedent of truncating a full
+    hex digest for a filename-safe tag) over the document's REAL,
+    stable content -- excludes only the per-run generation timestamps,
+    never any field that reflects an actual computed result (player
+    ownership values, team popularity, model_version, slate identity).
+    Two independent computations of the SAME underlying inputs must
+    hash identically; two computations of DIFFERENT inputs must not."""
+    stable = {k: v for k, v in document.items() if k not in _VOLATILE_OWNERSHIP_FIELDS}
+    canonical = json.dumps(stable, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+def _exists(path: Path) -> bool:
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    return storage.exists(to_artifact_key(path))
 
 
 def build_ownership_document(
@@ -79,8 +128,18 @@ def _slate_folder(output_root: Path, slate_date: str, slate_id: Optional[str]) -
 def save_ownership_document(
     document: dict, slate_date: str, timestamp: str, output_root: Path = DEFAULT_OWNERSHIP_ROOT, slate_id: Optional[str] = None,
 ) -> Path:
-    path = _slate_folder(output_root, slate_date, slate_id) / f"ownership_{timestamp}.json"
-    _no_overwrite(path)
+    """Immutable, content-hash-qualified snapshot filename -- see this
+    module's own top-of-file note on the real production race this
+    replaced. If the exact same (timestamp, content) pair already
+    exists, this is an idempotent duplicate (e.g. a retried/duplicate
+    writer computing the identical real result): returns the existing
+    path without writing again, never raises. A genuinely different
+    result for the same timestamp lands at a different key -- no
+    collision, both persisted, immutable history preserved."""
+    content_hash = _content_hash(document)
+    path = _slate_folder(output_root, slate_date, slate_id) / f"ownership_{timestamp}_{content_hash}.json"
+    if _exists(path):
+        return path
     save_json(path, document)
     return path
 
