@@ -215,15 +215,34 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   console.log(`AUTOMATIC RESEARCH/IDENTITY/ELIGIBILITY/PROJECTION/OWNERSHIP REFRESH -- ${sport} ${date}`);
   console.log(`===================================================================`);
 
+  // MLB AUTOMATIC PIPELINE RELIABILITY: found live -- when the whole T3
+  // stage exceeds its outer remote timeout, the worker log showed only
+  // the LAST "N/8: ..." header with no completion line, giving zero
+  // evidence of how long any individual step (of 8) actually took before
+  // the timeout hit. runPythonScript's own child stderr (which now
+  // carries permanent per-stage timing for the eligibility bridge --
+  // see compute_canonical_eligibility.py/probable_starters.py) is
+  // likewise never surfaced on the success path, only on a parse
+  // failure -- so a step that succeeds slowly left no trace either. A
+  // plain elapsed-seconds print after every step (cheap, permanent)
+  // closes both gaps at once: which step ran, and exactly how long it
+  // took, is now always in the log regardless of whether the OVERALL
+  // stage times out.
+  const stepStarted = () => Date.now();
+  const stepElapsed = (t0: number) => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+
   console.log("\n--- 1/8: research package refresh (MLB Stats API) ---");
+  let t0 = stepStarted();
   const research = await runResearchRefresh(date);
-  console.log(research.ok ? "OK" : `FAILED: ${research.detail}`);
+  console.log(`${research.ok ? "OK" : `FAILED: ${research.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 2/8: player identity crosswalk refresh (MLB Stats API) ---");
+  t0 = stepStarted();
   const identity = await runIdentityRefresh(date);
-  console.log(identity.ok ? "OK" : `FAILED: ${identity.detail}`);
+  console.log(`${identity.ok ? "OK" : `FAILED: ${identity.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 3/8: canonical eligibility recompute (Postgres only) ---");
+  t0 = stepStarted();
   let eligibility: RefreshSummary["eligibility"];
   try {
     const result = await refreshCanonicalEligibilityForDate(date, sport);
@@ -237,21 +256,25 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   } catch (err) {
     eligibility = { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
-  console.log(eligibility.ok ? "OK" : `DEGRADED: ${eligibility.detail}`);
+  console.log(`${eligibility.ok ? "OK" : `DEGRADED: ${eligibility.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 4/8: pitcher agent scoring (research/Statcast -- never DraftKings) ---");
+  t0 = stepStarted();
   const pitcherAgent = await runPitcherAgent(date);
-  console.log(pitcherAgent.ok ? "OK" : `FAILED: ${pitcherAgent.detail}`);
+  console.log(`${pitcherAgent.ok ? "OK" : `FAILED: ${pitcherAgent.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 5/8: batter agent scoring (research/Statcast -- never DraftKings) ---");
+  t0 = stepStarted();
   const batterAgent = await runBatterAgent(date);
-  console.log(batterAgent.ok ? "OK" : `FAILED: ${batterAgent.detail}`);
+  console.log(`${batterAgent.ok ? "OK" : `FAILED: ${batterAgent.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 6/8: Big Money Native projection engine (pitcher/batter agent boards -- never DraftKings) ---");
+  t0 = stepStarted();
   const nativeProjectionEngine = await runNativeProjectionEngine(date);
-  console.log(nativeProjectionEngine.ok ? "OK" : `FAILED: ${nativeProjectionEngine.detail}`);
+  console.log(`${nativeProjectionEngine.ok ? "OK" : `FAILED: ${nativeProjectionEngine.detail}`} (${stepElapsed(t0)})`);
 
   console.log("\n--- 7/8: canonical projection persistence (Postgres only) ---");
+  t0 = stepStarted();
   let projections: RefreshSummary["projections"];
   try {
     const result = await refreshCanonicalProjectionsForDate(date, sport);
@@ -265,16 +288,17 @@ export async function runRefresh(date: string, sport: string): Promise<RefreshSu
   } catch (err) {
     projections = { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
-  console.log(projections.ok ? "OK" : `DEGRADED: ${projections.detail}`);
+  console.log(`${projections.ok ? "OK" : `DEGRADED: ${projections.detail}`} (${stepElapsed(t0)})`);
 
   console.log(`\n--- 8/8: canonical ownership generation (real scripts/project_dk_ownership.py per slate, every ${OWNERSHIP_REFRESH_INTERVAL_MINUTES}m) ---`);
+  t0 = stepStarted();
   let ownership: OwnershipRefreshResult;
   try {
     ownership = await refreshOwnershipForDate(date, sport);
   } catch (err) {
     ownership = { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
-  console.log(ownership.skipped ? ownership.detail : ownership.ok ? "OK" : `DEGRADED: ${ownership.detail}`);
+  console.log(`${ownership.skipped ? ownership.detail : ownership.ok ? "OK" : `DEGRADED: ${ownership.detail}`} (${stepElapsed(t0)})`);
   if (ownership.failureReasons) {
     for (const reason of ownership.failureReasons) console.log(`  OWNERSHIP FAILURE: ${reason}`);
   }
