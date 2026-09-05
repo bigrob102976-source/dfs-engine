@@ -221,3 +221,21 @@ def build_pool(slate_date: str, draft_group_id: int, sport_code: str = "NFL") ->
         draft_group_id=draft_group_id, slate_date=slate_date, slate_name=slate_name,
         players=players, validation=validation, source_provenance=DRAFTKINGS_UNOFFICIAL_LIVE,
     )
+
+
+def build_pool_preferring_cache(slate_date: str, draft_group_id: int, sport_code: str = "NFL") -> NflPoolBuildResult:
+    """NFL M15 -- production DraftKings-access resilience: reuses a
+    recent (<=15 min, see nfl/pool_cache.py) real, live-provenance pool
+    snapshot for this exact DraftGroup if one exists, only calling
+    DraftKings live via build_pool() when no such snapshot exists.
+
+    A snapshot only exists once something has explicitly written one
+    (a normal dashboard run, or the external scripts/fetch_nfl_slates.py
+    -- see that script's docstring for why an external fetch is needed
+    at all), so ordinary local dev behaves exactly as before: no
+    snapshot -> straight to build_pool()'s live fetch, unchanged."""
+    from nfl.pool_cache import load_fresh_cached_pool
+    cached = load_fresh_cached_pool(slate_date, draft_group_id)
+    if cached is not None:
+        return cached
+    return build_pool(slate_date, draft_group_id, sport_code)

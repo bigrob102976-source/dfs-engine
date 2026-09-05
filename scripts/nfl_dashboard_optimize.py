@@ -38,13 +38,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from draftkings_unofficial import collector
 from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
 from nfl.game_context_builder import build_nfl_game_context
 from nfl.optimizer_models import NflOptimizerPlayer, NflOptimizerSettings, NflStackConfig
 from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
 from nfl.ownership_models import NflOwnershipInputPlayer
-from nfl.pool_builder import NflPoolBuildError, build_pool
+from nfl.pool_builder import NflPoolBuildError, build_pool_preferring_cache
+from nfl.pool_cache import NflSlateDiscoveryError, resolve_nfl_slate_date
 from nfl.solver import NflProjectionCoverageError, generate_lineups
 from nfl.constraints import NflOptimizerConfigError
 from nfl.status import DEFAULT_EXCLUDE_BY_STATUS, normalize_status
@@ -63,20 +63,19 @@ def _parse_stack(raw: dict) -> NflStackConfig:
 
 
 def main(draft_group_id: int, settings_raw: dict) -> int:
-    universe = collector.collect_sport_universe("NFL")
-    if universe.status != collector.STATUS_OK:
-        print(json.dumps({"error": f"DISCOVERY_FAILED: {universe.status} ({universe.error})"}))
+    try:
+        slate_date = resolve_nfl_slate_date(draft_group_id)
+    except NflSlateDiscoveryError as exc:
+        print(json.dumps({"error": f"DISCOVERY_FAILED: {exc}"}))
         return 1
-    slate = next((s for s in universe.slates if s.draft_group_id == draft_group_id), None)
-    if slate is None:
+    if slate_date is None:
         print(json.dumps({"error": f"DraftGroup {draft_group_id} not found in current NFL universe."}))
         return 1
-    slate_date = collector.slate_local_date(slate)
 
     mode = settings_raw.get("mode", "roster_feasibility")
 
     try:
-        pool = build_pool(slate_date, draft_group_id, sport_code="NFL")
+        pool = build_pool_preferring_cache(slate_date, draft_group_id, sport_code="NFL")
     except NflPoolBuildError as exc:
         print(json.dumps({"error": f"BUILD_POOL_FAILED: {exc}"}))
         return 1

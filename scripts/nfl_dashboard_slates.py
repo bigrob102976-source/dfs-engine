@@ -14,11 +14,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from draftkings_unofficial import collector
+from nfl.pool_cache import load_fresh_cached_universe
 
 CLASSIC_GAME_TYPE_ID = 1
 
 
 def main() -> int:
+    cached = load_fresh_cached_universe()
+    if cached is not None:
+        print(json.dumps({"slates": cached}))
+        return 0
+
     universe = collector.collect_sport_universe("NFL")
     if universe.status != collector.STATUS_OK:
         print(json.dumps({"error": f"DISCOVERY_FAILED: {universe.status} ({universe.error})"}))

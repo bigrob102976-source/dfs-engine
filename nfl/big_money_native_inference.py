@@ -35,7 +35,7 @@ from historical_nfl.team_offense_rolling import compute_team_offense_rolling_fea
 from historical_nfl.usage_identity_bridge import build_pfr_to_gsis_bridge
 from historical_nfl.usage_normalize import build_usage_records
 from historical_nfl import nflverse_client as nc
-from nfl.pool_builder import build_pool
+from nfl.pool_builder import build_pool_preferring_cache
 from nfl.projection_features import build_projection_features
 from nfl.projection_models import NflProjectionRecord
 
@@ -115,7 +115,7 @@ def build_current_nfl_projection_features(draft_group_id: int, slate_date: str):
     for gsis_id, weeks_map in cur_dk_points.items():
         dk_points_by_gsis_week.setdefault(gsis_id, {}).update({continuous_week(current_season, w, current_season): v for w, v in weeks_map.items()})
 
-    pool = build_pool(slate_date, draft_group_id, sport_code="NFL")
+    pool = build_pool_preferring_cache(slate_date, draft_group_id, sport_code="NFL")
     crosswalk = load_crosswalk()
     offense_players = [p for p in pool.players if not p.is_team_entity]
     dst_players = [p for p in pool.players if p.is_team_entity]
