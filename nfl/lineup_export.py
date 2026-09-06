@@ -112,6 +112,42 @@ def export_saved_lineups_to_csv(saved_lineups: List[NflSavedLineup]) -> str:
     return buffer.getvalue()
 
 
+def inline_assignments_to_dk_row(assignments: List[dict]) -> List[str]:
+    """NFL public access -- same DK_NFL_CSV_HEADER row shape as
+    lineup_to_dk_row()/saved_lineup_to_dk_row(), but built directly from
+    RAW assignment dicts exactly as scripts/nfl_dashboard_optimize.py's
+    own JSON response already returns them (slot, name,
+    draftkings_player_id) -- no NflLineup/NflOptimizerPlayer pool
+    reconstruction, no database, no persisted record.
+
+    This is the ONLY export path an anonymous/public caller may use: it
+    can only ever format data the caller already possesses from their
+    own just-completed optimizer call in the SAME request/response
+    cycle, never anyone else's stored data -- there is nothing here to
+    look up by id, so there is nothing to leak."""
+    by_slot = {a.get("slot"): a for a in assignments}
+    row: List[str] = []
+    for label in _SLOT_LABEL_ORDER:
+        a = by_slot.get(label)
+        if a is None or not a.get("draftkings_player_id") or not a.get("name"):
+            raise LineupExportError(f"Lineup is missing slot {label!r} -- refusing to export an incomplete roster.")
+        row.append(format_dk_player_cell(a["name"], a["draftkings_player_id"]))
+    return row
+
+
+def export_inline_lineups_to_csv(lineups: List[dict]) -> str:
+    """export_lineups_to_csv()'s stateless/public equivalent -- each
+    entry in `lineups` is a raw {"assignments": [...]} dict, not an
+    NflLineup, and nothing here ever touches a database or persisted
+    record. See inline_assignments_to_dk_row()'s docstring."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(DK_NFL_CSV_HEADER)
+    for lineup in lineups:
+        writer.writerow(inline_assignments_to_dk_row(lineup.get("assignments", [])))
+    return buffer.getvalue()
+
+
 def fill_dk_template_csv_from_saved(template_csv_text: str, saved_lineups: List[NflSavedLineup]) -> str:
     """fill_dk_template_csv()'s saved-lineup equivalent -- same real DK
     template-filling behavior, sourced from persisted snapshots instead

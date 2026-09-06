@@ -37,9 +37,9 @@ describe("GET /api/dev/auto-login", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
 
-    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fdashboard%2Fnfl"));
+    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fnfl"));
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("http://localhost:3000/dashboard/nfl");
+    expect(res.headers.get("location")).toBe("http://localhost:3000/nfl");
     expect(cookieStore.has("bigmoney_session")).toBe(true);
   });
 
@@ -47,7 +47,7 @@ describe("GET /api/dev/auto-login", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "false");
 
-    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fdashboard%2Fnfl"));
+    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fnfl"));
     expect(res.headers.get("location")).toBe("http://localhost:3000/login");
     expect(cookieStore.size).toBe(0);
   });
@@ -56,7 +56,7 @@ describe("GET /api/dev/auto-login", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
 
-    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fdashboard%2Fnfl"));
+    const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=%2Fnfl"));
     expect(res.headers.get("location")).toBe("http://localhost:3000/login");
     expect(cookieStore.size).toBe(0);
   });
@@ -66,6 +66,6 @@ describe("GET /api/dev/auto-login", () => {
     vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
 
     const res = await GET(req("http://localhost:3000/api/dev/auto-login?next=https%3A%2F%2Fevil.example.com"));
-    expect(res.headers.get("location")).toBe("http://localhost:3000/dashboard/nfl");
+    expect(res.headers.get("location")).toBe("http://localhost:3000/nfl");
   });
 });

@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 const TABS = [
-  { href: "/dashboard/nfl", label: "Overview" },
-  { href: "/dashboard/nfl/players", label: "Players" },
-  { href: "/dashboard/nfl/usage", label: "Usage" },
-  { href: "/dashboard/nfl/matchups", label: "Matchups" },
-  { href: "/dashboard/nfl/projections", label: "Projections" },
-  { href: "/dashboard/nfl/optimizer", label: "Optimizer" },
-  { href: "/dashboard/nfl/lineups", label: "Lineups" },
-  { href: "/dashboard/nfl/saved", label: "Saved / Late Swap" },
+  { href: "/nfl", label: "Overview" },
+  { href: "/nfl/players", label: "Players" },
+  { href: "/nfl/usage", label: "Usage" },
+  { href: "/nfl/matchups", label: "Matchups" },
+  { href: "/nfl/projections", label: "Projections" },
+  { href: "/nfl/optimizer", label: "Optimizer" },
+  { href: "/nfl/lineups", label: "Lineups" },
+  { href: "/nfl/saved", label: "Saved / Late Swap" },
 ];
 
 /** NFL UI M1 -- the NFL workspace's own tab bar. Lives INSIDE each NFL
@@ -28,7 +28,7 @@ export function NflTabs() {
   return (
     <nav className="mb-4 flex flex-wrap gap-1 border-b border-border-subtle pb-0" aria-label="NFL workspace">
       {TABS.map((tab) => {
-        const active = tab.href === "/dashboard/nfl" ? pathname === tab.href : pathname.startsWith(tab.href);
+        const active = tab.href === "/nfl" ? pathname === tab.href : pathname.startsWith(tab.href);
         return (
           <Link
             key={tab.href}

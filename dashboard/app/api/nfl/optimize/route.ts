@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
+
+// NFL public access, Phase 6 -- the most expensive NFL endpoint (a real
+// CP-SAT solve), now reachable with no account at all. Bounds abuse
+// without an account/session to key on: 20 solves per IP per 5 minutes
+// is comfortably above normal interactive use (build, tweak settings,
+// rebuild) while still refusing an unbounded automated flood.
+const OPTIMIZE_RATE_LIMIT_MAX = 20;
+const OPTIMIZE_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 
 interface StackRequestBody {
   qbStackMode?: "off" | "single" | "double";
@@ -60,9 +68,16 @@ function sanitizeStack(raw: StackRequestBody | undefined): Record<string, unknow
 // Settings are forwarded as ONE JSON argv element (not many positional
 // args) -- see scripts/nfl_dashboard_optimize.py's own docstring for
 // the exact contract.
+//
+// NFL public access -- no login required. This route never reads or
+// writes anything scoped to a user (no user.id anywhere in this file);
+// it is pure request-in/response-out computation, so opening it to
+// anonymous callers exposes no one's private data. Rate-limited below
+// since it's now reachable without an account.
 export async function POST(request: Request) {
-  const userOrRes = await requireAuthApi();
-  if (userOrRes instanceof NextResponse) return userOrRes;
+  if (!checkRateLimit(`nfl-optimize:${getClientIp(request)}`, OPTIMIZE_RATE_LIMIT_MAX, OPTIMIZE_RATE_LIMIT_WINDOW_MS)) {
+    return NextResponse.json({ error: "Too many optimizer requests. Please wait a few minutes and try again." }, { status: 429 });
+  }
 
   let body: OptimizeRequestBody;
   try {

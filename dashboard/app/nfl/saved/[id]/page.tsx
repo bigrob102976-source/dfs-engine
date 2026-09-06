@@ -26,6 +26,10 @@ function LateSwapContent() {
     setError(null);
     try {
       const lineupRes = await fetch(`/api/nfl/lineups/${params.id}`);
+      if (lineupRes.status === 401) {
+        setError("Sign in to save lineups and use persistent Late Swap.");
+        return;
+      }
       const lineupJson = await lineupRes.json();
       if (!lineupRes.ok) {
         setError(lineupJson.error || "Saved lineup not found.");
@@ -85,7 +89,7 @@ function LateSwapContent() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <SecondaryButton onClick={() => router.push(`/dashboard/nfl/saved?draftGroupId=${draftGroupId}`)} className="px-2 py-1 text-xs">
+        <SecondaryButton onClick={() => router.push(`/nfl/saved?draftGroupId=${draftGroupId}`)} className="px-2 py-1 text-xs">
           ← Back to Saved Lineups
         </SecondaryButton>
         <PrimaryButton onClick={applySwap} disabled={busy || preview.fully_locked} className="px-3 py-1.5 text-xs">

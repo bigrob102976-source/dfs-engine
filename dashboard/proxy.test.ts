@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { proxy } from "./proxy";
 
@@ -87,57 +87,46 @@ describe("proxy (cheap Edge session-cookie gate)", () => {
     expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
   });
 
-  describe("NFL local dev auto-login intercept", () => {
-    afterEach(() => {
-      vi.unstubAllEnvs();
+  it("never redirects /api/dev/auto-login itself, even without a cookie -- it must be reachable to establish a session", () => {
+    const res = proxy(requestFor("/api/dev/auto-login"));
+    expect(res.status).toBe(200);
+  });
+
+  describe("NFL public access", () => {
+    it("never redirects the bare root path, even without a cookie -- it redirects on to /nfl (app/page.tsx)", () => {
+      const res = proxy(requestFor("/"));
+      expect(res.status).toBe(200);
     });
 
-    it("dev+flag=true, cookie-less /dashboard/nfl request: redirects to /api/dev/auto-login with next=", () => {
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
+    it("never redirects /nfl itself, even without a cookie", () => {
+      const res = proxy(requestFor("/nfl"));
+      expect(res.status).toBe(200);
+    });
 
-      const res = proxy(requestFor("/dashboard/nfl/players"));
+    it("never redirects any /nfl/* subpage, even without a cookie", () => {
+      for (const path of ["/nfl/players", "/nfl/optimizer", "/nfl/lineups", "/nfl/saved", "/nfl/saved/some-id"]) {
+        const res = proxy(requestFor(path));
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("never redirects /api/nfl/* routes, even without a cookie -- real auth (or its absence) is enforced by the route handler, not this cheap gate", () => {
+      for (const path of ["/api/nfl/data", "/api/nfl/slates", "/api/nfl/optimize", "/api/nfl/lineups", "/api/nfl/lineups/some-id", "/api/nfl/lineups/some-id/late-swap", "/api/nfl/export"]) {
+        const res = proxy(requestFor(path));
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("does NOT make /dashboard/nfl (the old path) public -- NFL lives at /nfl now, nothing should still be served from the old prefix", () => {
+      const res = proxy(requestFor("/dashboard/nfl"));
       expect(res.status).toBe(307);
-      const location = new URL(res.headers.get("location")!);
-      expect(location.pathname).toBe("/api/dev/auto-login");
-      expect(location.searchParams.get("next")).toBe("/dashboard/nfl/players");
-    });
-
-    it("dev+flag=true, session cookie already present: passes through untouched, no auto-login redirect", () => {
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
-
-      const res = proxy(requestFor("/dashboard/nfl", "any-cookie-value"));
-      expect(res.status).toBe(200);
-    });
-
-    it("dev+flag=false: falls through to the normal /login redirect", () => {
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "false");
-
-      const res = proxy(requestFor("/dashboard/nfl"));
       expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
     });
 
-    it("production+flag=true: falls through to the normal /login redirect -- production is never intercepted", () => {
-      vi.stubEnv("NODE_ENV", "production");
-      vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
-
-      const res = proxy(requestFor("/dashboard/nfl"));
+    it("does not widen public access to bare /dashboard or other MLB dashboard paths", () => {
+      const res = proxy(requestFor("/dashboard"));
+      expect(res.status).toBe(307);
       expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
-    });
-
-    it("dev+flag=true, but a non-NFL dashboard path: still falls through to /login, unaffected", () => {
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("LOCAL_DEV_AUTO_LOGIN", "true");
-
-      const res = proxy(requestFor("/dashboard/optimizer"));
-      expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
-    });
-
-    it("never redirects /api/dev/auto-login itself, even without a cookie -- it must be reachable to establish the first session", () => {
-      const res = proxy(requestFor("/api/dev/auto-login"));
-      expect(res.status).toBe(200);
     });
   });
 });

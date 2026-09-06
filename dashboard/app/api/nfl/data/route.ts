@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +15,17 @@ export const dynamic = "force-dynamic";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<number, { data: Record<string, unknown>; fetchedAt: number }>();
 
-// NFL production access fix -- any authenticated member (not just
-// admin) may load real NFL slate data. Spawns the real Python
-// data-assembly bridge (scripts/nfl_dashboard_data.py) -- never
-// fabricates a value the script itself didn't produce. See that
-// script's own module docstring for exactly what "real" means for
-// every field.
+// NFL public access -- no login required (no user.id/role referenced
+// anywhere in this file; purely a draftGroupId-keyed real-data
+// assembly). Rate-limited since ?refresh=1 bypasses the cache above and
+// this ~15-30s assembly is now reachable with no account at all.
+const DATA_RATE_LIMIT_MAX = 20;
+const DATA_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
 export async function GET(request: Request) {
-  const userOrRes = await requireAuthApi();
-  if (userOrRes instanceof NextResponse) return userOrRes;
+  if (!checkRateLimit(`nfl-data:${getClientIp(request)}`, DATA_RATE_LIMIT_MAX, DATA_RATE_LIMIT_WINDOW_MS)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a few minutes and try again." }, { status: 429 });
+  }
 
   const { searchParams } = new URL(request.url);
   const draftGroupIdRaw = searchParams.get("draftGroupId");

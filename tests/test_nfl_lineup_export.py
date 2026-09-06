@@ -8,11 +8,13 @@ import pytest
 from nfl.lineup_export import (
     DK_NFL_CSV_HEADER,
     LineupExportError,
+    export_inline_lineups_to_csv,
     export_lineups_to_csv,
     export_saved_lineups_to_csv,
     fill_dk_template_csv,
     fill_dk_template_csv_from_saved,
     format_dk_player_cell,
+    inline_assignments_to_dk_row,
     lineup_to_dk_row,
     saved_lineup_to_dk_row,
 )
@@ -188,3 +190,49 @@ def test_fill_dk_template_csv_from_saved_handles_duplicate_columns():
     assert data_cells[0] == "555"
     assert data_cells[3] == "RB One (2)"
     assert data_cells[4] == "RB Two (3)"
+
+
+def _inline_assignments():
+    specs = [
+        ("QB", "1", "QB One"), ("RB1", "2", "RB One"), ("RB2", "3", "RB Two"),
+        ("WR1", "4", "WR One"), ("WR2", "5", "WR Two"), ("WR3", "6", "WR Three"),
+        ("TE", "7", "TE One"), ("FLEX", "8", "FLEX RB"), ("DST", "9", "Team DST"),
+    ]
+    return [{"slot": slot, "draftkings_player_id": pid, "name": name} for slot, pid, name in specs]
+
+
+class TestInlinePublicExport:
+    """NFL public access -- the stateless, request-scoped-only export
+    path an anonymous caller uses. Never touches a database or any
+    NflLineup/NflSavedLineup object -- only raw assignment dicts, exactly
+    as the optimizer's own JSON response already shapes them."""
+
+    def test_inline_assignments_to_dk_row_matches_header_order(self):
+        row = inline_assignments_to_dk_row(_inline_assignments())
+        assert row[0] == "QB One (1)"
+        assert row[1] == "RB One (2)"
+        assert row[2] == "RB Two (3)"
+        assert row[-1] == "Team DST (9)"
+
+    def test_inline_assignments_to_dk_row_raises_on_missing_slot(self):
+        assignments = [a for a in _inline_assignments() if a["slot"] != "DST"]
+        with pytest.raises(LineupExportError):
+            inline_assignments_to_dk_row(assignments)
+
+    def test_inline_assignments_to_dk_row_raises_on_missing_player_id(self):
+        assignments = _inline_assignments()
+        assignments[0] = {"slot": "QB", "name": "QB One"}
+        with pytest.raises(LineupExportError):
+            inline_assignments_to_dk_row(assignments)
+
+    def test_export_inline_lineups_to_csv_multiple_lineups(self):
+        csv_text = export_inline_lineups_to_csv([{"assignments": _inline_assignments()}, {"assignments": _inline_assignments()}])
+        lines = csv_text.strip("\n").split("\n")
+        assert lines[0] == ",".join(DK_NFL_CSV_HEADER)
+        assert len(lines) == 3
+
+    def test_export_inline_lineups_to_csv_never_touches_database_types(self):
+        """Sanity check that this path takes plain dicts -- no
+        NflSavedLineup/NflLineup import is even needed to call it."""
+        csv_text = export_inline_lineups_to_csv([{"assignments": _inline_assignments()}])
+        assert "QB One (1)" in csv_text

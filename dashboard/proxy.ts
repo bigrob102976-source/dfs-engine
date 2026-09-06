@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { isLocalDevAutoLoginEnabled } from "@/lib/auth/localDevGate";
-
 /**
  * Milestone 21: cheap, Edge-compatible UX gate -- replaces the old
  * single-shared-password check. This is NOT the security boundary: it
@@ -51,10 +49,29 @@ const PUBLIC_PATH_PREFIXES = [
   // redirect to /login whenever NODE_ENV isn't development or the flag
   // isn't set, exactly like every other route it doesn't touch.
   "/api/dev/auto-login",
+  // NFL public access: the whole NFL customer product (dashboard,
+  // slates, player pool, optimizer, build/generate) is intentionally
+  // reachable with no login at all -- see app/nfl/layout.tsx and
+  // app/api/nfl/*'s own docstrings for exactly which NFL API routes
+  // still require auth (saved lineups / late swap / persisted-lineup
+  // export -- all user-owned data, gated by their own requireAuthApi()
+  // calls regardless of what this cheap proxy-level check does). This
+  // only skips the redirect-to-login; it grants no route anything it
+  // doesn't already independently allow.
+  "/nfl",
+  "/api/nfl",
 ];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Root path redirects to /nfl (see app/page.tsx) -- must be reachable
+  // with no session cookie for that redirect to ever complete for an
+  // anonymous visitor. An exact match, never a prefix: "/" would
+  // otherwise match every path via startsWith and make everything public.
+  if (pathname === "/") {
+    return NextResponse.next();
+  }
 
   if (PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
@@ -63,19 +80,6 @@ export function proxy(request: NextRequest) {
   const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   if (hasSessionCookie) {
     return NextResponse.next();
-  }
-
-  // NFL local dev auto-login: only ever reachable when BOTH
-  // NODE_ENV=development AND LOCAL_DEV_AUTO_LOGIN=true (the two-part
-  // gate in lib/auth/localDevGate.ts, itself Edge-safe/dependency-free
-  // like this whole file). Scoped to /dashboard/nfl only -- MLB and
-  // every other path always falls through to the /login redirect
-  // below, completely unchanged, in every environment including this
-  // one whenever the flag is off.
-  if (pathname.startsWith("/dashboard/nfl") && isLocalDevAutoLoginEnabled()) {
-    const autoLoginUrl = new URL("/api/dev/auto-login", request.url);
-    autoLoginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(autoLoginUrl);
   }
 
   const loginUrl = new URL("/login", request.url);

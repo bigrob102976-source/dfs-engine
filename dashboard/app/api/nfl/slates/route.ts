@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
 
@@ -9,11 +8,10 @@ export const dynamic = "force-dynamic";
 // NFL UI M1 -- real DraftKings NFL Classic slate discovery (never
 // hardcoded to one DraftGroup; scripts/nfl_dashboard_slates.py is the
 // same real discovery path scripts/nfl_dashboard_data.py itself uses).
-// NFL production access fix -- any authenticated member may discover slates.
+// NFL public access -- no login required; purely a stateless discovery
+// call, and the underlying script already prefers a cached snapshot
+// (nfl/pool_cache.py) over a live DraftKings call in the common case.
 export async function GET() {
-  const userOrRes = await requireAuthApi();
-  if (userOrRes instanceof NextResponse) return userOrRes;
-
   const result = await runPythonScript("scripts/nfl_dashboard_slates.py", []);
   const parsed = parseLastJsonLine(result.stdout);
 

@@ -16,6 +16,8 @@ function LineupsContent() {
   const { data } = useNflData(draftGroupId);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [exportingIndex, setExportingIndex] = useState<number | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   if (!result) {
     return (
@@ -52,6 +54,10 @@ function LineupsContent() {
         body: JSON.stringify({ draftGroupId, slateDate: data.slate_date, mode: result!.mode, stackConfig: {}, slots }),
       });
       const json = await res.json();
+      if (res.status === 401) {
+        setSaveMessage("Sign in to save lineups and use persistent Late Swap.");
+        return;
+      }
       if (!res.ok || json.error) {
         setSaveMessage(`Lineup ${lineup.index + 1}: ${json.error || "save failed."}`);
         return;
@@ -64,6 +70,39 @@ function LineupsContent() {
     }
   }
 
+  // NFL public access -- exports the lineup exactly as currently
+  // generated, via the stateless /api/nfl/export/public route (no
+  // login, no database, no persisted saved-lineup record). This is a
+  // DIFFERENT export path from the Saved Lineups page's export, which
+  // operates on persisted, user-owned lineups and stays authenticated.
+  async function exportLineup(lineup: NflLineup) {
+    setExportingIndex(lineup.index);
+    setExportMessage(null);
+    try {
+      const res = await fetch("/api/nfl/export/public", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineups: [{ assignments: lineup.assignments }] }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setExportMessage(`Lineup ${lineup.index + 1}: ${json.error || "export failed."}`);
+        return;
+      }
+      const blob = new Blob([json.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `nfl-lineup-${draftGroupId}-${lineup.index + 1}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportMessage(err instanceof Error ? err.message : "Unknown error exporting lineup.");
+    } finally {
+      setExportingIndex(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-text-muted">
@@ -71,6 +110,7 @@ function LineupsContent() {
         {result.stopped_reason && <span className="ml-2 text-yellow">{result.stopped_reason}</span>}
       </p>
       {saveMessage && <p className="text-xs text-accent">{saveMessage}</p>}
+      {exportMessage && <p className="text-xs text-accent">{exportMessage}</p>}
       {result.lineups.map((lineup) => (
         <DataCard key={lineup.index} title={`Lineup ${lineup.index + 1}`}>
           <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-text-muted">
@@ -105,7 +145,10 @@ function LineupsContent() {
                 Total Leverage: <span className="font-semibold text-text">{fmt(lineup.total_leverage_score)}</span>
               </span>
             )}
-            <PrimaryButton onClick={() => saveLineup(lineup)} disabled={!data || savingIndex === lineup.index} className="ml-auto px-2 py-1 text-[11px]">
+            <PrimaryButton onClick={() => exportLineup(lineup)} disabled={exportingIndex === lineup.index} className="ml-auto px-2 py-1 text-[11px]">
+              {exportingIndex === lineup.index ? "Exporting…" : "Export CSV"}
+            </PrimaryButton>
+            <PrimaryButton onClick={() => saveLineup(lineup)} disabled={!data || savingIndex === lineup.index} className="px-2 py-1 text-[11px]">
               {savingIndex === lineup.index ? "Saving…" : "Save Lineup"}
             </PrimaryButton>
           </div>

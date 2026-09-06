@@ -19,6 +19,10 @@ function SavedLineupsContent() {
     setError(null);
     try {
       const res = await fetch(`/api/nfl/lineups?draftGroupId=${draftGroupId}`);
+      if (res.status === 401) {
+        setError("Sign in to save lineups and use persistent Late Swap.");
+        return;
+      }
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || "Failed to load saved lineups.");
@@ -106,7 +110,7 @@ function SavedLineupsContent() {
                   <td className="px-2 py-1.5 text-text-muted">{fmtSalary(totalSalary)}</td>
                   <td className="px-2 py-1.5">
                     <div className="flex gap-1.5">
-                      <Link href={`/dashboard/nfl/saved/${lu.id}?draftGroupId=${draftGroupId}`}>
+                      <Link href={`/nfl/saved/${lu.id}?draftGroupId=${draftGroupId}`}>
                         <PrimaryButton className="px-2 py-0.5 text-[11px]">Late Swap</PrimaryButton>
                       </Link>
                       <SecondaryButton onClick={() => exportOne(lu.id)} disabled={busyId === lu.id} className="px-2 py-0.5 text-[11px]">
