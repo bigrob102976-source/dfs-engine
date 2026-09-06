@@ -3,9 +3,5 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "Dockerfile"
-  },
-  "deploy": {
-    "preDeployCommand": ["npm run db:migrate:postgres"],
-    "startCommand": ""
   }
 }
