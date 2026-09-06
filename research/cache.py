@@ -27,6 +27,37 @@ DEFAULT_STATCAST_CACHE_ROOT = Path(__file__).resolve().parent.parent / "data" / 
 DEFAULT_RESULTS_CACHE_ROOT = Path(__file__).resolve().parent.parent / "data" / "cache" / "results"
 
 
+def _path_for(cache_root: Path, date: str, cache_key: str) -> Path:
+    return Path(cache_root) / date / f"{cache_key}.json"
+
+
+def read(cache_root: Path, date: str, cache_key: str) -> Optional[object]:
+    """Read-only cache lookup for (date, cache_key) -- None if not
+    cached yet. Used by callers that want to check which of several
+    keys are already cached BEFORE deciding what (if anything) to fetch
+    -- e.g. a bulk/batched fetch that only needs to request whichever
+    player IDs aren't already on disk (see research/collector.py's
+    batched batter/pitcher stats collection)."""
+    path = _path_for(cache_root, date, cache_key)
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write(cache_root: Path, date: str, cache_key: str, data: object) -> None:
+    """Write-only cache store for (date, cache_key). A None `data` is
+    never written (mirrors get_or_fetch's own "never cache a failure"
+    rule) so a transient miss doesn't get "stuck" for the rest of the
+    day."""
+    if data is None:
+        return
+    path = _path_for(cache_root, date, cache_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
 def get_or_fetch(
     cache_root: Path,
     date: str,
@@ -40,14 +71,10 @@ def get_or_fetch(
     cached, so a transient failure doesn't get "stuck" for the rest of
     the day -- the next call simply tries again.
     """
-    path = Path(cache_root) / date / f"{cache_key}.json"
-    if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+    cached = read(cache_root, date, cache_key)
+    if cached is not None:
+        return cached
 
     data = fetch_fn()
-    if data is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(data, f)
+    write(cache_root, date, cache_key, data)
     return data

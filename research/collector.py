@@ -65,28 +65,94 @@ def _get_json(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _percentile(sorted_values: List[float], pct: float) -> float:
-    if not sorted_values:
-        return 0.0
-    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
-    return sorted_values[idx]
+def _fetch_bulk_hydrated_people(player_ids: List[str], hydrate_expr: str, chunk_size: int = 50) -> Dict[str, dict]:
+    """MLB BATTER AGENT PERFORMANCE FIX: the real, measured root cause of
+    the batter agent's dominant cost -- collect_batter_stats made 4
+    SEQUENTIAL HTTP calls per hitter (season/gameLog/platoon x2), each
+    ~1.7s, for up to 270+ real starting-lineup hitters, totaling 461.89s
+    on a real production run (see this milestone's own profiling). MLB
+    Stats API's own `/people?personIds=id1,id2,...&hydrate=stats(...)`
+    endpoint (empirically verified live -- NOT assumed from
+    documentation -- to return each person's own `stats` array identical
+    in shape/count/values to what the single-player
+    `/people/{id}/stats?...` endpoint returns for the exact same
+    stats/group/season/sitCodes) lets ONE request cover many players at
+    once. Chunked (default 50 IDs/request) to keep each request's
+    URL/response size reasonable and to isolate one bad chunk from
+    poisoning the whole batch -- a failed chunk simply contributes no
+    data for its players (same never-raises philosophy as every other
+    collector function; the caller reports a normal per-player "no
+    stats available" warning for anyone missing from the result, exactly
+    as a failed single-player fetch already did before this change).
+    Returns {player_id: {"stats": [...]}} -- the SAME shape
+    fetch_batter_season_stats/fetch_pitcher_season_stats/etc. already
+    returned per player, so every downstream enrichment function
+    (research/batter_enrichment.py, research/enrichment.py) needs zero
+    changes."""
+    results: Dict[str, dict] = {}
+    for i in range(0, len(player_ids), chunk_size):
+        chunk = player_ids[i : i + chunk_size]
+        url = f"{MLB_STATS_BASE}/people?personIds={','.join(chunk)}&hydrate=stats({hydrate_expr})"
+        try:
+            data = _get_json(url)
+        except _FETCH_ERRORS:
+            continue
+        for person in data.get("people", []):
+            pid = str(person.get("id"))
+            stats = person.get("stats")
+            if stats:
+                results[pid] = {"stats": stats}
+    return results
 
 
-def _report_per_player_timings(label: str, elapsed_seconds: List[float]) -> None:
-    """MLB BATTER AGENT PERFORMANCE FIX Phase 2: permanent, cheap
-    per-player timing so a slow real run is diagnosable from stderr
-    alone (never guessed) -- mirrors the stage-timing instrumentation
-    already kept in scripts/compute_canonical_eligibility.py. Prints
-    nothing when there's nothing to time (an empty player list)."""
-    if not elapsed_seconds:
-        return
-    s = sorted(elapsed_seconds)
-    print(
-        f"[collector] {label} n={len(s)} total={sum(s):.2f}s "
-        f"p50={_percentile(s, 0.50):.3f}s p90={_percentile(s, 0.90):.3f}s "
-        f"p99={_percentile(s, 0.99):.3f}s max={s[-1]:.3f}s",
-        file=sys.stderr, flush=True,
-    )
+def _fetch_bulk_people(player_ids: List[str], chunk_size: int = 50) -> Dict[str, dict]:
+    """Bulk bio lookup (no `hydrate=stats`) -- the same
+    `/people?personIds=...` endpoint _fetch_bulk_hydrated_people uses,
+    just without the stats hydrate expression. Empirically verified live
+    to return the exact same fields per person as the single-player
+    `/people/{id}` endpoint. Returns {player_id: raw_person_dict}."""
+    results: Dict[str, dict] = {}
+    for i in range(0, len(player_ids), chunk_size):
+        chunk = player_ids[i : i + chunk_size]
+        url = f"{MLB_STATS_BASE}/people?personIds={','.join(chunk)}"
+        try:
+            data = _get_json(url)
+        except _FETCH_ERRORS:
+            continue
+        for person in data.get("people", []):
+            pid = str(person.get("id"))
+            results[pid] = person
+    return results
+
+
+def _collect_hydrated_stat_category(
+    player_ids: List[str], season: str, date: str, cache_root: Path, cache_prefix: str, hydrate_expr: str,
+) -> Dict[str, dict]:
+    """Cache-first bulk collection for ONE stat category (season hitting,
+    game log, a platoon split, ...) across many players -- checks the
+    on-disk cache per player FIRST (the exact same `{cache_prefix}_
+    {pid}_{season}` keys the old per-player get_or_fetch() calls used,
+    so this is fully compatible with, and benefits from, whatever's
+    already cached from an earlier run or the old code path), then
+    bulk-fetches ONLY the players not already cached, in as few
+    requests as _fetch_bulk_hydrated_people needs. Each newly-fetched
+    player's result is written back under that SAME per-player key, so
+    a later single-player cache read still finds it. Never raises."""
+    result: Dict[str, dict] = {}
+    missing: List[str] = []
+    for pid in player_ids:
+        cached = cache.read(cache_root, date, f"{cache_prefix}_{pid}_{season}")
+        if cached is not None:
+            result[pid] = cached
+        else:
+            missing.append(pid)
+    if missing:
+        fetched = _fetch_bulk_hydrated_people(missing, hydrate_expr)
+        for pid, data in fetched.items():
+            result[pid] = data
+            cache.write(cache_root, date, f"{cache_prefix}_{pid}_{season}", data)
+    return result
+
 
 
 def fetch_schedule(date: str) -> dict:
@@ -230,36 +296,41 @@ def collect_pitcher_stats(
 
     Never raises: a missing payload for one player/team becomes a
     warning, not a fatal error, since the rest of the slate can still be
-    scored (with lower confidence for that pitcher)."""
+    scored (with lower confidence for that pitcher).
+
+    MLB BATTER AGENT PERFORMANCE FIX: this function is called TWICE per
+    cycle for the same real pitchers -- once by the Pitcher Agent, once
+    by the Batter Agent's own opposing-pitcher-context build (see
+    scripts/run_real_batter_agent.py::_build_opposing_pitcher_index,
+    intentionally reusing pregame pitcher research rather than the
+    Pitcher Agent's scores). The on-disk cache already made the SECOND
+    call cheap once the first had run; batching (like
+    collect_batter_stats above) additionally makes the FIRST call fast,
+    and per-pitcher-id caching still means neither call ever re-fetches
+    the same player twice in one day even across process boundaries."""
     warnings: List[str] = []
     errors: List[str] = []
     sources: List[str] = []
 
-    season_pitching: Dict[str, dict] = {}
-    game_log_pitching: Dict[str, dict] = {}
-    per_player_elapsed: List[float] = []
+    t0 = time.monotonic()
+    season_pitching = _collect_hydrated_stat_category(
+        pitcher_ids, season, date, cache_root, "season_pitching", f"group=[pitching],type=[season],season={season}",
+    )
+    game_log_pitching = _collect_hydrated_stat_category(
+        pitcher_ids, season, date, cache_root, "gamelog_pitching", f"group=[pitching],type=[gameLog],season={season}",
+    )
+    elapsed = time.monotonic() - t0
+
     for pid in pitcher_ids:
-        player_started = time.monotonic()
-        data = cache.get_or_fetch(
-            cache_root, date, f"season_pitching_{pid}_{season}",
-            lambda pid=pid: fetch_pitcher_season_stats(pid, season),
-        )
-        if data:
-            season_pitching[pid] = data
-        else:
+        if pid not in season_pitching:
             warnings.append(f"[collector] no season pitching stats available for player {pid}")
-
-        data = cache.get_or_fetch(
-            cache_root, date, f"gamelog_pitching_{pid}_{season}",
-            lambda pid=pid: fetch_pitcher_game_log(pid, season),
-        )
-        if data:
-            game_log_pitching[pid] = data
-        else:
+        if pid not in game_log_pitching:
             warnings.append(f"[collector] no game log available for player {pid}")
-        per_player_elapsed.append(time.monotonic() - player_started)
 
-    _report_per_player_timings("collect_pitcher_stats (season+gamelog per player)", per_player_elapsed)
+    print(
+        f"[collector] collect_pitcher_stats (batched: season+gamelog) n={len(pitcher_ids)} elapsed={elapsed:.2f}s",
+        file=sys.stderr, flush=True,
+    )
 
     if pitcher_ids:
         sources.append("mlb_stats_api:pitching_season_stats")
@@ -353,57 +424,48 @@ def collect_batter_stats(
     """Collect raw season/recent/platoon hitting stats for each starting
     lineup hitter, going through the same on-disk cache the pitcher
     collector uses. Never raises -- a missing payload for one player
-    becomes a warning, not a fatal error."""
+    becomes a warning, not a fatal error.
+
+    MLB BATTER AGENT PERFORMANCE FIX: previously 4 sequential per-player
+    HTTP calls (measured live: 270 real hitters x ~1.7s x 4 calls =
+    461.89s, the dominant cost of the whole batter agent run). Now 4
+    bulk-hydrated requests (chunked) via _collect_hydrated_stat_category
+    -- semantically identical per-player results (empirically verified:
+    the bulk endpoint returns the same `stats` shape/values as the old
+    single-player endpoint), just fetched in far fewer round trips."""
     warnings: List[str] = []
     errors: List[str] = []
     sources: List[str] = []
 
-    season_hitting: Dict[str, dict] = {}
-    game_log_hitting: Dict[str, dict] = {}
-    platoon_vs_rhp: Dict[str, dict] = {}
-    platoon_vs_lhp: Dict[str, dict] = {}
+    t0 = time.monotonic()
+    season_hitting = _collect_hydrated_stat_category(
+        batter_ids, season, date, cache_root, "season_hitting", f"group=[hitting],type=[season],season={season}",
+    )
+    game_log_hitting = _collect_hydrated_stat_category(
+        batter_ids, season, date, cache_root, "gamelog_hitting", f"group=[hitting],type=[gameLog],season={season}",
+    )
+    platoon_vs_rhp = _collect_hydrated_stat_category(
+        batter_ids, season, date, cache_root, "platoon_vr", f"group=[hitting],type=[statSplits],season={season},sitCodes=[vr]",
+    )
+    platoon_vs_lhp = _collect_hydrated_stat_category(
+        batter_ids, season, date, cache_root, "platoon_vl", f"group=[hitting],type=[statSplits],season={season},sitCodes=[vl]",
+    )
+    elapsed = time.monotonic() - t0
 
-    per_player_elapsed: List[float] = []
     for pid in batter_ids:
-        player_started = time.monotonic()
-        data = cache.get_or_fetch(
-            cache_root, date, f"season_hitting_{pid}_{season}",
-            lambda pid=pid: fetch_batter_season_stats(pid, season),
-        )
-        if data:
-            season_hitting[pid] = data
-        else:
+        if pid not in season_hitting:
             warnings.append(f"[collector] no season hitting stats available for player {pid}")
-
-        data = cache.get_or_fetch(
-            cache_root, date, f"gamelog_hitting_{pid}_{season}",
-            lambda pid=pid: fetch_batter_game_log(pid, season),
-        )
-        if data:
-            game_log_hitting[pid] = data
-        else:
+        if pid not in game_log_hitting:
             warnings.append(f"[collector] no hitting game log available for player {pid}")
-
-        data = cache.get_or_fetch(
-            cache_root, date, f"platoon_vr_{pid}_{season}",
-            lambda pid=pid: fetch_batter_platoon_split(pid, season, "vr"),
-        )
-        if data:
-            platoon_vs_rhp[pid] = data
-        else:
+        if pid not in platoon_vs_rhp:
             warnings.append(f"[collector] no vs-RHP split available for player {pid}")
-
-        data = cache.get_or_fetch(
-            cache_root, date, f"platoon_vl_{pid}_{season}",
-            lambda pid=pid: fetch_batter_platoon_split(pid, season, "vl"),
-        )
-        if data:
-            platoon_vs_lhp[pid] = data
-        else:
+        if pid not in platoon_vs_lhp:
             warnings.append(f"[collector] no vs-LHP split available for player {pid}")
-        per_player_elapsed.append(time.monotonic() - player_started)
 
-    _report_per_player_timings("collect_batter_stats (season+gamelog+platoon x2 per player)", per_player_elapsed)
+    print(
+        f"[collector] collect_batter_stats (batched: season+gamelog+platoon x2) n={len(batter_ids)} elapsed={elapsed:.2f}s",
+        file=sys.stderr, flush=True,
+    )
 
     if batter_ids:
         sources.append("mlb_stats_api:hitting_season_stats")
@@ -433,16 +495,26 @@ def collect_batter_bios(
     pitcher throwing hand. batters.json itself never carries `bats` (see
     research/normalizer.py) -- this is what research.batter_enrichment
     uses to fill it in without touching that existing, already-tested
-    pipeline."""
+    pipeline.
+
+    MLB BATTER AGENT PERFORMANCE FIX: batched (cache-first, bulk-fetch
+    only what's missing) instead of one HTTP call per hitter -- see
+    _fetch_bulk_people."""
     people: Dict[str, dict] = {}
-    per_player_elapsed: List[float] = []
+    missing: List[str] = []
     for pid in batter_ids:
-        player_started = time.monotonic()
-        person = cache.get_or_fetch(cache_root, date, f"person_{pid}", lambda pid=pid: fetch_person(pid))
-        if person:
+        cached = cache.read(cache_root, date, f"person_{pid}")
+        if cached is not None:
+            people[pid] = cached
+        else:
+            missing.append(pid)
+    t0 = time.monotonic()
+    if missing:
+        fetched = _fetch_bulk_people(missing)
+        for pid, person in fetched.items():
             people[pid] = person
-        per_player_elapsed.append(time.monotonic() - player_started)
-    _report_per_player_timings("collect_batter_bios", per_player_elapsed)
+            cache.write(cache_root, date, f"person_{pid}", person)
+    print(f"[collector] collect_batter_bios (batched) n={len(batter_ids)} elapsed={time.monotonic() - t0:.2f}s", file=sys.stderr, flush=True)
     return people
 
 

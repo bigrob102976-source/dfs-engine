@@ -52,29 +52,6 @@ def _fetch_csv_rows(url: str) -> List[dict]:
     return list(csv.DictReader(io.StringIO(text)))
 
 
-def _percentile(sorted_values: List[float], pct: float) -> float:
-    if not sorted_values:
-        return 0.0
-    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
-    return sorted_values[idx]
-
-
-def _report_per_player_timings(label: str, elapsed_seconds: List[float]) -> None:
-    """MLB BATTER AGENT PERFORMANCE FIX Phase 2: permanent, cheap
-    per-player timing -- a local copy (not a cross-import from
-    research/collector.py) on purpose, matching this file's own existing
-    "stays fully decoupled" design note above for _fetch_csv_rows."""
-    if not elapsed_seconds:
-        return
-    s = sorted(elapsed_seconds)
-    print(
-        f"[statcast_batter_collector] {label} n={len(s)} total={sum(s):.2f}s "
-        f"p50={_percentile(s, 0.50):.3f}s p90={_percentile(s, 0.90):.3f}s "
-        f"p99={_percentile(s, 0.99):.3f}s max={s[-1]:.3f}s",
-        file=sys.stderr, flush=True,
-    )
-
-
 def fetch_expected_statistics(season: str) -> List[dict]:
     """League-wide xBA/xSLG/xwOBA/wOBA leaderboard for every hitter with
     any recorded plate appearances this season."""
@@ -111,6 +88,42 @@ def fetch_recent_pitch_level(player_id: str, date_gt: str, date_lt: str) -> List
         f"&min_pitches=0&min_results=0&type=details&batters_lookup%5B%5D={player_id}"
     )
     return _fetch_csv_rows(url)
+
+
+def _fetch_recent_pitch_level_bulk(player_ids: List[str], date_gt: str, date_lt: str, chunk_size: int = 25) -> Dict[str, List[dict]]:
+    """MLB BATTER AGENT PERFORMANCE FIX: Baseball Savant's own
+    `statcast_search/csv` endpoint accepts MULTIPLE `batters_lookup[]=`
+    values in one request (empirically verified live -- NOT assumed
+    from documentation -- a 3-player request returned each player's
+    full, correct row set, each row tagged with its own real `batter`
+    column matching the requested id). Chunked (default 25 players per
+    request, smaller than the MLB Stats API chunk size above since each
+    row here is a full pitch-level CSV record, not a small JSON stat
+    line) so one request's response stays a reasonable size and one bad
+    chunk can't poison the whole batch. Splits the combined CSV rows
+    back into the exact SAME {player_id: [row, ...]} shape
+    fetch_recent_pitch_level already returned per player, so downstream
+    enrichment needs no changes."""
+    results: Dict[str, List[dict]] = {}
+    season_tag = date_lt.split("-")[0]
+    for i in range(0, len(player_ids), chunk_size):
+        chunk = player_ids[i : i + chunk_size]
+        lookup_params = "&".join(f"batters_lookup%5B%5D={pid}" for pid in chunk)
+        url = (
+            f"{BASE_URL}/statcast_search/csv?all=true&hfGT=R%7C&hfSea={season_tag}%7C"
+            f"&player_type=batter&game_date_gt={date_gt}&game_date_lt={date_lt}"
+            f"&group_by=name&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc"
+            f"&min_pitches=0&min_results=0&type=details&{lookup_params}"
+        )
+        try:
+            rows = _fetch_csv_rows(url)
+        except _FETCH_ERRORS:
+            continue
+        for row in rows:
+            pid = row.get("batter")
+            if pid:
+                results.setdefault(pid, []).append(row)
+    return results
 
 
 def collect_batter_statcast_data(
@@ -150,25 +163,43 @@ def collect_batter_statcast_data(
     date_gt = (ref - timedelta(days=window_days + 1)).strftime("%Y-%m-%d")
     date_lt = ref.strftime("%Y-%m-%d")
 
+    # MLB BATTER AGENT PERFORMANCE FIX: previously one Savant CSV request
+    # PER HITTER (up to 270+ real hitters, each request downloading a
+    # full 14-day pitch-level export). Cache-first, then bulk-fetch only
+    # the players not already cached, via Savant's own multi-player
+    # `batters_lookup[]=` support (empirically verified -- see
+    # _fetch_recent_pitch_level_bulk). Each newly-fetched player's rows
+    # are cached individually under the SAME key format the old
+    # per-player fetch used, so a later single-player cache read (or a
+    # rerun for the same date) still finds it.
     recent_pitch_level: Dict[str, List[dict]] = {}
-    per_player_elapsed: List[float] = []
+    cache_key_for = lambda pid: f"batter_recent_pitch_level_{pid}_{date_gt}_{date_lt}"  # noqa: E731
+    missing: List[str] = []
     for pid in batter_ids:
-        player_started = time.monotonic()
-        try:
-            rows = cache.get_or_fetch(
-                cache_root, date, f"batter_recent_pitch_level_{pid}_{date_gt}_{date_lt}",
-                lambda pid=pid: fetch_recent_pitch_level(pid, date_gt, date_lt),
-            )
-        except _FETCH_ERRORS as exc:
-            rows = None
-            errors.append(f"[statcast_batter_collector] failed to fetch recent pitch-level data for player {pid}: {exc}")
-        if rows:
-            recent_pitch_level[pid] = rows
+        cached = cache.read(cache_root, date, cache_key_for(pid))
+        if cached is not None:
+            recent_pitch_level[pid] = cached
         else:
-            warnings.append(f"[statcast_batter_collector] no recent pitch-level data available for player {pid}")
-        per_player_elapsed.append(time.monotonic() - player_started)
+            missing.append(pid)
 
-    _report_per_player_timings("recent_pitch_level (per-hitter Savant CSV search)", per_player_elapsed)
+    t0 = time.monotonic()
+    if missing:
+        try:
+            fetched = _fetch_recent_pitch_level_bulk(missing, date_gt, date_lt)
+        except _FETCH_ERRORS as exc:
+            fetched = {}
+            errors.append(f"[statcast_batter_collector] failed to fetch recent pitch-level data in bulk: {exc}")
+        for pid in missing:
+            rows = fetched.get(pid)
+            if rows:
+                recent_pitch_level[pid] = rows
+                cache.write(cache_root, date, cache_key_for(pid), rows)
+            else:
+                warnings.append(f"[statcast_batter_collector] no recent pitch-level data available for player {pid}")
+    print(
+        f"[statcast_batter_collector] recent_pitch_level (batched) n={len(batter_ids)} elapsed={time.monotonic() - t0:.2f}s",
+        file=sys.stderr, flush=True,
+    )
 
     if batter_ids:
         sources.append("baseball_savant:recent_pitch_level")
