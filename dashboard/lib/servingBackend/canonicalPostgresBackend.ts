@@ -82,12 +82,35 @@ function ageMs(timestamp: string | null): number | null {
   return Number.isNaN(parsed) ? null : Date.now() - parsed;
 }
 
+// MLB FINAL FRESHNESS / STALENESS HARDENING: once a slate's own first
+// real game has started, DraftKings simply stops offering that
+// DraftGroup in slate discovery -- there is nothing left for the
+// automatic worker to re-check, so last_validated_at/last_attempt_at
+// naturally stop advancing forever (confirmed live: a real Early/
+// Turbo/Featured slate's last_validated_at froze exactly at its own
+// lock time while that SAME cycle's Night slate, still pre-lock, kept
+// advancing normally). That is expected, correct behavior, not
+// evidence the worker is delayed or the data is untrustworthy --
+// DK content genuinely cannot change anymore once a contest has
+// locked, so "how long ago was this last checked" stops being a
+// meaningful safety signal for it. Never a proxy for "should this be
+// treated as if just-promoted": a locked slate's `dataStatus` still
+// honestly reports "stale" once real time has passed since its last
+// check, exactly like the pre-existing pre-lock case -- the ONLY
+// change is that a locked slate never crosses into "expired" purely
+// from age, since nothing is missing a check that could have caught a
+// real change.
+function isSlateLocked(row: CanonicalSlateRow): boolean {
+  const lockTime = Date.parse(row.first_game_start_utc);
+  return !Number.isNaN(lockTime) && Date.now() >= lockTime;
+}
+
 function freshnessFor(row: CanonicalSlateRow): ProviderDataStatus | "expired" | null {
   const age = ageMs(mostRecentTimestamp(row));
   if (age === null) return null;
   if (age <= FRESHNESS_MS) return "fresh";
   if (age <= STALE_MAX_MS) return "stale";
-  return "expired";
+  return isSlateLocked(row) ? "stale" : "expired";
 }
 
 function mapSourceProvenance(sourceProvenance: string): ProviderSource | null {

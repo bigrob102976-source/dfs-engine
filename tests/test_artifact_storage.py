@@ -202,6 +202,83 @@ def test_s3_copy_file_refuses_overwrite(tmp_path):
 
 
 # ---------------------------------------------------------------------
+# MLB FINAL FRESHNESS / STALENESS HARDENING Phase 9/13: a real, observed
+# transient S3/R2 PutObject "InternalError" -- verifying the EXISTING
+# behavior (no code change; write_json is already a single, atomic
+# put_object call, and S3-compatible PutObject is itself all-or-nothing
+# at the object level -- there is no partial/torn write to guard
+# against). Confirmed live in production: this exact failure occurred
+# once on a research-package rebuild and self-recovered on the very
+# next natural worker cycle with no data loss.
+# ---------------------------------------------------------------------
+
+
+class _TransientPutObjectError(Exception):
+    """Stands in for botocore.exceptions.ClientError on a real,
+    transient S3/R2 InternalError -- the exact shape observed live."""
+
+    def __init__(self):
+        self.response = {"Error": {"Code": "InternalError", "Message": "We encountered an internal error. Please try again."}}
+
+
+class FlakyPutObjectS3Client(FakeS3Client):
+    """Fails the NEXT `fail_next` put_object call(s) with a transient
+    error, then behaves exactly like a real, healthy client."""
+
+    def __init__(self, fail_next: int = 1):
+        super().__init__()
+        self._fail_next = fail_next
+
+    def put_object(self, Bucket, Key, Body, **kwargs):
+        if self._fail_next > 0:
+            self._fail_next -= 1
+            raise _TransientPutObjectError()
+        super().put_object(Bucket, Key, Body, **kwargs)
+
+
+def _flaky_s3_storage(fail_next: int = 1):
+    return S3ArtifactStorage(
+        bucket="bigmoney-artifacts", region="auto",
+        access_key_id="ak", secret_access_key="sk",
+        client=FlakyPutObjectS3Client(fail_next=fail_next),
+    )
+
+
+def test_s3_transient_put_object_failure_never_corrupts_or_removes_last_good_content():
+    storage = _s3_storage()
+    storage.write_json("research_output/2026-09-05/games.json", {"games": ["real-good-data"]})
+
+    flaky_storage = S3ArtifactStorage(
+        bucket="bigmoney-artifacts", region="auto", access_key_id="ak", secret_access_key="sk",
+        client=FlakyPutObjectS3Client(fail_next=1),
+    )
+    flaky_storage._client.objects = dict(storage._client.objects)  # same underlying bucket state
+
+    with pytest.raises(Exception):
+        flaky_storage.write_json("research_output/2026-09-05/games.json", {"games": ["should-never-land"]}, allow_overwrite=True)
+
+    # The last-good content is completely untouched -- no partial/torn write, no silent corruption.
+    assert flaky_storage.read_json("research_output/2026-09-05/games.json") == {"games": ["real-good-data"]}
+
+
+def test_s3_transient_put_object_failure_is_a_real_propagated_error_never_a_silent_success():
+    storage = _flaky_s3_storage(fail_next=1)
+    with pytest.raises(Exception):
+        storage.write_json("x.json", {"a": 1})
+    # Nothing was written -- a failed attempt never fakes success.
+    assert storage.exists("x.json") is False
+
+
+def test_s3_next_attempt_after_a_transient_failure_succeeds_normally():
+    storage = _flaky_s3_storage(fail_next=1)
+    with pytest.raises(Exception):
+        storage.write_json("x.json", {"a": 1})
+
+    storage.write_json("x.json", {"a": 1})  # the next real attempt (e.g. the next worker cycle) succeeds
+    assert storage.read_json("x.json") == {"a": 1}
+
+
+# ---------------------------------------------------------------------
 # resolve_object_storage_config_from_env / resolve_artifact_storage
 # ---------------------------------------------------------------------
 

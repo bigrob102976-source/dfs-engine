@@ -14,10 +14,18 @@ beforeEach(() => {
 function insertSlate(overrides: Partial<{
   internal_slate_id: string; provider_slate_id: string; slate_date: string; validation_state: string;
   promoted_at: string | null; last_validated_at: string | null; game_count: number | null; salary_cap: number | null; slate_name: string;
+  first_game_start_utc: string;
 }> = {}) {
   const row = {
     internal_slate_id: "s1", provider_slate_id: "dkunofficial-152904", slate_date: "2026-08-31", validation_state: "VALID",
     promoted_at: new Date().toISOString(), last_validated_at: null as string | null, game_count: 8, salary_cap: 50000, slate_name: "Main",
+    // MLB FINAL FRESHNESS / STALENESS HARDENING: defaults to 6h in the
+    // FUTURE (never locked) so every pre-existing test in this file --
+    // none of which is about lock status -- keeps testing pure
+    // promoted_at/last_validated_at age, exactly as before. Tests that
+    // ARE about locked-slate behavior override this explicitly to a
+    // past timestamp.
+    first_game_start_utc: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
     ...overrides,
   };
   getDb()
@@ -26,9 +34,9 @@ function insertSlate(overrides: Partial<{
          internal_slate_id, sport, site, provider, provider_slate_id, slate_name, slate_date, first_game_start_utc,
          game_count, game_ids_json, salary_cap, schema_version, validation_state, source_provenance,
          promoted_at, last_validated_at, player_count, created_at, updated_at
-       ) VALUES (?, 'MLB', 'draftkings', 'draftkings_unofficial', ?, ?, ?, '2026-08-31T23:05:00Z', ?, '[]', ?, 'slate_normalized_v1', ?, 'DRAFTKINGS_UNOFFICIAL_LIVE', ?, ?, 1, 'x', 'x')`,
+       ) VALUES (?, 'MLB', 'draftkings', 'draftkings_unofficial', ?, ?, ?, ?, ?, '[]', ?, 'slate_normalized_v1', ?, 'DRAFTKINGS_UNOFFICIAL_LIVE', ?, ?, 1, 'x', 'x')`,
     )
-    .run(row.internal_slate_id, row.provider_slate_id, row.slate_name, row.slate_date, row.game_count, row.salary_cap, row.validation_state, row.promoted_at, row.last_validated_at);
+    .run(row.internal_slate_id, row.provider_slate_id, row.slate_name, row.slate_date, row.first_game_start_utc, row.game_count, row.salary_cap, row.validation_state, row.promoted_at, row.last_validated_at);
   return row;
 }
 
@@ -86,7 +94,7 @@ describe("M5B: canonicalListSlates", () => {
   });
 
   it("lists a VALID promoted slate, mapped to SlateOption", async () => {
-    insertSlate();
+    insertSlate({ first_game_start_utc: "2026-08-31T23:05:00Z" });
     const result = await canonicalListSlates("2026-08-31");
     expect(result.status).toBe("ready");
     expect(result.isMock).toBe(false);
@@ -206,6 +214,76 @@ describe("M5B: canonicalListSlates", () => {
     });
   });
 
+  describe("MLB FINAL FRESHNESS / STALENESS HARDENING: a LOCKED slate is never falsely 'expired' purely from age", () => {
+    function pastLockTime(hoursAgo: number): string {
+      return new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString();
+    }
+    function futureLockTime(hoursFromNow: number): string {
+      return new Date(Date.now() + hoursFromNow * 60 * 60 * 1000).toISOString();
+    }
+
+    it("Scenario H: an old, LOCKED Early slate stays usable (stale, not excluded) alongside a fresh, pre-lock Night slate", async () => {
+      insertSlate({
+        internal_slate_id: "early-1", provider_slate_id: "dkunofficial-early", slate_name: "Early",
+        promoted_at: pastLockTime(6), last_validated_at: pastLockTime(6), // 6h since its last real check -- games started 6h ago and DK stopped offering it
+        first_game_start_utc: pastLockTime(6),
+      });
+      insertSlate({
+        internal_slate_id: "night-1", provider_slate_id: "dkunofficial-night", slate_name: "Night",
+        promoted_at: new Date().toISOString(), last_validated_at: new Date().toISOString(),
+        first_game_start_utc: futureLockTime(3), // still pre-lock
+      });
+
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.status).toBe("ready");
+      // The locked Early slate is NOT excluded -- it remains valid, historical/final data.
+      expect(result.slates.map((s) => s.slateId).sort()).toEqual(["dkunofficial-early", "dkunofficial-night"]);
+      expect(result.slatesAvailable).toBe(2);
+      // Date-level disclosure still honestly shows "stale" (Early hasn't been rechecked in hours) -- never silently upgraded to "fresh".
+      expect(result.dataStatus).toBe("stale");
+    });
+
+    it("a PRE-LOCK slate that has genuinely gone unchecked for hours is still correctly EXPIRED -- lock status is never abused to hide a real staleness problem", async () => {
+      insertSlate({
+        internal_slate_id: "featured-1", provider_slate_id: "dkunofficial-featured", slate_name: "Featured",
+        promoted_at: pastLockTime(3), last_validated_at: pastLockTime(3),
+        first_game_start_utc: futureLockTime(2), // games haven't started -- a real safety gap
+      });
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.status).toBe("stale_expired");
+      expect(result.slates).toEqual([]);
+    });
+
+    it("canonicalGetSlatePool serves a LOCKED, hours-old slate instead of throwing 'too old to use safely'", async () => {
+      insertSlate({
+        internal_slate_id: "early-1", provider_slate_id: "dkunofficial-early",
+        promoted_at: pastLockTime(6), last_validated_at: pastLockTime(6), first_game_start_utc: pastLockTime(6),
+      });
+      insertPlayer({ internal_slate_id: "early-1", provider_player_id: "1", optimizer_eligible: 1, eligibility_status: "STARTING_HITTER" });
+
+      const pool = await canonicalGetSlatePool("2026-08-31", "dkunofficial-early");
+      expect(pool.players).toHaveLength(1);
+      expect(pool.dataStatus).toBe("stale");
+    });
+
+    it("canonicalGetSlatePool still throws for a genuinely expired PRE-LOCK slate -- locked status is not a blanket bypass", async () => {
+      insertSlate({
+        internal_slate_id: "featured-1", provider_slate_id: "dkunofficial-featured",
+        promoted_at: pastLockTime(3), last_validated_at: pastLockTime(3), first_game_start_utc: futureLockTime(2),
+      });
+      await expect(canonicalGetSlatePool("2026-08-31", "dkunofficial-featured")).rejects.toThrow(/too old to use safely/);
+    });
+
+    it("a slate that JUST locked with a fresh last_validated_at still honestly reports fresh -- locking does not prematurely downgrade freshness", async () => {
+      insertSlate({
+        promoted_at: new Date().toISOString(), last_validated_at: new Date().toISOString(),
+        first_game_start_utc: pastLockTime(0.01), // locked moments ago
+      });
+      const result = await canonicalListSlates("2026-08-31");
+      expect(result.dataStatus).toBe("fresh");
+    });
+  });
+
   it("M5G: a slate promoted for a FUTURE date never appears in today's list", async () => {
     insertSlate({ internal_slate_id: "future-1", provider_slate_id: "dkunofficial-999", slate_date: "2026-09-01" });
     const result = await canonicalListSlates("2026-08-31");
@@ -213,7 +291,7 @@ describe("M5B: canonicalListSlates", () => {
   });
 
   it("M5H: day-rollover simulation -- the SAME row (same internalSlateId/providerSlateId) hidden as tomorrow becomes today's servable slate once its own slateDate is queried, with no duplicate row minted", async () => {
-    insertSlate({ internal_slate_id: "rollover-1", provider_slate_id: "dkunofficial-rollover", slate_date: "2026-09-01" });
+    insertSlate({ internal_slate_id: "rollover-1", provider_slate_id: "dkunofficial-rollover", slate_date: "2026-09-01", first_game_start_utc: "2026-08-31T23:05:00Z" });
 
     const beforeRollover = await canonicalListSlates("2026-08-31"); // "today" is still Aug 31
     expect(beforeRollover.status).toBe("no_slate"); // hidden -- see M5G above
