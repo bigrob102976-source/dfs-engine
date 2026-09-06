@@ -43,9 +43,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from draftkings_unofficial import collector
-from nfl.persistence import save_nfl_player_pool
+from nfl.persistence import list_nfl_player_pools, save_nfl_player_pool
 from nfl.pool_builder import NflPoolBuildError, build_pool
-from nfl.pool_cache import save_nfl_universe_snapshot
+from nfl.pool_cache import list_nfl_universe_snapshots, prune_old_snapshots, save_nfl_universe_snapshot
 
 CLASSIC_GAME_TYPE_ID = 1
 
@@ -75,6 +75,7 @@ def main() -> int:
         universe_path = save_nfl_universe_snapshot(slates, timestamp)
     except FileExistsError:
         pass  # a snapshot for this exact second already exists -- harmless, per-DraftGroup pools below still proceed
+    prune_old_snapshots(list_nfl_universe_snapshots())
 
     results = []
     for s in slates:
@@ -88,6 +89,7 @@ def main() -> int:
         except FileExistsError as exc:
             results.append({"draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "error", "error": str(exc)})
             continue
+        prune_old_snapshots(list_nfl_player_pools(s["slate_date"]))
         results.append({
             "draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "ok",
             "player_count": len(pool.players), "path": str(pool_path),

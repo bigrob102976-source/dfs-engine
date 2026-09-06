@@ -174,3 +174,36 @@ def load_fresh_cached_universe(
     if doc is None or doc.get("source_provenance") != DRAFTKINGS_UNOFFICIAL_LIVE:
         return None
     return doc.get("slates")
+
+
+DEFAULT_SNAPSHOT_RETENTION_COUNT = 12
+
+
+def list_nfl_universe_snapshots(output_root: Path = DEFAULT_NFL_UNIVERSE_ROOT) -> List[str]:
+    """Every saved universe snapshot key, oldest first (mirrors
+    nfl/persistence.py::list_nfl_player_pools's ordering)."""
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    return storage.list_files(to_artifact_key(Path(output_root)), prefix="nfl_universe_", ext=".json")
+
+
+def prune_old_snapshots(paths_or_keys: List, keep_last: int = DEFAULT_SNAPSHOT_RETENTION_COUNT) -> List:
+    """Deletes all but the most recent `keep_last` entries from an
+    oldest-first snapshot listing (nfl/persistence.py::
+    list_nfl_player_pools() or list_nfl_universe_snapshots() above).
+
+    Bounds the otherwise-unbounded growth a recurring external fetch
+    (scripts/fetch_nfl_slates.py, run every few minutes) would cause.
+    These are a rolling operational CACHE for production DK-access
+    resilience, not the permanent evaluation-integrity prediction
+    history CLAUDE.md protects (predictions/, ownership_predictions/,
+    etc. are untouched here -- a stale DK pool re-fetch has no
+    evaluation value once a fresher one exists). Returns the entries
+    actually deleted."""
+    if len(paths_or_keys) <= keep_last:
+        return []
+    to_delete = paths_or_keys[:-keep_last]
+    storage = resolve_artifact_storage(ARTIFACT_ROOT)
+    for entry in to_delete:
+        key = entry if isinstance(entry, str) else to_artifact_key(Path(entry))
+        storage.delete(key)
+    return to_delete

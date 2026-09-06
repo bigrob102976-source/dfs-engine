@@ -8,11 +8,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from nfl.models import NflPlayer, NflPoolBuildResult, NflPoolValidationResult
-from nfl.persistence import save_nfl_player_pool
+from nfl.persistence import list_nfl_player_pools, save_nfl_player_pool
 from nfl.pool_cache import (
     NflSlateDiscoveryError,
+    list_nfl_universe_snapshots,
     load_fresh_cached_pool,
     load_fresh_cached_universe,
+    prune_old_snapshots,
     resolve_nfl_slate_date,
     save_nfl_universe_snapshot,
 )
@@ -153,3 +155,41 @@ class TestResolveNflSlateDate:
 
         with pytest.raises(NflSlateDiscoveryError):
             resolve_nfl_slate_date(151307, output_root=tmp_path, now_utc=NOW)
+
+
+class TestPruneOldSnapshots:
+    def test_keeps_the_most_recent_n_and_deletes_the_rest(self, tmp_path):
+        for i in range(5):
+            timestamp = (NOW - timedelta(minutes=(4 - i) * 5)).strftime("%Y%m%dT%H%M%S")
+            save_nfl_player_pool(_result(), timestamp, output_root=tmp_path)
+
+        pools = list_nfl_player_pools("2026-09-13", output_root=tmp_path)
+        assert len(pools) == 5
+
+        deleted = prune_old_snapshots(pools, keep_last=2)
+        assert len(deleted) == 3
+
+        remaining = list_nfl_player_pools("2026-09-13", output_root=tmp_path)
+        assert len(remaining) == 2
+        assert remaining == pools[-2:]
+
+    def test_no_op_when_at_or_under_the_retention_count(self, tmp_path):
+        timestamp = NOW.strftime("%Y%m%dT%H%M%S")
+        save_nfl_player_pool(_result(), timestamp, output_root=tmp_path)
+
+        pools = list_nfl_player_pools("2026-09-13", output_root=tmp_path)
+        deleted = prune_old_snapshots(pools, keep_last=12)
+        assert deleted == []
+        assert len(list_nfl_player_pools("2026-09-13", output_root=tmp_path)) == 1
+
+    def test_prunes_universe_snapshots_by_string_key(self, tmp_path):
+        for i in range(4):
+            timestamp = (NOW - timedelta(minutes=(3 - i) * 5)).strftime("%Y%m%dT%H%M%S")
+            save_nfl_universe_snapshot([], timestamp, output_root=tmp_path)
+
+        keys = list_nfl_universe_snapshots(output_root=tmp_path)
+        assert len(keys) == 4
+
+        deleted = prune_old_snapshots(keys, keep_last=1)
+        assert len(deleted) == 3
+        assert len(list_nfl_universe_snapshots(output_root=tmp_path)) == 1
