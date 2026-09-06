@@ -28,14 +28,19 @@ $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Add-Content -Path $logPath -Value "`n=== $timestamp run start ===" -Encoding utf8
 
 # Task Scheduler's own process context has a different PATH than an
-# interactive shell -- use the absolute npx path (this machine's real
-# Node install) rather than relying on PATH resolution, which failed
-# silently under Task Scheduler on the first real run.
+# interactive shell, and does NOT have this repo's .venv activated --
+# use absolute paths for both npx (this machine's real Node install)
+# and python (this repo's own venv, which has boto3/ortools/etc.
+# installed; the bare "python" on Task Scheduler's PATH does not).
+# Both failure modes were observed on real natural firings before this
+# fix: npx not found (first run), then boto3 missing under bare python
+# (second run, after the first fix).
 $npxPath = "C:\Users\taylo\AppData\Local\Programs\nodejs\npx.cmd"
+$venvPython = "D:\nfl-dfs-engine\.venv\Scripts\python.exe"
 $env:NODE_ENV = "production"
 
 try {
-    $output = & $npxPath --yes "@railway/cli" run --service nfl-web --environment production -- python scripts/fetch_nfl_slates.py 2>&1
+    $output = & $npxPath --yes "@railway/cli" run --service nfl-web --environment production -- $venvPython scripts/fetch_nfl_slates.py 2>&1
     $exitCode = $LASTEXITCODE
 } catch {
     $output = "WRAPPER_EXCEPTION: $_"
