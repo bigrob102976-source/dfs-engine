@@ -15,6 +15,8 @@ rather than crashing silently or fabricating games.
 """
 
 import json
+import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -61,6 +63,30 @@ class RawPitcherStats:
 def _get_json(url: str) -> dict:
     with urllib.request.urlopen(url, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _percentile(sorted_values: List[float], pct: float) -> float:
+    if not sorted_values:
+        return 0.0
+    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
+    return sorted_values[idx]
+
+
+def _report_per_player_timings(label: str, elapsed_seconds: List[float]) -> None:
+    """MLB BATTER AGENT PERFORMANCE FIX Phase 2: permanent, cheap
+    per-player timing so a slow real run is diagnosable from stderr
+    alone (never guessed) -- mirrors the stage-timing instrumentation
+    already kept in scripts/compute_canonical_eligibility.py. Prints
+    nothing when there's nothing to time (an empty player list)."""
+    if not elapsed_seconds:
+        return
+    s = sorted(elapsed_seconds)
+    print(
+        f"[collector] {label} n={len(s)} total={sum(s):.2f}s "
+        f"p50={_percentile(s, 0.50):.3f}s p90={_percentile(s, 0.90):.3f}s "
+        f"p99={_percentile(s, 0.99):.3f}s max={s[-1]:.3f}s",
+        file=sys.stderr, flush=True,
+    )
 
 
 def fetch_schedule(date: str) -> dict:
@@ -211,7 +237,9 @@ def collect_pitcher_stats(
 
     season_pitching: Dict[str, dict] = {}
     game_log_pitching: Dict[str, dict] = {}
+    per_player_elapsed: List[float] = []
     for pid in pitcher_ids:
+        player_started = time.monotonic()
         data = cache.get_or_fetch(
             cache_root, date, f"season_pitching_{pid}_{season}",
             lambda pid=pid: fetch_pitcher_season_stats(pid, season),
@@ -229,6 +257,9 @@ def collect_pitcher_stats(
             game_log_pitching[pid] = data
         else:
             warnings.append(f"[collector] no game log available for player {pid}")
+        per_player_elapsed.append(time.monotonic() - player_started)
+
+    _report_per_player_timings("collect_pitcher_stats (season+gamelog per player)", per_player_elapsed)
 
     if pitcher_ids:
         sources.append("mlb_stats_api:pitching_season_stats")
@@ -332,7 +363,9 @@ def collect_batter_stats(
     platoon_vs_rhp: Dict[str, dict] = {}
     platoon_vs_lhp: Dict[str, dict] = {}
 
+    per_player_elapsed: List[float] = []
     for pid in batter_ids:
+        player_started = time.monotonic()
         data = cache.get_or_fetch(
             cache_root, date, f"season_hitting_{pid}_{season}",
             lambda pid=pid: fetch_batter_season_stats(pid, season),
@@ -368,6 +401,9 @@ def collect_batter_stats(
             platoon_vs_lhp[pid] = data
         else:
             warnings.append(f"[collector] no vs-LHP split available for player {pid}")
+        per_player_elapsed.append(time.monotonic() - player_started)
+
+    _report_per_player_timings("collect_batter_stats (season+gamelog+platoon x2 per player)", per_player_elapsed)
 
     if batter_ids:
         sources.append("mlb_stats_api:hitting_season_stats")
@@ -399,10 +435,14 @@ def collect_batter_bios(
     uses to fill it in without touching that existing, already-tested
     pipeline."""
     people: Dict[str, dict] = {}
+    per_player_elapsed: List[float] = []
     for pid in batter_ids:
+        player_started = time.monotonic()
         person = cache.get_or_fetch(cache_root, date, f"person_{pid}", lambda pid=pid: fetch_person(pid))
         if person:
             people[pid] = person
+        per_player_elapsed.append(time.monotonic() - player_started)
+    _report_per_player_timings("collect_batter_bios", per_player_elapsed)
     return people
 
 

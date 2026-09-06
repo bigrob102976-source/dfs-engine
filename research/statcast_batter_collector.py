@@ -15,6 +15,8 @@ minimal) pitch-type-performance signal.
 
 import csv
 import io
+import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -48,6 +50,29 @@ def _fetch_csv_rows(url: str) -> List[dict]:
         raw = resp.read()
     text = raw.decode("utf-8-sig")
     return list(csv.DictReader(io.StringIO(text)))
+
+
+def _percentile(sorted_values: List[float], pct: float) -> float:
+    if not sorted_values:
+        return 0.0
+    idx = min(len(sorted_values) - 1, int(round(pct * (len(sorted_values) - 1))))
+    return sorted_values[idx]
+
+
+def _report_per_player_timings(label: str, elapsed_seconds: List[float]) -> None:
+    """MLB BATTER AGENT PERFORMANCE FIX Phase 2: permanent, cheap
+    per-player timing -- a local copy (not a cross-import from
+    research/collector.py) on purpose, matching this file's own existing
+    "stays fully decoupled" design note above for _fetch_csv_rows."""
+    if not elapsed_seconds:
+        return
+    s = sorted(elapsed_seconds)
+    print(
+        f"[statcast_batter_collector] {label} n={len(s)} total={sum(s):.2f}s "
+        f"p50={_percentile(s, 0.50):.3f}s p90={_percentile(s, 0.90):.3f}s "
+        f"p99={_percentile(s, 0.99):.3f}s max={s[-1]:.3f}s",
+        file=sys.stderr, flush=True,
+    )
 
 
 def fetch_expected_statistics(season: str) -> List[dict]:
@@ -126,7 +151,9 @@ def collect_batter_statcast_data(
     date_lt = ref.strftime("%Y-%m-%d")
 
     recent_pitch_level: Dict[str, List[dict]] = {}
+    per_player_elapsed: List[float] = []
     for pid in batter_ids:
+        player_started = time.monotonic()
         try:
             rows = cache.get_or_fetch(
                 cache_root, date, f"batter_recent_pitch_level_{pid}_{date_gt}_{date_lt}",
@@ -139,6 +166,9 @@ def collect_batter_statcast_data(
             recent_pitch_level[pid] = rows
         else:
             warnings.append(f"[statcast_batter_collector] no recent pitch-level data available for player {pid}")
+        per_player_elapsed.append(time.monotonic() - player_started)
+
+    _report_per_player_timings("recent_pitch_level (per-hitter Savant CSV search)", per_player_elapsed)
 
     if batter_ids:
         sources.append("baseball_savant:recent_pitch_level")

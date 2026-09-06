@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -142,7 +143,19 @@ def main() -> None:
     parser.add_argument("--output", default="research_output", help="Research package root directory")
     args = parser.parse_args()
 
+    # MLB BATTER AGENT PERFORMANCE FIX Phase 1/2: permanent per-stage
+    # timing to stderr (never stdout) so a slow real run is diagnosable
+    # from the worker log alone, matching the same discipline already
+    # kept in scripts/compute_canonical_eligibility.py.
+    run_started = time.monotonic()
+
+    def _stage(label, t0):
+        print(f"[batter_agent] {label} elapsed={time.monotonic() - t0:.2f}s", file=sys.stderr, flush=True)
+
+    t0 = time.monotonic()
     package = _ensure_research_package(args.date, args.output)
+    _stage("research_package_load", t0)
+
     confirmed_count = len(batter_adapter.build_batter_inputs(package))
     # PROBABLE FIX milestone: real, evidence-based probable starters
     # (dfs/probable_starters.py) for any team whose official lineup
@@ -150,7 +163,9 @@ def main() -> None:
     # Native projections/ownership never have to wait for official
     # lineups. Never a second, divergent probable-inference algorithm --
     # the SAME build_probable_hitters_map dfs/eligibility.py itself uses.
+    t0 = time.monotonic()
     probable_hitters = build_probable_hitters_map(args.date, package)
+    _stage("probable_hitters_map", t0)
     batter_inputs = batter_adapter.build_batter_inputs_with_probables(package, probable_hitters)
     missing_games = batter_adapter.missing_lineup_games(package)
 
@@ -174,19 +189,27 @@ def main() -> None:
     season = args.date.split("-")[0]
 
     print(f"Fetching real season/recent/platoon hitting statistics for {len(batter_ids)} starting hitters...\n")
+    t0 = time.monotonic()
     raw_stats = collector.collect_batter_stats(batter_ids, season, args.date)
+    _stage("collect_batter_stats", t0)
     retrieved_at = datetime.now(timezone.utc).isoformat()
     enriched, mlb_provenance = apply_stats_to_batter_inputs(batter_inputs, raw_stats, args.date, retrieved_at)
 
+    t0 = time.monotonic()
     people = collector.collect_batter_bios(batter_ids, args.date)
+    _stage("collect_batter_bios", t0)
     enriched = apply_bios_to_batter_inputs(enriched, people)
 
     print(f"Fetching advanced Statcast metrics for {len(batter_ids)} hitters...\n")
+    t0 = time.monotonic()
     raw_statcast = statcast_batter_collector.collect_batter_statcast_data(batter_ids, season, args.date, args.date)
+    _stage("collect_batter_statcast_data", t0)
     enriched, sc_provenance = statcast_batter_enrichment.apply_statcast_to_batter_inputs(enriched, raw_statcast, retrieved_at)
 
     print("Building opposing-pitcher research context (reusing pregame pitcher research, not the Pitcher Agent)...\n")
+    t0 = time.monotonic()
     pitcher_index = _build_opposing_pitcher_index(args.date, args.output)
+    _stage("opposing_pitcher_index", t0)
     enriched = attach_opposing_pitcher_context(enriched, pitcher_index)
 
     for warnings, label in ((raw_stats.warnings, "MLB Stats"), (raw_statcast.warnings, "Statcast")):
@@ -198,7 +221,9 @@ def main() -> None:
                 print(f"  ... and {len(warnings) - 10} more")
             print()
 
+    t0 = time.monotonic()
     board = analyze_slate(enriched)
+    _stage("analyze_slate", t0)
     batters_by_id = {b.player_id: b for b in enriched}
 
     print(f"TOP {min(TOP_N_SUMMARY, len(board))}")
@@ -258,12 +283,15 @@ def main() -> None:
         "statcast_sources": raw_statcast.sources_used,
     }
     missing_lineup_game_ids = [g["game_id"] for g in missing_games]
+    t0 = time.monotonic()
     snapshot = build_batter_snapshot(
         args.date, board, batters_by_id, quality_report, source_metadata,
         missing_lineup_game_ids=missing_lineup_game_ids, generated_at=retrieved_at,
     )
     snapshot_path = save_snapshot(snapshot, filename_prefix="batter_board")
+    _stage("persistence", t0)
     print(f"Pregame prediction snapshot saved (immutable): {snapshot_path}")
+    print(f"[batter_agent] TOTAL elapsed={time.monotonic() - run_started:.2f}s players={len(enriched)}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
