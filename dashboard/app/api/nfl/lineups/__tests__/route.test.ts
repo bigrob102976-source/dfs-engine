@@ -2,16 +2,17 @@ import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireAdminApi: vi.fn(),
+  requireAuthApi: vi.fn(),
 }));
 
-const { requireAdminApi } = await import("@/lib/auth/guards");
+const { requireAuthApi } = await import("@/lib/auth/guards");
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { GET, POST } = await import("../route");
 
 const DG_ID = 151307;
-const USER = { id: "user-1", email: "admin@example.com", role: "ADMIN" };
+const USER = { id: "user-1", email: "member@example.com", role: "MEMBER" };
+const ADMIN = { id: "admin-1", email: "admin@example.com", role: "ADMIN" };
 
 function slots() {
   return Array.from({ length: 9 }, (_, i) => ({ roster_slot: `S${i}`, draftkings_player_id: String(i) }));
@@ -20,7 +21,7 @@ function slots() {
 beforeEach(() => {
   __resetDbForTests();
   __resetExecutorForTests();
-  (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
+  (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -31,10 +32,21 @@ function req(url: string, init?: RequestInit) {
 }
 
 describe("GET/POST /api/nfl/lineups", () => {
-  it("returns 403 for a non-admin, never touches the DB", async () => {
-    (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(NextResponse.json({ error: "no" }, { status: 403 }));
+  it("returns 401 for an anonymous (unauthenticated) request, never touches the DB", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
     const res = await GET(req(`http://localhost/api/nfl/lineups?draftGroupId=${DG_ID}`));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+  });
+
+  it("an authenticated MEMBER (not admin) can list and create lineups", async () => {
+    const res = await GET(req(`http://localhost/api/nfl/lineups?draftGroupId=${DG_ID}`));
+    expect(res.status).toBe(200);
+  });
+
+  it("an ADMIN can still list and create lineups", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(ADMIN);
+    const res = await GET(req(`http://localhost/api/nfl/lineups?draftGroupId=${DG_ID}`));
+    expect(res.status).toBe(200);
   });
 
   it("400s on a missing draftGroupId", async () => {
@@ -79,7 +91,7 @@ describe("GET/POST /api/nfl/lineups", () => {
       body: JSON.stringify({ draftGroupId: DG_ID, slateDate: "2026-09-13", slots: slots() }),
     }));
 
-    (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ...USER, id: "user-2" });
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ...USER, id: "user-2" });
     const res = await GET(req(`http://localhost/api/nfl/lineups?draftGroupId=${DG_ID}`));
     const json = await res.json();
     expect(json.lineups).toEqual([]);

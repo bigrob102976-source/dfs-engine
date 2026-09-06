@@ -1,21 +1,22 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireAdminApi: vi.fn(),
+  requireAuthApi: vi.fn(),
 }));
 vi.mock("@/lib/orchestrator/pythonRunner", () => ({
   runPythonScript: vi.fn(),
   tail: (s: string) => s,
 }));
 
-const { requireAdminApi } = await import("@/lib/auth/guards");
+const { requireAuthApi } = await import("@/lib/auth/guards");
 const { runPythonScript } = await import("@/lib/orchestrator/pythonRunner");
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createSavedLineup } = await import("@/lib/db/nflSavedLineups");
 const { POST } = await import("../route");
 
-const USER = { id: "user-1", email: "admin@example.com", role: "ADMIN" };
+const USER = { id: "user-1", email: "member@example.com", role: "MEMBER" };
 
 function mockPythonSuccess(payload: unknown) {
   (runPythonScript as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -26,11 +27,18 @@ function mockPythonSuccess(payload: unknown) {
 beforeEach(() => {
   __resetDbForTests();
   __resetExecutorForTests();
-  (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
+  (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
   vi.clearAllMocks();
 });
 
 describe("POST /api/nfl/export", () => {
+  it("returns 401 for an anonymous request, never calls Python", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
+    const res = await POST(new Request("http://localhost", { method: "POST", body: JSON.stringify({ lineupIds: ["x"] }) }));
+    expect(res.status).toBe(401);
+    expect(runPythonScript).not.toHaveBeenCalled();
+  });
+
   it("400s with no lineupIds", async () => {
     const res = await POST(new Request("http://localhost", { method: "POST", body: JSON.stringify({ lineupIds: [] }) }));
     expect(res.status).toBe(400);

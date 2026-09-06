@@ -1,16 +1,17 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireAdminApi: vi.fn(),
+  requireAuthApi: vi.fn(),
 }));
 
-const { requireAdminApi } = await import("@/lib/auth/guards");
+const { requireAuthApi } = await import("@/lib/auth/guards");
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createSavedLineup } = await import("@/lib/db/nflSavedLineups");
 const { GET, DELETE } = await import("../route");
 
-const USER = { id: "user-1", email: "admin@example.com", role: "ADMIN" };
+const USER = { id: "user-1", email: "member@example.com", role: "MEMBER" };
 
 function ctx(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -19,10 +20,16 @@ function ctx(id: string) {
 beforeEach(() => {
   __resetDbForTests();
   __resetExecutorForTests();
-  (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
+  (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
 });
 
 describe("GET/DELETE /api/nfl/lineups/[id]", () => {
+  it("returns 401 for an anonymous request", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
+    const res = await GET(new Request("http://localhost"), ctx("anything"));
+    expect(res.status).toBe(401);
+  });
+
   it("GET 404s for an unknown id", async () => {
     const res = await GET(new Request("http://localhost"), ctx("nope"));
     expect(res.status).toBe(404);
@@ -66,5 +73,16 @@ describe("GET/DELETE /api/nfl/lineups/[id]", () => {
     });
     const res = await DELETE(new Request("http://localhost"), ctx(row.id));
     expect(res.status).toBe(404);
+  });
+
+  it("an ADMIN can also GET their own saved lineup (admin access unaffected)", async () => {
+    const ADMIN = { id: "admin-1", email: "admin@example.com", role: "ADMIN" };
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(ADMIN);
+    const row = await createSavedLineup({
+      userId: ADMIN.id, draftGroupId: 151307, slateDate: "2026-09-13", mode: "projection",
+      stackConfigJson: "{}", slotsJson: "[]",
+    });
+    const res = await GET(new Request("http://localhost"), ctx(row.id));
+    expect(res.status).toBe(200);
   });
 });

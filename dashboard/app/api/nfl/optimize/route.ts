@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/auth/guards";
+import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
 
@@ -61,7 +61,7 @@ function sanitizeStack(raw: StackRequestBody | undefined): Record<string, unknow
 // args) -- see scripts/nfl_dashboard_optimize.py's own docstring for
 // the exact contract.
 export async function POST(request: Request) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
   let body: OptimizeRequestBody;

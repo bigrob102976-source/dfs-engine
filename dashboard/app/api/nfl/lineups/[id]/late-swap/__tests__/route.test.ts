@@ -1,21 +1,22 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireAdminApi: vi.fn(),
+  requireAuthApi: vi.fn(),
 }));
 vi.mock("@/lib/orchestrator/pythonRunner", () => ({
   runPythonScript: vi.fn(),
   tail: (s: string) => s,
 }));
 
-const { requireAdminApi } = await import("@/lib/auth/guards");
+const { requireAuthApi } = await import("@/lib/auth/guards");
 const { runPythonScript } = await import("@/lib/orchestrator/pythonRunner");
 const { __resetDbForTests } = await import("@/lib/db/client");
 const { __resetExecutorForTests } = await import("@/lib/db/executor");
 const { createSavedLineup, getSavedLineupById } = await import("@/lib/db/nflSavedLineups");
 const { POST } = await import("../route");
 
-const USER = { id: "user-1", email: "admin@example.com", role: "ADMIN" };
+const USER = { id: "user-1", email: "member@example.com", role: "MEMBER" };
 
 function ctx(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -30,7 +31,7 @@ function mockPythonSuccess(payload: unknown) {
 beforeEach(() => {
   __resetDbForTests();
   __resetExecutorForTests();
-  (requireAdminApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
+  (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
   vi.clearAllMocks();
 });
 
@@ -43,6 +44,23 @@ async function makeLineup() {
 }
 
 describe("POST /api/nfl/lineups/[id]/late-swap", () => {
+  it("returns 401 for an anonymous request, never calls Python", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
+    const res = await POST(new Request("http://localhost", { method: "POST", body: "{}" }), ctx("anything"));
+    expect(res.status).toBe(401);
+    expect(runPythonScript).not.toHaveBeenCalled();
+  });
+
+  it("404s for another user's lineup, never calls Python -- ownership is enforced before any solve", async () => {
+    const row = await createSavedLineup({
+      userId: "someone-else", draftGroupId: 151307, slateDate: "2026-09-13", mode: "projection",
+      stackConfigJson: "{}", slotsJson: JSON.stringify([{ roster_slot: "QB", draftkings_player_id: "1" }]),
+    });
+    const res = await POST(new Request("http://localhost", { method: "POST", body: "{}" }), ctx(row.id));
+    expect(res.status).toBe(404);
+    expect(runPythonScript).not.toHaveBeenCalled();
+  });
+
   it("404s for an unknown lineup id, never calls Python", async () => {
     const res = await POST(new Request("http://localhost", { method: "POST", body: "{}" }), ctx("nope"));
     expect(res.status).toBe(404);
@@ -73,7 +91,7 @@ describe("POST /api/nfl/lineups/[id]/late-swap", () => {
     });
 
     await POST(new Request("http://localhost", { method: "POST", body: "{}" }), ctx(row.id));
-    const stillOriginal = await getSavedLineupById(row.id);
+    const stillOriginal = await getSavedLineupById(row.id, USER.id);
     expect(JSON.parse(stillOriginal!.slots_json)[0].draftkings_player_id).toBe("1");
   });
 
@@ -86,7 +104,7 @@ describe("POST /api/nfl/lineups/[id]/late-swap", () => {
     });
 
     await POST(new Request("http://localhost", { method: "POST", body: JSON.stringify({ apply: true }) }), ctx(row.id));
-    const updated = await getSavedLineupById(row.id);
+    const updated = await getSavedLineupById(row.id, USER.id);
     expect(JSON.parse(updated!.slots_json)[0].draftkings_player_id).toBe("2");
   });
 

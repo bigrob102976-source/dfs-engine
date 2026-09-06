@@ -24,12 +24,20 @@ export async function createSavedLineup(args: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, args.userId, args.draftGroupId, args.slateDate, args.mode, args.stackConfigJson, args.slotsJson, now, now],
   );
-  return (await getSavedLineupById(id))!;
+  return (await getSavedLineupById(id, args.userId))!;
 }
 
-export async function getSavedLineupById(id: string): Promise<NflSavedLineupRow | null> {
+/** NFL production access fix -- ownership is now enforced IN THE QUERY
+ * (WHERE id = ? AND user_id = ?), not left to every caller to remember
+ * to check afterward. A lineup id belonging to a different user reads
+ * back as "not found," identically to a genuinely nonexistent id -- no
+ * existence oracle. Previously this was id-only and relied entirely on
+ * callers checking `row.user_id !== user.id`, which was safe only
+ * because every route was admin-only; opening NFL to all members made
+ * that assumption too fragile to keep relying on alone. */
+export async function getSavedLineupById(id: string, userId: string): Promise<NflSavedLineupRow | null> {
   const db = getExecutor();
-  const row = await db.get<Record<string, unknown>>("SELECT * FROM nfl_saved_lineups WHERE id = ?", [id]);
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM nfl_saved_lineups WHERE id = ? AND user_id = ?", [id, userId]);
   return (row as unknown as NflSavedLineupRow) ?? null;
 }
 
@@ -44,18 +52,19 @@ export async function listSavedLineups(userId: string, draftGroupId: number): Pr
 
 /** Late swap's write path -- replaces slots_json (the whole slot array,
  * locked slots included unchanged) and bumps updated_at. Never touches
- * id/user_id/draft_group_id/slate_date/created_at. */
-export async function updateSavedLineupSlots(id: string, slotsJson: string): Promise<NflSavedLineupRow | null> {
+ * id/user_id/draft_group_id/slate_date/created_at. `userId` is enforced
+ * in the WHERE clause -- see getSavedLineupById's docstring. */
+export async function updateSavedLineupSlots(id: string, userId: string, slotsJson: string): Promise<NflSavedLineupRow | null> {
   const db = getExecutor();
   const now = new Date().toISOString();
-  await db.run("UPDATE nfl_saved_lineups SET slots_json = ?, updated_at = ? WHERE id = ?", [slotsJson, now, id]);
-  return getSavedLineupById(id);
+  await db.run("UPDATE nfl_saved_lineups SET slots_json = ?, updated_at = ? WHERE id = ? AND user_id = ?", [slotsJson, now, id, userId]);
+  return getSavedLineupById(id, userId);
 }
 
 export async function deleteSavedLineup(id: string, userId: string): Promise<boolean> {
   const db = getExecutor();
-  const existing = await getSavedLineupById(id);
-  if (!existing || existing.user_id !== userId) return false;
-  await db.run("DELETE FROM nfl_saved_lineups WHERE id = ?", [id]);
+  const existing = await getSavedLineupById(id, userId);
+  if (!existing) return false;
+  await db.run("DELETE FROM nfl_saved_lineups WHERE id = ? AND user_id = ?", [id, userId]);
   return true;
 }

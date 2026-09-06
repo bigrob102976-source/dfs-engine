@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/auth/guards";
+import { requireAuthApi } from "@/lib/auth/guards";
 import { getSavedLineupById } from "@/lib/db/nflSavedLineups";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
@@ -19,7 +19,7 @@ interface ExportRequestBody {
 // Every lineup is independently re-validated for structural corruption
 // before export -- see that module's own docstring.
 export async function POST(request: Request) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 
@@ -36,8 +36,8 @@ export async function POST(request: Request) {
 
   const savedLineups = [];
   for (const id of body.lineupIds) {
-    const row = await getSavedLineupById(id);
-    if (!row || row.user_id !== user.id) {
+    const row = await getSavedLineupById(id, user.id);
+    if (!row) {
       return NextResponse.json({ error: `Saved lineup ${id} not found.` }, { status: 404 });
     }
     savedLineups.push({

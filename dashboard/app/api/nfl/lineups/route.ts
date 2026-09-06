@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/auth/guards";
+import { requireAuthApi } from "@/lib/auth/guards";
 import { createSavedLineup, listSavedLineups } from "@/lib/db/nflSavedLineups";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // workflow (see dashboard/lib/db/migrations/0009_nfl_saved_lineups.sql).
 // Scoped per (user, draftGroupId) -- never a shared/global lineup list.
 export async function GET(request: Request) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 
@@ -39,7 +39,7 @@ interface CreateLineupBody {
 }
 
 export async function POST(request: Request) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 

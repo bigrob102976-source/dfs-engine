@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/auth/guards";
+import { requireAuthApi } from "@/lib/auth/guards";
 import { deleteSavedLineup, getSavedLineupById } from "@/lib/db/nflSavedLineups";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, ctx: RouteContext<"/api/nfl/lineups/[id]">) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 
   const { id } = await ctx.params;
-  const row = await getSavedLineupById(id);
-  if (!row || row.user_id !== user.id) {
+  const row = await getSavedLineupById(id, user.id);
+  if (!row) {
     return NextResponse.json({ error: "Saved lineup not found." }, { status: 404 });
   }
 
@@ -24,7 +24,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/nfl/lineups
 }
 
 export async function DELETE(_request: Request, ctx: RouteContext<"/api/nfl/lineups/[id]">) {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
   const user = userOrRes;
 

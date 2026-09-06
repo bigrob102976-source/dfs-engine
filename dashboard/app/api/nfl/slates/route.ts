@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminApi } from "@/lib/auth/guards";
+import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
 
@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
 // NFL UI M1 -- real DraftKings NFL Classic slate discovery (never
 // hardcoded to one DraftGroup; scripts/nfl_dashboard_slates.py is the
 // same real discovery path scripts/nfl_dashboard_data.py itself uses).
+// NFL production access fix -- any authenticated member may discover slates.
 export async function GET() {
-  const userOrRes = await requireAdminApi();
+  const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
 
   const result = await runPythonScript("scripts/nfl_dashboard_slates.py", []);
