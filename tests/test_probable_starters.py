@@ -56,6 +56,52 @@ class TestInferProbableHittersForTeam:
         result = ps.infer_probable_hitters_for_team("100", "2026-09-05", cache_root=tmp_path)
         assert result == {}
 
+    def test_team_schedule_is_cached_so_a_second_caller_the_same_day_never_refetches(self, monkeypatch, tmp_path):
+        """MLB BATTER AGENT PERFORMANCE FIX Phase 12: eligibility and the
+        Batter Agent each independently call infer_probable_hitters_for_team
+        for the SAME (team_id, slate_date) as two separate subprocesses --
+        real, measured live: this was previously an uncached, real network
+        round trip both times. Simulates the second caller (sharing the
+        same on-disk cache_root/slate_date, exactly like two real
+        subprocesses on the same container/date would) by calling twice
+        with a fetch_team_recent_schedule mock that raises on a second call."""
+        calls = {"n": 0}
+
+        def fake_fetch(*a, **k):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise AssertionError("fetch_team_recent_schedule called more than once for the same team/date -- not cached")
+            return _schedule((1001, "2026-09-04"))
+
+        monkeypatch.setattr(ps, "fetch_team_recent_schedule", fake_fetch)
+        monkeypatch.setattr(ps, "fetch_boxscore", lambda gid: _boxscore("100", "home", [111]))
+        monkeypatch.setattr(ps, "fetch_team_roster", lambda *a, **k: _roster(111))
+        _patch_no_platoon(monkeypatch)
+
+        first = ps.infer_probable_hitters_for_team("100", "2026-09-05", cache_root=tmp_path)
+        second = ps.infer_probable_hitters_for_team("100", "2026-09-05", cache_root=tmp_path)
+        assert calls["n"] == 1
+        assert first.keys() == second.keys()
+
+    def test_team_schedule_cache_is_isolated_per_slate_date(self, monkeypatch, tmp_path):
+        """A different slate_date must never read yesterday's cached
+        schedule -- the lookback window itself shifts, so this MUST
+        genuinely re-fetch, never silently reuse a stale window."""
+        calls = {"n": 0}
+
+        def fake_fetch(*a, **k):
+            calls["n"] += 1
+            return _schedule((1001, "2026-09-04"))
+
+        monkeypatch.setattr(ps, "fetch_team_recent_schedule", fake_fetch)
+        monkeypatch.setattr(ps, "fetch_boxscore", lambda gid: _boxscore("100", "home", [111]))
+        monkeypatch.setattr(ps, "fetch_team_roster", lambda *a, **k: _roster(111))
+        _patch_no_platoon(monkeypatch)
+
+        ps.infer_probable_hitters_for_team("100", "2026-09-05", cache_root=tmp_path)
+        ps.infer_probable_hitters_for_team("100", "2026-09-06", cache_root=tmp_path)
+        assert calls["n"] == 2
+
     def test_real_evidence_only_never_a_guess_with_no_basis(self, monkeypatch, tmp_path):
         """A player who never appears in ANY recent boxscore's starting
         order is never included in the result at all."""

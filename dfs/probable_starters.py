@@ -113,7 +113,7 @@ class ProbableHitterInfo:
     game_id: Optional[str] = None
 
 
-def _fetch_recent_completed_game_ids(team_id: str, slate_date: str) -> List[str]:
+def _fetch_recent_completed_game_ids(team_id: str, slate_date: str, cache_root=cache.DEFAULT_RESULTS_CACHE_ROOT) -> List[str]:
     """Real, chronological (most-recent-first) list of this team's own
     completed ("Final") game IDs (plus their officialDate) in the
     lookback window strictly BEFORE `slate_date` -- never today's own
@@ -121,10 +121,28 @@ def _fetch_recent_completed_game_ids(team_id: str, slate_date: str) -> List[str]
     historical, already-played games; see
     research/collector.py::fetch_boxscore's own docstring on why this is
     not a lookahead-bias concern). Returns a list of (game_id, date)
-    tuples, most-recent-first, capped at RECENT_GAMES_MAX_CONSIDERED."""
+    tuples, most-recent-first, capped at RECENT_GAMES_MAX_CONSIDERED.
+
+    MLB BATTER AGENT PERFORMANCE FIX Phase 12: this function is called
+    independently by BOTH the eligibility recompute and the Batter
+    Agent's own probable-hitters map for the SAME (team_id, slate_date)
+    -- real, measured live: with tomorrow's lineups not yet posted,
+    eligibility's own build_probable_hitters_map call cost 291.1s, and
+    the Batter Agent's separate call to the same function immediately
+    after contributed to exceeding the remote timeout. Unlike the
+    sibling fetch_boxscore call just below (already cached), this raw
+    schedule fetch was never cached -- a small, safe fix (same
+    cache.get_or_fetch pattern already used one function down in this
+    same file, same cache_root/slate_date namespacing) so the SECOND
+    caller of the day hits the cache instead of re-fetching. A
+    completed team's schedule for a fixed past date range never changes
+    once fetched, so this is never stale."""
     end = (datetime.strptime(slate_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     start = (datetime.strptime(slate_date, "%Y-%m-%d") - timedelta(days=RECENT_GAMES_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-    schedule = fetch_team_recent_schedule(team_id, start, end)
+    schedule = cache.get_or_fetch(
+        cache_root, slate_date, f"probable_team_schedule_{team_id}_{start}_{end}",
+        lambda: fetch_team_recent_schedule(team_id, start, end),
+    )
     if not schedule:
         return []
 
@@ -229,7 +247,7 @@ def infer_probable_hitters_for_team(
     (research/collector.py's own convention) and is treated as "no
     evidence available" rather than a crash.
     """
-    recent_games = _fetch_recent_completed_game_ids(team_id, slate_date)
+    recent_games = _fetch_recent_completed_game_ids(team_id, slate_date, cache_root)
     if not recent_games:
         return {}
 
