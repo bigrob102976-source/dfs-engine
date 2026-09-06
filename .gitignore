@@ -100,6 +100,10 @@ dashboard/next-env.d.ts
 .env
 .env.*
 
+# NFL M15: BigMoneyDFS_NFL_DK_Fetch_Worker's own run log -- local runtime
+# state, not source. See scripts/run_nfl_dk_fetch_worker.ps1.
+/logs/
+
 # OS / editor
 .DS_Store
 *.pem
