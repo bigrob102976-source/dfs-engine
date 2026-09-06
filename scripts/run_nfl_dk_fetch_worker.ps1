@@ -11,7 +11,6 @@
 # only writes under this repo's own dfs_input/nfl/ namespace (via the
 # Python script) and this file's own log below.
 
-$ErrorActionPreference = "Stop"
 Set-Location "D:\nfl-dfs-engine"
 
 $logDir = "D:\nfl-dfs-engine\logs"
@@ -28,9 +27,20 @@ if (Test-Path $logPath) {
 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Add-Content -Path $logPath -Value "`n=== $timestamp run start ===" -Encoding utf8
 
+# Task Scheduler's own process context has a different PATH than an
+# interactive shell -- use the absolute npx path (this machine's real
+# Node install) rather than relying on PATH resolution, which failed
+# silently under Task Scheduler on the first real run.
+$npxPath = "C:\Users\taylo\AppData\Local\Programs\nodejs\npx.cmd"
 $env:NODE_ENV = "production"
-$output = & npx.cmd --yes "@railway/cli" run --service nfl-web --environment production -- python scripts/fetch_nfl_slates.py 2>&1
-$exitCode = $LASTEXITCODE
+
+try {
+    $output = & $npxPath --yes "@railway/cli" run --service nfl-web --environment production -- python scripts/fetch_nfl_slates.py 2>&1
+    $exitCode = $LASTEXITCODE
+} catch {
+    $output = "WRAPPER_EXCEPTION: $_"
+    $exitCode = 1
+}
 
 Add-Content -Path $logPath -Value $output -Encoding utf8
 Add-Content -Path $logPath -Value "=== $timestamp run end (exit=$exitCode) ===" -Encoding utf8
