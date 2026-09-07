@@ -13,6 +13,7 @@ const ADMIN_NAV_ITEMS = [
   { href: "/admin/slates", label: "Slates", icon: "📋" },
   { href: "/admin/slate-import", label: "CSV Slate Import", icon: "📥" },
   { href: "/admin/draftkings-unofficial", label: "DK Dev Data", icon: "🧪" },
+  { href: "/nfl", label: "NFL", icon: "🏈" },
   { href: "/admin/performance", label: "Performance", icon: "📈" },
   { href: "/admin/system", label: "System", icon: "🖥" },
   { href: "/admin/audit", label: "Audit Log", icon: "🔍" },

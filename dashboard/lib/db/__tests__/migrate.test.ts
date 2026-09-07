@@ -11,12 +11,19 @@ describe("migrations", () => {
     const db = getDb();
     const rows = db.prepare("SELECT filename FROM schema_migrations ORDER BY filename").all() as Array<{ filename: string }>;
     expect(rows.map((r) => r.filename)).toEqual([
+      // M16B: 0009 collides in NUMBER (not filename) between the NFL
+      // saved-lineups migration and main's canonical-foundation
+      // migration -- both are real, both are kept unchanged (never
+      // renumbered; see migrate.ts's own "never reorder, never
+      // renumber" docstring), and the runner tracks/sorts by exact
+      // filename, not numeric prefix, so this is safe. Lexicographic
+      // order: "n" < "s".
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql", "0004_slate_publishing.sql",
       "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql",
-      "0008_slate_change_report.sql", "0009_slate_identity_foundation.sql", "0010_canonical_slate_promotion_metadata.sql",
-      "0011_canonical_shadow_status.sql", "0012_canonical_serving_backend_flag.sql", "0013_canonical_slate_player_eligibility.sql",
-      "0014_canonical_slate_last_validated.sql", "0015_canonical_slate_player_projections.sql", "0016_probable_starters.sql",
-      "0017_admin_csv_import_job_type.sql",
+      "0008_slate_change_report.sql", "0009_nfl_saved_lineups.sql", "0009_slate_identity_foundation.sql",
+      "0010_canonical_slate_promotion_metadata.sql", "0011_canonical_shadow_status.sql", "0012_canonical_serving_backend_flag.sql",
+      "0013_canonical_slate_player_eligibility.sql", "0014_canonical_slate_last_validated.sql", "0015_canonical_slate_player_projections.sql",
+      "0016_probable_starters.sql", "0017_admin_csv_import_job_type.sql",
     ]);
   });
 
@@ -27,7 +34,7 @@ describe("migrations", () => {
     // not re-apply or error since the singleton is already migrated.
     expect(() => getDb()).not.toThrow();
     const rows = db.prepare("SELECT COUNT(*) as c FROM schema_migrations").get() as { c: number };
-    expect(rows.c).toBe(17);
+    expect(rows.c).toBe(18);
   });
 
   it("seeds all 4 sports with MLB LIVE and the rest COMING_SOON", () => {

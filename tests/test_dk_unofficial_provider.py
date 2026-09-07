@@ -408,3 +408,183 @@ def test_config_mock_mode_wins_over_draftkings_unofficial_without_touching_it(mo
     assert provider is not None
     assert provider.name == "mock_dev_provider"
     assert source == "mock_explicit"
+
+
+# M16B -- integration reconciliation tests. This provider file was
+# changed independently on both origin/main (capture/cache kwargs, the
+# 2026-09-01 disk-incident save_snapshot fix, draftable_ids propagation)
+# and origin/nfl-dev (sport-aware structural validation, an `elif
+# sport.upper() == "NFL":` branch calling validate_nfl_classic_
+# draftgroup()) and hand-reconciled here. These tests prove BOTH sides
+# of that reconciliation actually survived, not just that the file
+# still imports.
+
+_NFL_CONTEST = DkContest(
+    contest_id=2, name="NFL $1M Sunday Million", sport_id=1, draft_group_id=20,
+    game_type="Classic", game_type_id=1, start_time_raw=None, start_time_iso=None,
+)
+_VALID_NFL_ROSTER_SLOTS = [DkRosterSlot(roster_slot_id=60 + i, name=n) for i, n in enumerate(
+    ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"]
+)]
+_VALID_NFL_ROSTER_RULES = DkRosterRules(
+    game_type_id=1, sport_id=1, name="Classic", draft_type="SalaryCap",
+    salary_cap_enabled=True, salary_cap=50000, roster_slots=_VALID_NFL_ROSTER_SLOTS,
+)
+
+
+def _nfl_slate(dg_id=20):
+    return DkSlate(draft_group_id=dg_id, sport_id=1, sport_code="NFL", game_type_id=1,
+                   game_type_name="Classic", start_time="2026-09-13T17:00:00Z",
+                   tag="Featured", label=None, contest_ids=[2],
+                   raw={"StartDateEst": "2026-09-13T17:00:00.0000000"})
+
+
+def _nfl_detail_ok():
+    game = DkSlateGame(competition_id=200, sport_id=1, name="DAL @ PHI", start_time="2026-09-13T17:00:00Z",
+                        home_team=DkTeam(team_id=1, abbreviation="PHI"), away_team=DkTeam(team_id=2, abbreviation="DAL"))
+    draftable = DkDraftable(draftable_id=1, draft_group_id=20, player_id=1, player_dk_id=1, display_name="Starting QB",
+                             first_name=None, last_name=None, position="QB", roster_slot_id=60, salary=7500,
+                             status="None", team_id=1, team_abbreviation="PHI", competition_id=200)
+    return collector.SlateDetailResult(status=collector.STATUS_OK, draft_group_id=20, games=[game], draftables=[draftable], roster_rules=_VALID_NFL_ROSTER_RULES)
+
+
+def _nfl_detail_bad_roster():
+    # Same shape as _nfl_detail_ok() but the roster rules are MLB's, not
+    # NFL's -- must fail validate_nfl_classic_draftgroup structurally.
+    detail = _nfl_detail_ok()
+    return collector.SlateDetailResult(status=collector.STATUS_OK, draft_group_id=20, games=detail.games,
+                                        draftables=detail.draftables, roster_rules=_VALID_ROSTER_RULES)
+
+
+def test_nfl_sport_runs_nfl_structural_validation_and_gets_live_provenance(monkeypatch):
+    """NFL-dev side of the reconciliation: sport="NFL" must run
+    validate_nfl_classic_draftgroup (not skip validation entirely, and
+    not run the MLB validator), and a structurally valid NFL DraftGroup
+    must be upgraded to DRAFTKINGS_UNOFFICIAL_LIVE, exactly like MLB."""
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="NFL", slates=[_nfl_slate()], contests=[_NFL_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _nfl_detail_ok())
+
+    provider = DraftKingsUnofficialProvider()
+    result = provider.get_slate("2026-09-13", sport="NFL")
+    assert len(result.slates) == 1
+    assert result.slates[0].source_provenance == DRAFTKINGS_UNOFFICIAL_LIVE
+    players = result.players_by_slate[result.slates[0].slate_id]
+    assert players[0].name == "Starting QB"
+
+
+def test_nfl_sport_skips_a_structurally_invalid_draftgroup(monkeypatch):
+    """A DraftGroup claiming sport=NFL but carrying MLB's real roster
+    template must fail validate_nfl_classic_draftgroup and be skipped
+    with a warning -- the same failure-handling path MLB already has,
+    now reachable for NFL too."""
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="NFL", slates=[_nfl_slate()], contests=[_NFL_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _nfl_detail_bad_roster())
+
+    provider = DraftKingsUnofficialProvider()
+    with pytest.raises(ProviderUnavailableError):
+        provider.get_slate("2026-09-13", sport="NFL")
+
+
+def test_mlb_structural_validation_still_runs_exactly_as_before_reconciliation(monkeypatch):
+    """Main side of the reconciliation, re-proven directly against the
+    hand-merged file: sport="MLB" must still run validate_classic_
+    draftgroup (the original, unmodified MLB path) -- the new `elif
+    NFL:` branch must never shadow or replace it."""
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="MLB", slates=[_slate()], contests=[_CLASSIC_CONTEST])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: _detail_ok())
+
+    provider = DraftKingsUnofficialProvider()
+    result = provider.get_slate("2026-08-20", sport="MLB")
+    assert result.slates[0].source_provenance == DRAFTKINGS_UNOFFICIAL_LIVE
+
+
+def test_a_third_sport_with_no_validator_keeps_the_original_unverified_claim(monkeypatch):
+    """Main side of the reconciliation: a sport that is neither MLB nor
+    NFL must fall through with structural_result=None (the original
+    pre-NFL behavior for every non-MLB sport), never crash, never
+    silently claim LIVE provenance."""
+    monkeypatch.setenv("DK_UNOFFICIAL_ENABLED", "true")
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    other_contest = DkContest(contest_id=3, name="NBA Contest", sport_id=4, draft_group_id=30,
+                               game_type="Classic", game_type_id=1, start_time_raw=None, start_time_iso=None)
+    other_slate = DkSlate(draft_group_id=30, sport_id=4, sport_code="NBA", game_type_id=1,
+                           game_type_name="Classic", start_time="2026-08-20T18:00:00Z",
+                           tag="Featured", label=None, contest_ids=[3],
+                           raw={"StartDateEst": "2026-08-20T18:00:00.0000000"})
+    game = DkSlateGame(competition_id=300, sport_id=4, name="LAL @ BOS", start_time="2026-08-20T18:00:00Z",
+                        home_team=DkTeam(team_id=1, abbreviation="BOS"), away_team=DkTeam(team_id=2, abbreviation="LAL"))
+    draftable = DkDraftable(draftable_id=1, draft_group_id=30, player_id=1, player_dk_id=1, display_name="Player",
+                             first_name=None, last_name=None, position="G", roster_slot_id=1, salary=8000,
+                             status="None", team_id=1, team_abbreviation="BOS", competition_id=300)
+    detail = collector.SlateDetailResult(status=collector.STATUS_OK, draft_group_id=30, games=[game], draftables=[draftable], roster_rules=None)
+
+    universe = collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="NBA", slates=[other_slate], contests=[other_contest])
+    monkeypatch.setattr(collector, "collect_sport_universe", lambda sport_code, **k: universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", lambda *a, **k: detail)
+
+    provider = DraftKingsUnofficialProvider()
+    result = provider.get_slate("2026-08-20", sport="NBA")
+    assert result.slates[0].source_provenance == UNOFFICIAL_DEVELOPMENT_SOURCE
+
+
+def test_disk_incident_fix_still_applies_when_sport_is_nfl(monkeypatch):
+    """Main's 2026-09-01 disk-incident fix (save_snapshot defaults OFF)
+    is sport-agnostic in the code -- prove it still applies for
+    sport="NFL", not just the MLB path the original incident happened
+    on, since NFL's scheduled worker uses the exact same collector
+    functions."""
+    monkeypatch.delenv("DK_UNOFFICIAL_LOCAL_RAW_ARCHIVE_ENABLED", raising=False)
+    from dfs.providers.draftkings_unofficial_provider import DraftKingsUnofficialProvider
+
+    captured: dict = {}
+
+    def fake_universe(sport_code, **kwargs):
+        captured["universe"] = kwargs
+        return collector.SportUniverseResult(status=collector.STATUS_OK, sport_code="NFL", slates=[_nfl_slate()], contests=[_NFL_CONTEST])
+
+    def fake_detail(*args, **kwargs):
+        captured["detail"] = kwargs
+        return _nfl_detail_ok()
+
+    monkeypatch.setattr(collector, "collect_sport_universe", fake_universe)
+    monkeypatch.setattr(collector, "collect_slate_detail", fake_detail)
+
+    DraftKingsUnofficialProvider().get_slate("2026-09-13", sport="NFL")
+
+    assert captured["universe"]["save_snapshot"] is False
+    assert captured["detail"]["save_snapshot"] is False
+
+
+def test_no_mock_or_csv_fallback_was_introduced_by_reconciliation():
+    """Structural proof mirroring test_disabling_local_raw_archive_does_
+    not_affect_r2_persistence's discipline: the reconciled file must
+    still never import a CSV or mock provider module -- the merge must
+    not have introduced any new fallback path."""
+    import ast
+    import inspect
+
+    import dfs.providers.draftkings_unofficial_provider as provider_module
+
+    source = inspect.getsource(provider_module)
+    tree = ast.parse(source)
+    imported_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_names.add(alias.name)
+    assert not any("csv" in name.lower() or "mock" in name.lower() for name in imported_names)
