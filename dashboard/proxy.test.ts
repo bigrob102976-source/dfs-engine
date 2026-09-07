@@ -86,4 +86,53 @@ describe("proxy (cheap Edge session-cookie gate)", () => {
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
   });
+
+  it("never redirects /api/dev/auto-login itself, even without a cookie -- it must be reachable to establish a session", () => {
+    const res = proxy(requestFor("/api/dev/auto-login"));
+    expect(res.status).toBe(200);
+  });
+
+  describe("M16B integration: NFL public access", () => {
+    it("never redirects /nfl itself, even without a cookie", () => {
+      const res = proxy(requestFor("/nfl"));
+      expect(res.status).toBe(200);
+    });
+
+    it("never redirects any /nfl/* subpage, even without a cookie", () => {
+      for (const path of ["/nfl/players", "/nfl/optimizer", "/nfl/lineups", "/nfl/saved", "/nfl/saved/some-id"]) {
+        const res = proxy(requestFor(path));
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("never redirects /api/nfl/* routes, even without a cookie -- real auth (or its absence) is enforced by the route handler, not this cheap gate", () => {
+      for (const path of ["/api/nfl/data", "/api/nfl/slates", "/api/nfl/optimize", "/api/nfl/lineups", "/api/nfl/lineups/some-id", "/api/nfl/lineups/some-id/late-swap", "/api/nfl/export"]) {
+        const res = proxy(requestFor(path));
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it("root / is completely unaffected by NFL integration -- still redirects a cookie-less visitor to /login (main's existing /dashboard gate)", () => {
+      const res = proxy(requestFor("/"));
+      expect(res.status).toBe(307);
+      expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    });
+
+    it("does NOT make /dashboard/nfl (the old standalone-service path) public -- NFL lives at /nfl in the integrated app", () => {
+      const res = proxy(requestFor("/dashboard/nfl"));
+      expect(res.status).toBe(307);
+      expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    });
+
+    it("does not widen public access to bare /dashboard or other MLB dashboard paths", () => {
+      const res = proxy(requestFor("/dashboard"));
+      expect(res.status).toBe(307);
+      expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+    });
+
+    it("admin paths remain protected -- NFL's additions never widen /admin or /api/admin", () => {
+      expect(proxy(requestFor("/admin")).status).toBe(307);
+      expect(proxy(requestFor("/api/admin/users")).status).toBe(307);
+    });
+  });
 });

@@ -42,6 +42,27 @@ const PUBLIC_PATH_PREFIXES = [
   // can never accidentally widen to cover a different, actually-
   // protected API route.
   "/api/health",
+  // NFL local dev auto-login: this exact route (app/api/dev/auto-login/
+  // route.ts) has to be reachable with NO session cookie yet -- that's
+  // the whole point of it. Safe to leave public unconditionally: the
+  // route's own isLocalDevAutoLoginEnabled() check makes it a no-op
+  // redirect to /login whenever NODE_ENV isn't development or the flag
+  // isn't set, exactly like every other route it doesn't touch.
+  "/api/dev/auto-login",
+  // M16B integration: the NFL customer product (dashboard, slates,
+  // player pool, optimizer, build/generate) is intentionally reachable
+  // with no login at all -- see app/nfl/layout.tsx and app/api/nfl/*'s
+  // own docstrings for exactly which NFL API routes still require auth
+  // (saved lineups / late swap / persisted-lineup export -- all
+  // user-owned data, gated by their own requireAuthApi() calls
+  // regardless of what this cheap proxy-level check does). This only
+  // skips the redirect-to-login; it grants no route anything it doesn't
+  // already independently allow. Root "/" deliberately keeps its
+  // existing behavior (redirect to /dashboard, still auth-gated) --
+  // NFL does not replace the combined app's landing page, it's reached
+  // via the sport nav instead (Sidebar.tsx).
+  "/nfl",
+  "/api/nfl",
 ];
 
 export function proxy(request: NextRequest) {

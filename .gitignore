@@ -91,6 +91,13 @@ dashboard/next-env.d.ts
 # live sources, never source. See historical_mlb/.
 /data/historical/
 
+# NFL M6A: raw nflverse historical snapshots -- reproducible by
+# re-running historical_nfl/ingest.py against live nflverse data, never
+# source. Real single-week snapshots run tens of MB (play-by-play
+# especially); same "never commit reproducible fetched data" rule as
+# /data/historical/ above. See historical_nfl/.
+/historical/
+
 # Milestone 32.2: trained model artifacts (model.joblib, metrics,
 # feature importance, etc.) -- reproducible by re-running
 # `python -m historical_models.pitcher_v1.train` against the warehouse,
@@ -100,6 +107,10 @@ dashboard/next-env.d.ts
 # env files -- never commit secrets (DFS_SALARY_PROVIDER / DFS_PROVIDER_API_KEY, etc.)
 .env
 .env.*
+
+# NFL M15: BigMoneyDFS_NFL_DK_Fetch_Worker's own run log -- local runtime
+# state, not source. See scripts/run_nfl_dk_fetch_worker.ps1.
+/logs/
 
 # OS / editor
 .DS_Store

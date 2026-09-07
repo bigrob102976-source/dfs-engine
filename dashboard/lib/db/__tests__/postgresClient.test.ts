@@ -33,11 +33,16 @@ describe("listPostgresMigrationFiles", () => {
   it("lists every *.sql file in lib/db/migrations-postgres, sorted", () => {
     const files = listPostgresMigrationFiles();
     expect(files).toEqual([
+      // M16B: 0010 collides in NUMBER (not filename) between the NFL
+      // saved-lineups migration and main's canonical-foundation
+      // migration -- both real, both kept unchanged (never renumbered;
+      // filename-tracked runner, "n" < "s" lexicographically). See
+      // migrate.test.ts's matching note for the SQLite-side 0009 case.
       "0001_init.sql", "0002_seed_reference_data.sql", "0003_stripe_billing.sql",
       "0004_slate_publishing.sql", "0005_production_infrastructure.sql", "0006_big_money_ml_optimizer_flag.sql",
       "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql", "0009_ordering_sequence_columns.sql",
-      "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql", "0012_canonical_shadow_status.sql",
-      "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
+      "0010_nfl_saved_lineups.sql", "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql",
+      "0012_canonical_shadow_status.sql", "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
       "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql",
       "0017_probable_starters.sql", "0018_admin_csv_import_job_type.sql",
     ]);
@@ -65,10 +70,10 @@ describe("runPostgresMigrations", () => {
     expect(result.applied).toEqual([
       "0003_stripe_billing.sql", "0004_slate_publishing.sql", "0005_production_infrastructure.sql",
       "0006_big_money_ml_optimizer_flag.sql", "0007_bluecollar_optimizer_flag.sql", "0008_slate_change_report.sql",
-      "0009_ordering_sequence_columns.sql", "0010_slate_identity_foundation.sql", "0011_canonical_slate_promotion_metadata.sql",
-      "0012_canonical_shadow_status.sql", "0013_canonical_serving_backend_flag.sql", "0014_canonical_slate_player_eligibility.sql",
-      "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql", "0017_probable_starters.sql",
-      "0018_admin_csv_import_job_type.sql",
+      "0009_ordering_sequence_columns.sql", "0010_nfl_saved_lineups.sql", "0010_slate_identity_foundation.sql",
+      "0011_canonical_slate_promotion_metadata.sql", "0012_canonical_shadow_status.sql", "0013_canonical_serving_backend_flag.sql",
+      "0014_canonical_slate_player_eligibility.sql", "0015_canonical_slate_last_validated.sql", "0016_canonical_slate_player_projections.sql",
+      "0017_probable_starters.sql", "0018_admin_csv_import_job_type.sql",
     ]);
   });
 

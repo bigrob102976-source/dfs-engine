@@ -1,0 +1,270 @@
+"""NFL UI M1 -- the single real-data bridge the dashboard's NFL API
+routes call (via the existing MLB_DFS_PYTHON subprocess convention,
+mirroring dashboard/lib/orchestrator/pythonRunner.ts's pattern). Prints
+ONE JSON object to stdout: real DK slate/pool, real usage features, real
+matchup/game context (honestly empty without M7 odds credentials), and
+real Big Money Native projections (honestly absent for any player/
+position without a real trained model or resolved identity).
+
+Never fabricates: every "not available" field is null, never a guessed
+number -- the dashboard is responsible for rendering null as an honest
+"--" / "Not Available", never as 0.
+
+Usage:
+    python scripts/nfl_dashboard_data.py <draft_group_id>
+"""
+
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from historical_nfl.identity_persistence import load_crosswalk
+from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
+from nfl.game_context_builder import build_nfl_game_context
+from nfl.game_lock import GameStartTimeMissingError, build_game_lock_info
+from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
+from nfl.ownership_models import NflOwnershipInputPlayer
+from nfl.pool_builder import NflPoolBuildError
+from nfl.pool_cache import NflSlateDiscoveryError, resolve_nfl_slate_date
+from nfl.status import build_status_info
+
+
+def _player_dict(player) -> dict:
+    return {
+        "draftkings_player_id": player.draftkings_player_id,
+        "name": player.name,
+        "position": player.position,
+        "team": player.team,
+        "opponent": player.opponent,
+        "game_id": player.game_id,
+        "salary": player.salary,
+        "roster_slots": player.roster_slots,
+        "is_team_entity": player.is_team_entity,
+        "status": player.status,
+        "injury_status": player.injury_status,
+    }
+
+
+def main(draft_group_id: int) -> int:
+    try:
+        slate_date = resolve_nfl_slate_date(draft_group_id)
+    except NflSlateDiscoveryError as exc:
+        print(json.dumps({"error": f"DISCOVERY_FAILED: {exc}"}))
+        return 1
+    if slate_date is None:
+        print(json.dumps({"error": f"DraftGroup {draft_group_id} not found in current NFL universe."}))
+        return 1
+
+    try:
+        ctx = build_current_nfl_projection_features(draft_group_id, slate_date)
+    except NflPoolBuildError as exc:
+        print(json.dumps({"error": f"BUILD_POOL_FAILED: {exc}"}))
+        return 1
+
+    pool = ctx["pool"]
+    crosswalk = load_crosswalk()
+
+    # Real matchup/game context (M7) -- honestly empty without odds
+    # credentials, never fabricated. Reuses M2's own canonical pool
+    # (never a second fetch).
+    game_ctx_result = build_nfl_game_context(pool.players, draft_group_id, pool.slate_date)
+    games_by_id = {g.canonical_game_id: g for g in game_ctx_result.match_result.games}
+
+    # Real projections (reuses the SAME ctx -- no second historical fetch)
+    try:
+        projection_records = generate_projections(draft_group_id, slate_date, ctx=ctx)
+    except Exception as exc:  # noqa: BLE001 -- no trained model artifacts locally is a real, expected state to report honestly, never crash the dashboard
+        projection_records = []
+        projection_error = str(exc)
+    else:
+        projection_error = None
+    projections_by_dk_id = {r.draftkings_player_id: r for r in projection_records}
+
+    usage_by_dk_id = {f.draftkings_player_id: f for f in ctx["join_result"].features}
+
+    # NFL M12: Big Money Native ownership -- reuses the SAME pool,
+    # projections, and game context already computed above (never a
+    # second fetch). Only players with a real, usable projection get an
+    # ownership record at all (see nfl/ownership_model.py's module
+    # docstring) -- every other player's row["ownership"] stays None,
+    # never a fabricated 0%.
+    team_implied_total = {}
+    for g in games_by_id.values():
+        if g.home_team:
+            team_implied_total[g.home_team] = g.home_implied_total
+        if g.away_team:
+            team_implied_total[g.away_team] = g.away_implied_total
+
+    ownership_input_players = []
+    for p in pool.players:
+        proj = projections_by_dk_id.get(p.draftkings_player_id)
+        if proj is None or proj.projection is None:
+            continue
+        usage = usage_by_dk_id.get(p.draftkings_player_id)
+        usage_share = _usage_share_for_player(
+            p.position, usage.rolling if usage else None, usage.season_to_date if usage else None,
+        )
+        ownership_input_players.append(NflOwnershipInputPlayer(
+            draftkings_player_id=p.draftkings_player_id, name=p.name, position=p.position, team=p.team,
+            opponent=p.opponent, salary=p.salary, projection=proj.projection, ceiling=proj.ceiling,
+            usage_share=usage_share, team_implied_total=team_implied_total.get(p.team),
+            opponent_implied_total=(team_implied_total.get(p.opponent) if p.opponent else None),
+        ))
+
+    ownership_records = []
+    ownership_normalization_report = {}
+    if ownership_input_players:
+        ownership_records, ownership_normalization_report = build_nfl_ownership_projections(
+            ownership_input_players, draft_group_id, slate_date, pool.source_provenance,
+            datetime.now(timezone.utc).isoformat(),
+        )
+    ownership_by_dk_id = {r.draftkings_player_id: r for r in ownership_records}
+
+    # Real games list (from the canonical pool -- derived, not guessed)
+    games = {}
+    for p in pool.players:
+        if p.game_id not in games:
+            games[p.game_id] = {
+                "game_id": p.game_id, "game_description": p.game_description, "game_start_time": p.game_start_time,
+            }
+    now_utc = datetime.now(timezone.utc)
+    game_rows = []
+    for game_id, g in games.items():
+        matched = games_by_id.get(game_id)
+        # NFL M14 -- real per-game lock state (nfl/game_lock.py), never a
+        # blanket slate-wide cutoff. None only when DK hasn't published a
+        # start time for this game yet.
+        # home_team/away_team: prefer the odds-provider match when
+        # configured, else parse DK's own real "AWAY @ HOME"
+        # game_description (always available, no Vegas credentials
+        # needed) -- never guessed if that string is absent/malformed.
+        home_team, away_team = (matched.home_team, matched.away_team) if matched else (None, None)
+        if home_team is None and away_team is None and g.get("game_description") and " @ " in g["game_description"]:
+            away_team, home_team = g["game_description"].split(" @ ", 1)
+        try:
+            lock_info = build_game_lock_info(
+                game_id, g["game_start_time"], now_utc, home_team=home_team, away_team=away_team,
+            ).to_dict()
+        except GameStartTimeMissingError:
+            lock_info = None
+        game_rows.append({
+            **g,
+            "spread_home": matched.spread if matched else None,
+            "total": matched.total if matched else None,
+            "home_implied_total": matched.home_implied_total if matched else None,
+            "away_implied_total": matched.away_implied_total if matched else None,
+            "lock": lock_info,
+        })
+    game_lock_by_id = {g["game_id"]: g["lock"] for g in game_rows}
+
+    players = []
+    for p in pool.players:
+        row = _player_dict(p)
+        crosswalk_row = crosswalk.get(p.draftkings_player_id)
+        row["gsis_id"] = crosswalk_row.gsis_id if crosswalk_row else None
+        row["identity_resolved"] = bool(crosswalk_row and crosswalk_row.gsis_id)
+        # NFL M14 -- real DK status normalized into a standard status
+        # vocabulary + the default exclusion/warning policy (nfl/status.py).
+        row["status_info"] = build_status_info(p.status).to_dict()
+        row["game_lock"] = game_lock_by_id.get(p.game_id)
+
+        usage = usage_by_dk_id.get(p.draftkings_player_id)
+        row["usage"] = {"rolling": usage.rolling, "season_to_date": usage.season_to_date} if usage else None
+
+        proj = projections_by_dk_id.get(p.draftkings_player_id)
+        if proj is not None:
+            row["projection"] = {
+                "projection": proj.projection, "floor": proj.floor, "ceiling": proj.ceiling,
+                "source": proj.source, "model_name": proj.model_name, "model_version": proj.model_version,
+            }
+        else:
+            row["projection"] = None
+
+        own = ownership_by_dk_id.get(p.draftkings_player_id)
+        if own is not None:
+            row["ownership"] = {
+                "ownership_projection": own.ownership_projection, "ownership_rank": own.ownership_rank,
+                "ownership_tier": own.ownership_tier, "chalk_score": own.chalk_score,
+                "leverage_score": own.leverage_score, "ownership_confidence": own.ownership_confidence,
+                "value": own.value, "flex_ownership_component": own.flex_ownership_component,
+                "source": own.source, "method": own.method, "model_version": own.model_version,
+            }
+        else:
+            row["ownership"] = None
+
+        matched_game = games_by_id.get(p.game_id)
+        row["matchup"] = {
+            "spread_home": matched_game.spread if matched_game else None,
+            "total": matched_game.total if matched_game else None,
+            "home_implied_total": matched_game.home_implied_total if matched_game else None,
+            "away_implied_total": matched_game.away_implied_total if matched_game else None,
+        } if matched_game else None
+
+        # DST opponent-context usage (M11) -- attached separately since
+        # DST players aren't in join_result (offense-only)
+        if p.is_team_entity:
+            from historical_nfl.dst_rolling import compute_dst_rolling_features
+            from historical_nfl.team_offense_rolling import compute_team_offense_rolling_features
+            rolling = dict(compute_dst_rolling_features(ctx["dst_records"], p.team, ctx["current_week"]))
+            if p.opponent:
+                rolling.update(compute_team_offense_rolling_features(ctx["team_offense_records"], p.opponent, ctx["current_week"]))
+            row["usage"] = {"rolling": rolling, "season_to_date": {}}
+
+        players.append(row)
+
+    position_counts = {}
+    for p in pool.players:
+        pos = "DST" if p.is_team_entity else p.position
+        position_counts[pos] = position_counts.get(pos, 0) + 1
+
+    resolved_count = sum(1 for p in players if p["identity_resolved"] or p["is_team_entity"])
+    projected_count = sum(1 for p in players if p["projection"] is not None)
+    projection_coverage_by_position = {}
+    ownership_coverage_by_position = {}
+    for pos in ("QB", "RB", "WR", "TE", "DST"):
+        pos_players = [p for p in players if (("DST" if p["is_team_entity"] else p["position"]) == pos)]
+        pos_projected = [p for p in pos_players if p["projection"] is not None]
+        projection_coverage_by_position[pos] = {"total": len(pos_players), "projected": len(pos_projected)}
+        pos_owned = [p for p in pos_players if p["ownership"] is not None]
+        ownership_coverage_by_position[pos] = {"total": len(pos_players), "generated": len(pos_owned)}
+
+    ownership_generated_count = sum(1 for p in players if p["ownership"] is not None)
+
+    output = {
+        "draft_group_id": draft_group_id,
+        "slate_date": pool.slate_date,
+        "slate_name": pool.slate_name,
+        "source_provenance": pool.source_provenance,
+        "salary_cap": 50000,
+        "current_season": ctx["current_season"],
+        "current_week": ctx["current_week"],
+        "prior_season": ctx["prior_season"],
+        "current_completed_weeks": ctx["current_completed_weeks"],
+        "games": game_rows,
+        "game_count": len(game_rows),
+        "player_count": len(players),
+        "position_counts": position_counts,
+        "identity": {"total": len(players), "resolved": resolved_count, "unresolved": len(players) - resolved_count},
+        "projection_coverage": projection_coverage_by_position,
+        "projection_error": projection_error,
+        "ownership_coverage": ownership_coverage_by_position,
+        "ownership_generated": ownership_generated_count,
+        "ownership_missing": len(players) - ownership_generated_count,
+        "ownership_normalization": ownership_normalization_report or None,
+        "ownership_model_version": ownership_records[0].model_version if ownership_records else None,
+        "vegas_configured": game_ctx_result.odds_fetch.source_provenance != "not_configured",
+        "vegas_source_provenance": game_ctx_result.odds_fetch.source_provenance,
+        "players": players,
+    }
+    print(json.dumps(output, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print(json.dumps({"error": "Usage: python scripts/nfl_dashboard_data.py <draft_group_id>"}))
+        sys.exit(2)
+    sys.exit(main(int(sys.argv[1])))
