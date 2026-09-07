@@ -102,4 +102,78 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     expect(screen.getByText("Hitters").closest("a")).toHaveAttribute("href", "/dashboard/hitters");
   });
+
+  describe("M16D -- unified sport switcher (shared by MLB and NFL)", () => {
+    it("always renders both MLB and NFL sport links, on an MLB page", () => {
+      mockUsePathname.mockReturnValue("/dashboard");
+      render(<Sidebar />);
+      expect(screen.getByText("MLB").closest("a")).toHaveAttribute("href", "/dashboard");
+      expect(screen.getByText("NFL").closest("a")).toHaveAttribute("href", "/nfl");
+    });
+
+    it("always renders both MLB and NFL sport links, on an NFL page", () => {
+      mockUsePathname.mockReturnValue("/nfl/optimizer");
+      render(<Sidebar />);
+      expect(screen.getByText("MLB").closest("a")).toHaveAttribute("href", "/dashboard");
+      expect(screen.getByText("NFL").closest("a")).toHaveAttribute("href", "/nfl");
+    });
+
+    it("marks MLB as the active sport on any /dashboard route", () => {
+      mockUsePathname.mockReturnValue("/dashboard/optimizer");
+      render(<Sidebar />);
+      expect(screen.getByText("MLB").closest("a")).toHaveAttribute("aria-current", "page");
+      expect(screen.getByText("NFL").closest("a")).not.toHaveAttribute("aria-current");
+    });
+
+    it("marks NFL as the active sport on any /nfl route", () => {
+      mockUsePathname.mockReturnValue("/nfl/players");
+      render(<Sidebar />);
+      expect(screen.getByText("NFL").closest("a")).toHaveAttribute("aria-current", "page");
+      expect(screen.getByText("MLB").closest("a")).not.toHaveAttribute("aria-current");
+    });
+
+    it("shows the full NFL navigation (not MLB's) once on an /nfl route", () => {
+      mockUsePathname.mockReturnValue("/nfl");
+      render(<Sidebar />);
+      for (const label of ["Players", "Matchups", "Projections", "Optimizer", "Lineups", "Saved / Late Swap", "Usage"]) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+      // MLB-only labels must not leak into the NFL nav.
+      expect(screen.queryByText("Pitchers")).not.toBeInTheDocument();
+      expect(screen.queryByText("Hitters")).not.toBeInTheDocument();
+      expect(screen.queryByText("Stacks")).not.toBeInTheDocument();
+    });
+
+    it("shows the full MLB navigation (not NFL's) on a /dashboard route", () => {
+      mockUsePathname.mockReturnValue("/dashboard");
+      render(<Sidebar />);
+      expect(screen.getByText("Pitchers")).toBeInTheDocument();
+      expect(screen.getByText("Hitters")).toBeInTheDocument();
+      // NFL-only labels must not leak into the MLB nav.
+      expect(screen.queryByText("Matchups")).not.toBeInTheDocument();
+      expect(screen.queryByText("Saved / Late Swap")).not.toBeInTheDocument();
+    });
+
+    it("marks only the exact /nfl route as active among NFL items, not every nested /nfl/* route", () => {
+      mockUsePathname.mockReturnValue("/nfl/players");
+      render(<Sidebar />);
+      expect(screen.getAllByText("Dashboard")[0].closest("a")).not.toHaveAttribute("aria-current");
+      expect(screen.getByText("Players").closest("a")).toHaveAttribute("aria-current", "page");
+    });
+
+    it("carries the current ?draftGroupId= forward on every NFL nav link", () => {
+      mockUsePathname.mockReturnValue("/nfl");
+      mockSearchParams = new URLSearchParams("draftGroupId=151307");
+      render(<Sidebar />);
+      expect(screen.getByText("Players").closest("a")).toHaveAttribute("href", "/nfl/players?draftGroupId=151307");
+      expect(screen.getByText("Optimizer").closest("a")).toHaveAttribute("href", "/nfl/optimizer?draftGroupId=151307");
+    });
+
+    it("does not leak MLB's ?slate=/?date= onto NFL links, or NFL's ?draftGroupId= onto MLB links", () => {
+      mockUsePathname.mockReturnValue("/nfl");
+      mockSearchParams = new URLSearchParams("slate=dkunofficial-152547&date=2026-08-21");
+      render(<Sidebar />);
+      expect(screen.getByText("Players").closest("a")).toHaveAttribute("href", "/nfl/players");
+    });
+  });
 });

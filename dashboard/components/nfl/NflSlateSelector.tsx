@@ -16,7 +16,9 @@ interface RealNflSlate {
 /** NFL UI M1 -- real DraftKings NFL Classic slate selector (never
  * hardcoded to one DraftGroup; fetches the live discovery API). Updates
  * the current page's ?draftGroupId= query param so the selection is
- * shareable and carries across NflTabs navigation. */
+ * shareable and carries across sidebar navigation (M16D: the sidebar
+ * carries ?draftGroupId= forward the same way it carries MLB's
+ * ?slate=/?date=, mirroring this selector's own convention). */
 export function NflSlateSelector() {
   const router = useRouter();
   const pathname = usePathname();
