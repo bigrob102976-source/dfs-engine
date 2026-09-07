@@ -64,7 +64,7 @@ function OptimizerContent() {
         return;
       }
       saveOptimizeResult(draftGroupId, json);
-      router.push(`/dashboard/nfl/lineups?draftGroupId=${draftGroupId}`);
+      router.push(`/nfl/lineups?draftGroupId=${draftGroupId}`);
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : "Unknown error building lineups.");
     } finally {
@@ -106,7 +106,7 @@ function OptimizerContent() {
           <PrimaryButton onClick={build} disabled={building || !canBuild}>
             {building ? "Building…" : "Build Lineups"}
           </PrimaryButton>
-          <SecondaryButton onClick={() => router.push(`/dashboard/nfl/players?draftGroupId=${draftGroupId}`)}>Edit Locks/Excludes</SecondaryButton>
+          <SecondaryButton onClick={() => router.push(`/nfl/players?draftGroupId=${draftGroupId}`)}>Edit Locks/Excludes</SecondaryButton>
         </div>
         <p className="mt-2 text-[11px] text-text-faint">{OBJECTIVE_EXPLANATIONS[mode]}</p>
         {isScoringMode && !canBuild && (

@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("draftGroupId=151307"),
-  usePathname: () => "/dashboard/nfl/optimizer",
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn() }),
+  usePathname: () => "/nfl/optimizer",
+  useRouter: () => ({ push: pushMock, replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn() }),
 }));
 
 import NflOptimizerPage from "../page";
@@ -25,6 +26,7 @@ const SLATE_DATA = {
 };
 
 beforeEach(() => {
+  pushMock.mockClear();
   window.localStorage.clear();
   vi.stubGlobal("fetch", vi.fn((url: string) => {
     if (typeof url === "string" && url.includes("/api/nfl/data")) {
@@ -92,6 +94,30 @@ describe("NFL Optimizer page -- stacking/objective/exposure controls (NFL M13)",
       expect(optimizeCall).toBeDefined();
       const body = JSON.parse(optimizeCall![1].body as string);
       expect(body.stack.qbStackMode).toBe("double");
+    });
+  });
+
+  describe("navigation targets NFL public access -- regression for the /dashboard/nfl 404 bug", () => {
+    it("Build Lineups navigates to /nfl/lineups, NOT the deleted /dashboard/nfl/lineups", async () => {
+      render(<NflOptimizerPage />);
+      await waitFor(() => expect(screen.getByText("Build Lineups")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText("Build Lineups"));
+
+      await waitFor(() => {
+        expect(pushMock).toHaveBeenCalledWith(expect.stringMatching(/^\/nfl\/lineups\?/));
+      });
+      expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining("/dashboard/nfl"));
+    });
+
+    it("Edit Locks/Excludes navigates to /nfl/players, NOT the deleted /dashboard/nfl/players", async () => {
+      render(<NflOptimizerPage />);
+      await waitFor(() => expect(screen.getByText("Edit Locks/Excludes")).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText("Edit Locks/Excludes"));
+
+      expect(pushMock).toHaveBeenCalledWith(expect.stringMatching(/^\/nfl\/players\?/));
+      expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining("/dashboard/nfl"));
     });
   });
 });
