@@ -21,19 +21,23 @@ export async function userCanUseCanonicalServing(user: { id: string; role: strin
 }
 
 /** M5C -- the single choke point every customer-facing route must call
- * to pick a serving backend. `requestedKind` is an EXPLICIT, OPT-IN
- * request (e.g. an admin's own UI toggle) -- never inferred from a
- * prior failure, and NEVER honored for a user who doesn't currently
- * pass userCanUseCanonicalServing(). The production default (no
- * requestedKind, or a non-visible user) is ALWAYS LegacyR2ServingBackend
- * -- this function contains the only branch that can ever choose
- * otherwise, so rolling back to legacy for everyone is always exactly
- * "flip the feature flag to DISABLED" (see lib/entitlements/
- * featureVisibility.ts), never a code change. */
+ * to pick a serving backend. URGENT FIX (2026-09-08): canonical is now
+ * the DEFAULT for any user who passes userCanUseCanonicalServing() --
+ * previously this required an EXPLICIT `requestedKind === "CANONICAL_
+ * POSTGRES"` from the caller, which no customer-facing page ever sent,
+ * so flipping the flag to PRODUCTION on 2026-09-03 silently did nothing
+ * for real traffic (confirmed live: every ordinary request kept
+ * resolving to LegacyR2ServingBackend, which has been broken/empty
+ * since the same date). `requestedKind` is now ignored -- kept in the
+ * signature only so existing call sites compile unchanged.
+ * DISABLED remains a full kill switch (isFeatureVisibleToUser returns
+ * false for everyone, including ADMIN, when the flag is DISABLED) --
+ * rolling back to legacy for everyone is still always exactly "flip the
+ * feature flag to DISABLED," never a code change. */
 export async function resolveServingBackend(
-  user: { id: string; role: string } | null, requestedKind?: ServingBackendKind | null,
+  user: { id: string; role: string } | null, _requestedKind?: ServingBackendKind | null,
 ): Promise<SlateServingBackend> {
-  if (requestedKind === "CANONICAL_POSTGRES" && (await userCanUseCanonicalServing(user))) {
+  if (await userCanUseCanonicalServing(user)) {
     return CanonicalPostgresServingBackend;
   }
   return LegacyR2ServingBackend;
