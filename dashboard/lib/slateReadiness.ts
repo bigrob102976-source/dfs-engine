@@ -21,20 +21,27 @@ import type { ResearchGame } from "./types";
 import type { PlayerRow } from "./types";
 
 export interface CoverageCount {
-  covered: number;
+  /** null == genuinely UNKNOWN (the source document this count comes
+   * from is absent), which is NOT the same as "zero are covered" and
+   * must never be rendered as a number. See buildSlateReadinessSummary. */
+  covered: number | null;
   eligible: number;
 }
 
 export interface SlateReadinessSummary {
-  dkPlayers: number;
-  identityResolved: number;
+  /** False when no dk_match_report_ document was available. Every field
+   * derived from it is null in that case -- callers MUST render those as
+   * an explicit unknown, never as 0 and never as a full/confirmed count. */
+  matchReportAvailable: boolean;
+  dkPlayers: number | null;
+  identityResolved: number | null;
   startingPitchers: CoverageCount; // covered = confirmed starters, eligible = every DK pitcher-type row
   lineupsConfirmed: CoverageCount; // covered = teams with a posted lineup, eligible = every team on this slate
   blueCollarUsable: number;
   nativeEligible: CoverageCount;
   aiEligible: CoverageCount;
   mlEligible: CoverageCount;
-  optimizerEligible: number;
+  optimizerEligible: number | null;
 }
 
 function coverage(rows: PlayerRow[], hasValue: (r: PlayerRow) => boolean): CoverageCount {
@@ -55,15 +62,29 @@ export function buildSlateReadinessSummary(
   mlCoverage: MlCoverageSummary,
   blueCollarSnapshot: BlueCollarSnapshot | null,
 ): SlateReadinessSummary {
+  // A MISSING match report means every value below that reads it is
+  // UNKNOWN -- not zero, and above all never "fully covered". Before
+  // this, `teamsAwaiting` defaulted to [] when the document was absent,
+  // so lineupsConfirmed computed `uniqueTeams.size - 0` and reported a
+  // confident 30/30 teams built entirely out of missing data (confirmed
+  // live on the Command Center while the banner alongside it correctly
+  // said 15 games had no posted lineup). That also fed
+  // computeSlateCompletionStage's `covered >= eligible` branch, so the
+  // slate advertised itself as MOSTLY_READY/READY off the same absence.
+  // Absence is now propagated as null and rendered as an explicit
+  // unknown -- this repo's "fail loudly when critical DFS data is
+  // missing / never silently invent missing statistics" rule.
+  const hasMatchReport = matchReport !== null && matchReport !== undefined;
   const eligibility = (matchReport?.eligibility as Record<string, number> | undefined) ?? {};
   const teamsAwaiting = (matchReport?.teams_awaiting_lineups as string[] | undefined) ?? [];
   const uniqueTeams = new Set(allTeams);
 
   return {
-    dkPlayers: (matchReport?.dk_entries as number) ?? 0,
-    identityResolved: (matchReport?.matched_to_mlb as number) ?? 0,
-    startingPitchers: { covered: eligibility.starting_pitchers ?? 0, eligible: pitcherRows.length },
-    lineupsConfirmed: { covered: Math.max(0, uniqueTeams.size - teamsAwaiting.length), eligible: uniqueTeams.size },
+    matchReportAvailable: hasMatchReport,
+    dkPlayers: hasMatchReport ? ((matchReport?.dk_entries as number) ?? 0) : null,
+    identityResolved: hasMatchReport ? ((matchReport?.matched_to_mlb as number) ?? 0) : null,
+    startingPitchers: { covered: hasMatchReport ? (eligibility.starting_pitchers ?? 0) : null, eligible: pitcherRows.length },
+    lineupsConfirmed: { covered: hasMatchReport ? Math.max(0, uniqueTeams.size - teamsAwaiting.length) : null, eligible: uniqueTeams.size },
     blueCollarUsable: blueCollarSnapshot?.usable_projection_count ?? 0,
     nativeEligible: coverage(nativeRows, (r) => (r as NativeRankedPlayer).nativeProjection !== null),
     aiEligible: coverage(aiRows, (r) => (r as AiRankedPlayer).aiProjection !== null),
@@ -71,7 +92,7 @@ export function buildSlateReadinessSummary(
       eligible: mlCoverage.eligiblePitchers + mlCoverage.eligibleHitters,
       covered: mlCoverage.projectedPitchers + mlCoverage.projectedHitters,
     },
-    optimizerEligible: eligibility.optimizer_eligible ?? 0,
+    optimizerEligible: hasMatchReport ? (eligibility.optimizer_eligible ?? 0) : null,
   };
 }
 
@@ -159,9 +180,12 @@ export function computeSlateCompletionStage(
   if (earliestLockTimeUtc && new Date(nowUtc).getTime() >= new Date(earliestLockTimeUtc).getTime()) return "LOCKED";
 
   const { covered, eligible } = readiness.lineupsConfirmed;
-  if (eligible === 0 || covered === 0) return "EARLY";
+  // covered === null is UNKNOWN lineup coverage (no match report). It can
+  // never promote a slate past EARLY -- the previous code compared a
+  // fabricated count here and reached MOSTLY_READY/READY on absent data.
+  if (covered === null || eligible === 0 || covered === 0) return "EARLY";
   if (covered >= eligible) {
-    return readiness.optimizerEligible > 0 ? "READY" : "MOSTLY_READY";
+    return (readiness.optimizerEligible ?? 0) > 0 ? "READY" : "MOSTLY_READY";
   }
   return covered / eligible >= 0.5 ? "MOSTLY_READY" : "PARTIAL_LINEUPS";
 }

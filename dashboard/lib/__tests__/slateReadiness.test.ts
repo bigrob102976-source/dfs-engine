@@ -68,6 +68,44 @@ describe("buildSlateReadinessSummary", () => {
     expect(summary.startingPitchers).toEqual({ covered: 1, eligible: 2 });
   });
 
+  // REGRESSION: a missing dk_match_report_ document used to default
+  // teams_awaiting_lineups to [], so lineupsConfirmed reported a
+  // confident "30 / 30 teams" assembled entirely out of absent data --
+  // while the banner beside it correctly said 15 games had no posted
+  // lineup. Missing data must read as unknown, never as full coverage.
+  it("reports UNKNOWN (null), never full coverage, when the match report is absent", () => {
+    const teams = ["NYY", "TOR", "BOS", "PHI"];
+    const summary = buildSlateReadinessSummary(null, teams, [], [], [], mlCoverage(), null);
+
+    expect(summary.matchReportAvailable).toBe(false);
+    expect(summary.lineupsConfirmed.covered).toBeNull();
+    expect(summary.lineupsConfirmed.covered).not.toBe(teams.length);
+    expect(summary.lineupsConfirmed.eligible).toBe(teams.length);
+  });
+
+  it("reports every other match-report-derived field as UNKNOWN (null), never 0, when it is absent", () => {
+    const pitcherRows = [row({ id: "p1", playerType: "pitcher" })];
+    const summary = buildSlateReadinessSummary(null, ["NYY"], pitcherRows, [], [], mlCoverage(), null);
+
+    expect(summary.dkPlayers).toBeNull();
+    expect(summary.identityResolved).toBeNull();
+    expect(summary.optimizerEligible).toBeNull();
+    expect(summary.startingPitchers.covered).toBeNull();
+    // `eligible` counts come from live rows, not the match report, so
+    // they stay real numbers -- only the covered/derived side is unknown.
+    expect(summary.startingPitchers.eligible).toBe(1);
+  });
+
+  it("still reports 0 (not unknown) when the match report is present and genuinely reports none", () => {
+    const summary = buildSlateReadinessSummary(
+      { dk_entries: 0, matched_to_mlb: 0, eligibility: {}, teams_awaiting_lineups: ["NYY"] },
+      ["NYY"], [], [], [], mlCoverage(), null,
+    );
+    expect(summary.matchReportAvailable).toBe(true);
+    expect(summary.dkPlayers).toBe(0);
+    expect(summary.lineupsConfirmed.covered).toBe(0);
+  });
+
   it("computes lineups confirmed as total teams minus teams awaiting lineups", () => {
     const summary = buildSlateReadinessSummary(
       { eligibility: {}, teams_awaiting_lineups: ["TOR", "BOS"] },
@@ -103,11 +141,15 @@ describe("buildSlateReadinessSummary", () => {
     expect(summary.optimizerEligible).toBe(15);
   });
 
-  it("never crashes on a null match report -- every count degrades to 0/empty honestly", () => {
+  // This test previously asserted these degraded to 0 and called that
+  // "honest". Degrading to 0 is what let the SAME absent document
+  // produce a confident 30/30 in lineupsConfirmed -- 0 and null are not
+  // interchangeable here: 0 is a measurement, null is the absence of one.
+  it("never crashes on a null match report -- every count degrades to UNKNOWN (null), not 0", () => {
     const summary = buildSlateReadinessSummary(null, [], [], [], [], mlCoverage(), null);
-    expect(summary.dkPlayers).toBe(0);
-    expect(summary.identityResolved).toBe(0);
-    expect(summary.optimizerEligible).toBe(0);
+    expect(summary.dkPlayers).toBeNull();
+    expect(summary.identityResolved).toBeNull();
+    expect(summary.optimizerEligible).toBeNull();
   });
 });
 
@@ -178,6 +220,7 @@ function game(overrides: Partial<ResearchGame> = {}): ResearchGame {
 
 function readiness(overrides: Partial<ReturnType<typeof buildSlateReadinessSummary>> = {}) {
   return {
+    matchReportAvailable: true,
     dkPlayers: 746, identityResolved: 415, startingPitchers: { covered: 15, eligible: 419 },
     lineupsConfirmed: { covered: 0, eligible: 15 }, blueCollarUsable: 159,
     nativeEligible: { covered: 15, eligible: 15 }, aiEligible: { covered: 15, eligible: 15 },
@@ -189,6 +232,17 @@ function readiness(overrides: Partial<ReturnType<typeof buildSlateReadinessSumma
 describe("computeSlateCompletionStage", () => {
   it("classifies EARLY when no team has a confirmed lineup yet", () => {
     const stage = computeSlateCompletionStage(readiness({ lineupsConfirmed: { covered: 0, eligible: 15 } }), [game()], null);
+    expect(stage).toBe("EARLY");
+  });
+
+  // REGRESSION: unknown lineup coverage used to reach `covered >= eligible`
+  // via the fabricated 30/30 above and advertise the slate as
+  // MOSTLY_READY/READY off entirely absent data.
+  it("classifies EARLY when lineup coverage is UNKNOWN, never MOSTLY_READY/READY", () => {
+    const stage = computeSlateCompletionStage(
+      readiness({ matchReportAvailable: false, lineupsConfirmed: { covered: null, eligible: 15 }, optimizerEligible: null }),
+      [game()], null,
+    );
     expect(stage).toBe("EARLY");
   });
 
