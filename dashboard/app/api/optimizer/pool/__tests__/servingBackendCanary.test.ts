@@ -106,14 +106,14 @@ describe("M5I/M5J: admin canary -- real end-to-end serving-backend selection", (
     expect(mockLoadPool).toHaveBeenCalledWith("2026-08-31", "dkunofficial-canary", false);
   });
 
-  it("omitting servingBackend entirely is the production default -- LEGACY_R2 for ADMIN too", async () => {
+  it("omitting servingBackend entirely now serves CANONICAL_POSTGRES -- no customer-facing page ever sent the param, so this default IS production", async () => {
     seedCanonicalSlate();
     await loginAsAdmin();
 
     const res = await POST(req({ slateId: "dkunofficial-canary", date: "2026-08-31" }));
     const body = await res.json();
-    expect(body.servingBackend).toBe("LEGACY_R2");
-    expect(mockLoadPool).toHaveBeenCalled();
+    expect(body.servingBackend).toBe("CANONICAL_POSTGRES");
+    expect(mockLoadPool).not.toHaveBeenCalled();
   });
 
   it("M5L rollback: flipping the flag to DISABLED instantly reverts even an in-flight ADMIN canonical request to LEGACY_R2 -- no code change, no redeploy, no data loss", async () => {

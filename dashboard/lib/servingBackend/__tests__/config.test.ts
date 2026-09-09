@@ -36,21 +36,41 @@ describe("M5C/M5I: userCanUseCanonicalServing", () => {
     expect(await userCanUseCanonicalServing(await admin())).toBe(false);
   });
 
-  it("M5M: PRODUCTION would make canonical visible to any member -- confirms the mechanism works for the eventual cutover, without this milestone ever setting it", async () => {
+  it("PRODUCTION grants canonical to a plain MEMBER with no entitlement -- serving backend is infrastructure, not a purchased feature", async () => {
     await setFeatureFlagState(CANONICAL_SERVING_FLAG_KEY, "PRODUCTION", null);
-    // A member with no specific entitlement still isn't granted access --
-    // PRODUCTION requires either ADMIN or the matching entitlement, same
-    // rule every other flag in this app already follows.
-    expect(await userCanUseCanonicalServing(await member())).toBe(false);
+    // Regression guard for the 2026-09-08 outage: the subscriptions table
+    // is empty in production, so requiring a per-user entitlement here
+    // pinned all 47 members to the broken legacy backend.
+    expect(await userCanUseCanonicalServing(await member())).toBe(true);
     expect(await userCanUseCanonicalServing(await admin())).toBe(true);
+  });
+
+  it("PRODUCTION still refuses an unauthenticated (null) user", async () => {
+    await setFeatureFlagState(CANONICAL_SERVING_FLAG_KEY, "PRODUCTION", null);
+    expect(await userCanUseCanonicalServing(null)).toBe(false);
+  });
+
+  it("DISABLED remains a full kill switch even from PRODUCTION -- config-only rollback for every user", async () => {
+    await setFeatureFlagState(CANONICAL_SERVING_FLAG_KEY, "PRODUCTION", null);
+    await setFeatureFlagState(CANONICAL_SERVING_FLAG_KEY, "DISABLED", null);
+    expect(await userCanUseCanonicalServing(await member())).toBe(false);
+    expect(await userCanUseCanonicalServing(await admin())).toBe(false);
   });
 });
 
 describe("M5C/M5I/M5K: resolveServingBackend", () => {
-  it("defaults to LEGACY_R2 when no backend is requested, for any user", async () => {
-    expect((await resolveServingBackend(await admin(), undefined)).kind).toBe("LEGACY_R2");
+  it("defaults to CANONICAL_POSTGRES for a user the flag covers, and LEGACY_R2 for everyone else -- no request param required", async () => {
+    // The whole point of the 2026-09-08 fix: no customer-facing page ever
+    // sent a `servingBackend` param, so requiring one meant the flag being
+    // PRODUCTION did nothing for real traffic. The default must now follow
+    // the flag, not the caller.
+    expect((await resolveServingBackend(await admin(), undefined)).kind).toBe("CANONICAL_POSTGRES");
     expect((await resolveServingBackend(await member(), undefined)).kind).toBe("LEGACY_R2");
     expect((await resolveServingBackend(null, undefined)).kind).toBe("LEGACY_R2");
+  });
+
+  it("honors an explicit LEGACY_R2 request even from a user the flag covers -- the per-request escape hatch", async () => {
+    expect((await resolveServingBackend(await admin(), "LEGACY_R2")).kind).toBe("LEGACY_R2");
   });
 
   it("honors an explicit CANONICAL_POSTGRES request from an ADMIN", async () => {

@@ -79,11 +79,11 @@ describe("M6K: /api/optimizer/build serving-backend authorization -- never trust
     expect(mockBuildLineups).toHaveBeenCalledWith(expect.objectContaining({ servingBackend: "LEGACY_R2" }));
   });
 
-  it("omitting servingBackend is the production default -- LEGACY_R2 for ADMIN too", async () => {
+  it("omitting servingBackend now builds on CANONICAL_POSTGRES -- the UI never sent the param, so this default IS production", async () => {
     await loginAsAdmin();
     const res = await POST(req(baseBody()));
     const body = await res.json();
-    expect(body.servingBackend).toBe("LEGACY_R2");
+    expect(body.servingBackend).toBe("CANONICAL_POSTGRES");
   });
 
   it("M6P rollback: once the flag is DISABLED, an ADMIN's build request immediately reverts to LEGACY_R2 -- no code change, no redeploy", async () => {
