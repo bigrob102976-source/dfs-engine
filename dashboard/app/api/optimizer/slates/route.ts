@@ -15,14 +15,19 @@ export const dynamic = "force-dynamic";
  * lib/slateDate.ts. A present-but-invalid date is rejected with 400.
  * Milestone 29: requires login; a non-admin viewer only ever sees
  * PUBLISHED slates here too (lib/memberSlateVisibility.ts), same rule
- * as every /dashboard/* page's slate list.
+ * as every /dashboard/* page's slate list. "Published" is defined by
+ * whichever backend served the list, which is why `backend.kind` is
+ * passed through -- for canonical, promotion IS publication, and
+ * consulting the legacy `slate_status` table there would filter every
+ * slate away (see memberSlateVisibility.ts's docstring).
  *
- * M5I: an OPTIONAL `?servingBackend=CANONICAL_POSTGRES` request is
- * honored ONLY when resolveServingBackend() confirms the requesting
- * user currently passes the 'mlb.canonical_postgres_serving' feature
- * flag (ADMIN_ONLY by default -- see lib/servingBackend/config.ts). A
- * MEMBER passing this param gets the exact same LEGACY_R2 result as
- * omitting it entirely -- there is no way to bypass this server-side. */
+ * The serving backend is chosen by resolveServingBackend(); since
+ * 2026-09-08 canonical is the DEFAULT for any user the
+ * 'mlb.canonical_postgres_serving' flag covers, and an explicit
+ * `?servingBackend=LEGACY_R2` is honored as a per-request escape
+ * hatch. An explicit CANONICAL_POSTGRES can never grant access the
+ * flag does not already give -- there is no way to bypass this
+ * server-side. */
 export async function GET(request: Request) {
   const userOrRes = await requireAuthApi();
   if (userOrRes instanceof NextResponse) return userOrRes;
@@ -38,6 +43,6 @@ export async function GET(request: Request) {
 
   const backend = await resolveServingBackend(user, requestedBackend);
   const result = await backend.listSlates(date);
-  const slates = await filterSlatesForCurrentViewer(result.slates, date);
+  const slates = await filterSlatesForCurrentViewer(result.slates, date, backend.kind);
   return NextResponse.json({ date, ...result, slates, servingBackend: backend.kind });
 }
