@@ -111,6 +111,18 @@ describe("M5B: canonicalListSlates", () => {
     expect(result.status).toBe("no_slate");
   });
 
+  it("excludes a PENDING (draft / not-yet-promoted) slate -- PENDING is the schema default, so this is the state an unpromoted slate actually sits in", async () => {
+    // This is the property lib/memberSlateVisibility.ts now RELIES ON:
+    // it no longer consults the legacy slate_status publish table for
+    // canonical, on the grounds that an unpromoted slate never reaches
+    // it in the first place. If this test ever fails, that filter skip
+    // is unsafe and must be reinstated.
+    insertSlate({ validation_state: "PENDING", promoted_at: null });
+    const result = await canonicalListSlates("2026-08-31");
+    expect(result.status).toBe("no_slate");
+    expect(result.slates).toEqual([]);
+  });
+
   it("reports stale (not fresh) for a slate promoted well outside the fresh window but still within the reuse ceiling", async () => {
     insertSlate({ promoted_at: new Date(Date.now() - 45 * 60 * 1000).toISOString() }); // 45 min old
     const result = await canonicalListSlates("2026-08-31");
