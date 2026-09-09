@@ -21,6 +21,24 @@ vi.mock("@/lib/memberSlateVisibility", () => ({
   filterSlatesForCurrentViewer: async (slates: unknown) => slates,
 }));
 
+// resolveSlateContext (used by every /dashboard/* page) now picks its
+// serving backend the same way /api/optimizer/slates does
+// (lib/servingBackend/config.ts) instead of calling poolCache.listSlates
+// directly -- getCurrentUser() calls next/headers cookies(), which
+// throws outside a real request scope, so it's stubbed to null here
+// (this file's own focus is the page's rendering, not backend
+// selection -- covered by servingBackend/__tests__/config.test.ts).
+// resolveServingBackend is stubbed to the REAL LegacyR2ServingBackend so
+// listSlates keeps running for real exactly as it did before this
+// change, unchanged for every test below.
+vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn(async () => null) }));
+vi.mock("@/lib/servingBackend/config", () => ({
+  resolveServingBackend: vi.fn(async () => {
+    const { LegacyR2ServingBackend } = await import("@/lib/servingBackend/legacyR2Backend");
+    return LegacyR2ServingBackend;
+  }),
+}));
+
 function jsonResponse(body: unknown) {
   return Promise.resolve({ json: () => Promise.resolve(body) } as Response);
 }

@@ -24,9 +24,10 @@
 // action (the global dropdown), never inferred/auto-picked, so nothing
 // about existing behavior changes until the user opts in.
 
+import { getCurrentUser } from "./auth/session";
 import { filterSlatesForCurrentViewer } from "./memberSlateVisibility";
-import { listSlates } from "./optimizerWorkspace/poolCache";
 import type { SlateOption } from "./orchestrator/types";
+import { resolveServingBackend } from "./servingBackend/config";
 
 export { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel } from "./slateFilters";
 
@@ -59,8 +60,17 @@ export interface SlateContext {
 export async function resolveSlateContext(
   date: string, requestedSlateId?: string | null, options?: { autoSelectSoleSlate?: boolean },
 ): Promise<SlateContext> {
-  const result = await listSlates(date);
-  const slates = await filterSlatesForCurrentViewer(result.slates, date);
+  // Every /dashboard/* page picks its serving backend through the same
+  // choke point /api/optimizer/slates uses (lib/servingBackend/config.ts)
+  // -- previously this called poolCache.listSlates directly, which pinned
+  // every dashboard page to the legacy R2 artifact path regardless of the
+  // canonical serving flag (that path's dfs_input/ artifacts have had no
+  // writer since the pre-canonical pipeline was superseded -- confirmed
+  // empty in production storage going back to at least 2026-09-06).
+  const user = await getCurrentUser();
+  const backend = await resolveServingBackend(user);
+  const result = await backend.listSlates(date);
+  const slates = await filterSlatesForCurrentViewer(result.slates, date, backend.kind);
   let selected = requestedSlateId ? (slates.find((s) => s.slateId === requestedSlateId) ?? null) : null;
   if (!requestedSlateId && !selected && options?.autoSelectSoleSlate && slates.length === 1) {
     selected = slates[0];

@@ -18,6 +18,23 @@ vi.mock("../memberSlateVisibility", () => ({
   filterSlatesForCurrentViewer: (...args: Parameters<typeof mockFilterSlates>) => mockFilterSlates(...args),
 }));
 
+// resolveSlateContext now picks its serving backend the same way
+// /api/optimizer/slates does (lib/servingBackend/config.ts) instead of
+// calling poolCache.listSlates directly. This file's own focus stays on
+// selection/gameIds mechanics, not backend selection (covered by
+// servingBackend/__tests__/config.test.ts), so getCurrentUser is stubbed
+// to null (no real session/DB) and resolveServingBackend is stubbed to
+// always return the REAL LegacyR2ServingBackend -- which itself imports
+// poolCache.listSlates, so it resolves to the SAME mock every test below
+// already sets up, with zero per-test changes needed.
+vi.mock("../auth/session", () => ({ getCurrentUser: vi.fn(async () => null) }));
+vi.mock("../servingBackend/config", () => ({
+  resolveServingBackend: vi.fn(async () => {
+    const { LegacyR2ServingBackend } = await import("../servingBackend/legacyR2Backend");
+    return LegacyR2ServingBackend;
+  }),
+}));
+
 afterEach(() => {
   vi.clearAllMocks();
   mockFilterSlates.mockImplementation(async (slates: SlateOption[]) => slates);
@@ -93,7 +110,7 @@ describe("resolveSlateContext", () => {
 
     const ctx = await resolveSlateContext("2026-08-17");
     expect(ctx.slates.map((s) => s.slateId)).toEqual(["main"]);
-    expect(mockFilterSlates).toHaveBeenCalledWith([main, draft], "2026-08-17");
+    expect(mockFilterSlates).toHaveBeenCalledWith([main, draft], "2026-08-17", "LEGACY_R2");
   });
 
   it("Milestone 29: auto-selects the sole slate only when autoSelectSoleSlate is explicitly requested", async () => {
