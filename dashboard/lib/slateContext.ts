@@ -28,6 +28,7 @@ import { getCurrentUser } from "./auth/session";
 import { filterSlatesForCurrentViewer } from "./memberSlateVisibility";
 import type { SlateOption } from "./orchestrator/types";
 import { resolveServingBackend } from "./servingBackend/config";
+import type { ServingBackendKind } from "./servingBackend/types";
 
 export { effectiveGameIds, filterByGameIdField, filterByGameIds, formatSlateLabel } from "./slateFilters";
 
@@ -42,6 +43,11 @@ export interface SlateContext {
    * everything unfiltered rather than silently rendering zero rows, and
    * may want to surface this to the user. */
   gameIdsUnavailable: boolean;
+  /** Which backend actually served `slates`/`selected` (already gated by
+   * resolveServingBackend() above) -- exposed so a page that needs the
+   * per-slate DK player pool/match report (lib/canonicalDkAdapter.ts)
+   * can pick the matching source without a second flag/DB lookup. */
+  backendKind: ServingBackendKind;
 }
 
 /** Resolves available slates for `date` and, if `requestedSlateId` names
@@ -83,5 +89,6 @@ export async function resolveSlateContext(
     isMock: result.isMock,
     providerName: result.providerName,
     gameIdsUnavailable: selected !== null && selected.gameIds.length === 0,
+    backendKind: backend.kind,
   };
 }

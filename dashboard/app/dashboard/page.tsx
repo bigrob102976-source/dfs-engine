@@ -14,6 +14,7 @@ import { StatusCard } from "@/components/StatusCard";
 import { DataCard } from "@/components/ui/Card";
 import { SectionHeader } from "@/components/ui/Header";
 import { loadLatestBlueCollarSnapshot } from "@/lib/blueCollarProjections";
+import { resolveDkBundle } from "@/lib/canonicalDkAdapter";
 import { buildDkSlateVegasCoverage } from "@/lib/dkVegasCoverage";
 import {
   bestValuePitcher,
@@ -44,11 +45,8 @@ import { getPublishedVersion } from "@/lib/db/slateStatus";
 import { loadLatestEnvironmentReport } from "@/lib/gameEnvironment";
 import {
   loadLatestBatterSnapshot,
-  loadLatestDKPlayerPool,
-  loadLatestDkMatchReport,
   loadLatestOwnershipSnapshot,
   loadLatestPitcherSnapshot,
-  loadLatestProviderSlate,
   loadResearchGames,
 } from "@/lib/loaders";
 import { buildHitterRows, buildPitcherRows } from "@/lib/normalize";
@@ -99,13 +97,15 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
     batterSnapshotLoaded,
     ownershipLoaded,
     fullDayEnvironmentReport,
-    matchReportLoaded,
-    providerSlateLoaded,
     // Milestone 27.2: without the real DK pool here, a whole real MLB team
     // whose lineup hasn't posted yet (confirmed live: LAD @ COL) never got
     // a row anywhere on Command Center -- see lib/normalize.ts's own
-    // Milestone 27.2 docstring for the full root cause.
-    dkPoolLoaded,
+    // Milestone 27.2 docstring for the full root cause. resolveDkBundle
+    // picks LEGACY_R2's original three loaders or canonical's single
+    // getSlatePool call + translation based on slateCtx.backendKind (the
+    // SAME gate resolveSlateContext already applied for the slate list
+    // above) -- see lib/canonicalDkAdapter.ts.
+    dkBundle,
   ] = await Promise.all([
     buildSlateSummary(date),
     buildPipelineStatuses(date),
@@ -113,9 +113,7 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
     loadLatestBatterSnapshot(date),
     loadLatestOwnershipSnapshot(date, selectedSlateId),
     loadLatestEnvironmentReport(date),
-    loadLatestDkMatchReport(date, selectedSlateId),
-    loadLatestProviderSlate(date),
-    loadLatestDKPlayerPool(date, selectedSlateId),
+    resolveDkBundle(slateCtx.backendKind, date, selectedSlateId),
   ]);
   const pitcherSnapshot = pitcherSnapshotLoaded.data;
   const batterSnapshot = batterSnapshotLoaded.data;
@@ -126,9 +124,9 @@ export default async function TodaysSlatePage(props: PageProps<"/dashboard">) {
         return { ...fullDayEnvironmentReport, games, vegas_slate_analysis: recomputeVegasSlateAnalysis(games) };
       })()
     : null;
-  const matchReport = matchReportLoaded.data;
-  const providerSlate = providerSlateLoaded.data;
-  const dkPool = dkPoolLoaded.data;
+  const matchReport = dkBundle.matchReport;
+  const providerSlate = dkBundle.providerSlate;
+  const dkPool = dkBundle.pool;
 
   const pitcherRows = filterByGameIds(buildPitcherRows(pitcherSnapshot?.pitchers ?? [], ownership, dkPool), gameIds);
   const hitterRows = filterByGameIds(buildHitterRows(batterSnapshot?.hitters ?? [], ownership, dkPool), gameIds);
