@@ -89,7 +89,12 @@ def main() -> int:
         except FileExistsError as exc:
             results.append({"draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "error", "error": str(exc)})
             continue
-        prune_old_snapshots(list_nfl_player_pools(s["slate_date"]))
+        # 2026-09-11 incident fix -- scoped to this exact DraftGroup.
+        # Passing no draft_group_id here used to prune every DraftGroup
+        # sharing this slate_date as one shared pool of
+        # DEFAULT_SNAPSHOT_RETENTION_COUNT (12) files, so one DraftGroup
+        # fetched often enough could evict another's entire history.
+        prune_old_snapshots(list_nfl_player_pools(s["slate_date"], s["draft_group_id"]))
         results.append({
             "draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "ok",
             "player_count": len(pool.players), "path": str(pool_path),

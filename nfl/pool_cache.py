@@ -59,7 +59,10 @@ POOL_CACHE_STALE_MAX_SECONDS = 2 * 60 * 60
 
 DEFAULT_NFL_UNIVERSE_ROOT = Path(__file__).resolve().parent.parent / "dfs_input" / "nfl" / "_universe"
 
-_POOL_TIMESTAMP_RE = re.compile(r"nfl_player_pool_(\d{8}T\d{6})\.json$")
+# Matches both the new <timestamp>_<draft_group_id>.json filenames
+# (nfl/persistence.py's 2026-09-11 incident fix) and old, suffix-less
+# ones already in production.
+_POOL_TIMESTAMP_RE = re.compile(r"nfl_player_pool_(\d{8}T\d{6})(?:_\d+)?\.json$")
 _UNIVERSE_TIMESTAMP_RE = re.compile(r"nfl_universe_(\d{8}T\d{6})\.json$")
 
 PoolFreshness = Literal["fresh", "stale", "expired"]
@@ -150,8 +153,18 @@ def load_fresh_cached_pool(
     is_railway_production_environment/POOL_CACHE_STALE_MAX_SECONDS).
     Callers that show this to a user MUST surface data_status honestly,
     never presenting a stale pool as current. Never fabricates a
-    DraftGroup match or a timestamp."""
-    pools = list_nfl_player_pools(slate_date, output_root)
+    DraftGroup match or a timestamp.
+
+    2026-09-11 incident fix: list_nfl_player_pools is now called WITH
+    draft_group_id, so a date with several concurrently-live DraftGroups
+    (confirmed live: 2026-09-13 has five) each get their own file
+    listing -- previously this took the single latest file across EVERY
+    DraftGroup sharing the date, so whichever DraftGroup happened to be
+    fetched most recently silently answered lookups for every other one
+    too (or, combined with the filename-collision bug this same incident
+    also fixed in nfl/persistence.py, usually just found nothing at all
+    for every DraftGroup but the one lucky enough to win the collision)."""
+    pools = list_nfl_player_pools(slate_date, draft_group_id, output_root)
     if not pools:
         return None
     latest_path = pools[-1]
@@ -160,7 +173,7 @@ def load_fresh_cached_pool(
     if freshness is None or freshness == "expired":
         return None
 
-    doc = load_latest_nfl_player_pool(slate_date, output_root)
+    doc = load_latest_nfl_player_pool(slate_date, draft_group_id, output_root)
     if doc is None or doc.get("draft_group_id") != draft_group_id:
         return None
     if doc.get("source_provenance") != DRAFTKINGS_UNOFFICIAL_LIVE:
