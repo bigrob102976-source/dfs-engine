@@ -3,6 +3,7 @@
 import { DataCard } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NflPlayerTable } from "@/components/nfl/NflPlayerTable";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { fmt } from "@/lib/nfl/format";
 import { useNflData } from "@/lib/nfl/useNflData";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
@@ -60,6 +61,7 @@ function UsageContent() {
 
   return (
     <div className="space-y-4">
+      <NflStalenessBanner data={data} />
       {selected && (
         <DataCard title={`${selected.name} -- Recent Trend (Last 1 / 3 / 5)`}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

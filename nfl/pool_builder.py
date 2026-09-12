@@ -224,18 +224,32 @@ def build_pool(slate_date: str, draft_group_id: int, sport_code: str = "NFL") ->
 
 
 def build_pool_preferring_cache(slate_date: str, draft_group_id: int, sport_code: str = "NFL") -> NflPoolBuildResult:
-    """NFL M15 -- production DraftKings-access resilience: reuses a
-    recent (<=15 min, see nfl/pool_cache.py) real, live-provenance pool
-    snapshot for this exact DraftGroup if one exists, only calling
-    DraftKings live via build_pool() when no such snapshot exists.
+    """NFL M15 -- production DraftKings-access resilience: reuses a real,
+    live-provenance pool snapshot for this exact DraftGroup if one
+    exists -- fresh (<=15 min) or stale (<=2h, see nfl/pool_cache.py's
+    POOL_CACHE_STALE_MAX_SECONDS) -- only calling DraftKings live via
+    build_pool() when no such snapshot exists at all.
 
-    A snapshot only exists once something has explicitly written one
-    (a normal dashboard run, or the external scripts/fetch_nfl_slates.py
-    -- see that script's docstring for why an external fetch is needed
-    at all), so ordinary local dev behaves exactly as before: no
-    snapshot -> straight to build_pool()'s live fetch, unchanged."""
-    from nfl.pool_cache import load_fresh_cached_pool
+    2026-09-11 incident fix: that live call is never attempted inside a
+    Railway-hosted container (nfl.pool_cache.is_railway_production_
+    environment()) -- it is PERMANENTLY blocked by DraftKings' own
+    IP-level restriction on Railway's egress, so attempting it is
+    guaranteed to fail (confirmed live: a stale-cache miss fell through
+    to this call and returned DraftKings' own ACCESS_RESTRICTED HTTP
+    403, surfaced to the member as a bare 502). NflPoolBuildError is
+    raised instead, with a message that says why, so the failure is at
+    least honest instead of a doomed network round trip on every
+    request. Ordinary local dev (where DraftKings access always works)
+    is unaffected -- no snapshot still goes straight to build_pool()'s
+    live fetch, unchanged."""
+    from nfl.pool_cache import is_railway_production_environment, load_fresh_cached_pool
     cached = load_fresh_cached_pool(slate_date, draft_group_id)
     if cached is not None:
         return cached
+    if is_railway_production_environment():
+        raise NflPoolBuildError(
+            f"No usable cached pool (fresh or stale) for DraftGroup {draft_group_id}, and a live DraftKings call is "
+            "never attempted from production (Railway's egress IP is permanently blocked) -- the external fetch "
+            "worker needs to catch up."
+        )
     return build_pool(slate_date, draft_group_id, sport_code)

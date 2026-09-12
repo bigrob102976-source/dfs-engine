@@ -2,6 +2,7 @@
 
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NflPlayerTable } from "@/components/nfl/NflPlayerTable";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { useNflData } from "@/lib/nfl/useNflData";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
 
@@ -13,7 +14,12 @@ function PlayersContent() {
   if (error) return <p className="text-sm text-red">{error}</p>;
   if (!data) return null;
 
-  return <NflPlayerTable players={data.players} draftGroupId={draftGroupId} variant="players" />;
+  return (
+    <div className="space-y-3">
+      <NflStalenessBanner data={data} />
+      <NflPlayerTable players={data.players} draftGroupId={draftGroupId} variant="players" />
+    </div>
+  );
 }
 
 export default function NflPlayersPage() {

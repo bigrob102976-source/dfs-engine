@@ -6,6 +6,7 @@ import { useState } from "react";
 import { DataCard, MetricCard, PrimaryButton, SecondaryButton } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NflExposureEditor } from "@/components/nfl/NflExposureEditor";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { DEFAULT_NFL_STACK_CONFIG, NFL_ROSTER_SLOT_ORDER, type NflObjectiveMode, type NflStackConfig } from "@/lib/nfl/types";
 import { loadExposureState } from "@/lib/nfl/exposureStorage";
 import { loadLockExcludeState } from "@/lib/nfl/lockExcludeStorage";
@@ -74,6 +75,7 @@ function OptimizerContent() {
 
   return (
     <div className="space-y-4">
+      <NflStalenessBanner data={data} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard label="Roster" value="QB/RB/RB/WR/WR/WR/TE/FLEX/DST" />
         <MetricCard label="Salary Cap" value={`$${data.salary_cap.toLocaleString()}`} />

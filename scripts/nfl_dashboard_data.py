@@ -238,6 +238,13 @@ def main(draft_group_id: int) -> int:
         "slate_date": pool.slate_date,
         "slate_name": pool.slate_name,
         "source_provenance": pool.source_provenance,
+        # 2026-09-11 incident fix -- "fresh" or "stale" (nfl/pool_cache.py's
+        # POOL_CACHE_STALE_MAX_SECONDS); pool_generated_at_utc is the
+        # underlying real fetch's own timestamp, null only when this pool
+        # was built live just now. The dashboard MUST show this honestly
+        # whenever data_status is "stale" -- never present it as current.
+        "data_status": pool.data_status,
+        "pool_generated_at_utc": pool.pool_generated_at_utc,
         "salary_cap": 50000,
         "current_season": ctx["current_season"],
         "current_week": ctx["current_week"],

@@ -3,6 +3,7 @@
 import { DataCard } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NflPlayerTable } from "@/components/nfl/NflPlayerTable";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { fmt } from "@/lib/nfl/format";
 import { useNflData } from "@/lib/nfl/useNflData";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
@@ -17,6 +18,7 @@ function MatchupsContent() {
 
   return (
     <div className="space-y-4">
+      <NflStalenessBanner data={data} />
       <DataCard title="Games">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">

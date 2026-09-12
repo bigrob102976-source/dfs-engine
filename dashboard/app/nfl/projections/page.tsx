@@ -3,6 +3,7 @@
 import { MetricCard } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
 import { NflPlayerTable } from "@/components/nfl/NflPlayerTable";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { useNflData } from "@/lib/nfl/useNflData";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
 
@@ -16,6 +17,7 @@ function ProjectionsContent() {
 
   return (
     <div className="space-y-4">
+      <NflStalenessBanner data={data} />
       {data.projection_error && (
         <p className="rounded-[var(--radius-control)] border border-yellow/40 bg-yellow/10 p-2 text-xs text-yellow">
           Projections unavailable: {data.projection_error}

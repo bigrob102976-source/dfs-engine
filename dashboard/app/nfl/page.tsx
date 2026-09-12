@@ -2,6 +2,7 @@
 
 import { DataCard, MetricCard } from "@/components/ui";
 import { NflPageShell } from "@/components/nfl/NflPageShell";
+import { NflStalenessBanner } from "@/components/nfl/NflStalenessBanner";
 import { fmt } from "@/lib/nfl/format";
 import { useNflData } from "@/lib/nfl/useNflData";
 import { useNflDraftGroupId } from "@/lib/nfl/useNflDraftGroupId";
@@ -18,6 +19,7 @@ function OverviewContent() {
 
   return (
     <div className="space-y-5">
+      <NflStalenessBanner data={data} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <MetricCard label="Slate" value={data.slate_name ?? "--"} />
         <MetricCard label="DraftGroup" value={data.draft_group_id} />

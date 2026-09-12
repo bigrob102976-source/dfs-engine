@@ -117,6 +117,15 @@ export interface NflSlateData {
   slate_date: string;
   slate_name: string | null;
   source_provenance: string;
+  // 2026-09-11 incident fix -- see nfl/pool_cache.py's
+  // POOL_CACHE_STALE_MAX_SECONDS. "stale" means real, reused data past
+  // the 15-minute freshness window but within the 2-hour reuse ceiling;
+  // pool_generated_at_utc is null only for a pool built live just now.
+  // Any UI rendering this data MUST show data_status honestly when
+  // "stale" -- never let stale data look current (same standard as the
+  // dashboard's Slate Readiness card).
+  data_status: "fresh" | "stale";
+  pool_generated_at_utc: string | null;
   salary_cap: number;
   current_season: number;
   current_week: number;

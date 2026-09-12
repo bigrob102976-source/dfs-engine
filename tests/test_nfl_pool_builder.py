@@ -167,3 +167,57 @@ def test_validate_pool_blocks_wrong_provenance():
     result = validate_pool(players, DG_ID, expected_provenance=PROVENANCE)
     assert result.passed is False
     assert any(f.level == "BLOCK" and "provenance" in f.message for f in result.findings)
+
+
+# 2026-09-11 incident regression coverage: build_pool_preferring_cache
+# used to fall through to build_pool()'s LIVE DraftKings call on ANY
+# cache miss, including inside a Railway-hosted container where that
+# call is permanently blocked -- confirmed live, this returned a bare
+# 502 with DraftKings' own ACCESS_RESTRICTED (HTTP 403). These prove the
+# live call is refused (never attempted) whenever RAILWAY_ENVIRONMENT is
+# set, while local dev (unset) is completely unaffected.
+class TestBuildPoolPreferringCacheProductionGate:
+    def test_raises_instead_of_calling_dk_live_in_production_on_cache_miss(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+        # load_fresh_cached_pool/is_railway_production_environment are
+        # imported lazily inside the function (see its own docstring) --
+        # patch them where they're actually looked up: nfl.pool_cache.
+        import nfl.pool_cache as pool_cache_module
+
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+        monkeypatch.setattr(pool_cache_module, "load_fresh_cached_pool", lambda *a, **kw: None)
+
+        def _boom(*a, **kw):
+            raise AssertionError("a live DraftKings call must never be attempted from production")
+
+        monkeypatch.setattr(pool_builder_module, "build_pool", _boom)
+
+        with pytest.raises(pool_builder_module.NflPoolBuildError, match="never attempted from production"):
+            pool_builder_module.build_pool_preferring_cache("2026-09-13", DG_ID)
+
+    def test_falls_through_to_live_build_in_local_dev_on_cache_miss(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+        import nfl.pool_cache as pool_cache_module
+
+        monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+        monkeypatch.setattr(pool_cache_module, "load_fresh_cached_pool", lambda *a, **kw: None)
+
+        sentinel = object()
+        monkeypatch.setattr(pool_builder_module, "build_pool", lambda *a, **kw: sentinel)
+
+        assert pool_builder_module.build_pool_preferring_cache("2026-09-13", DG_ID) is sentinel
+
+    def test_reuses_a_cache_hit_in_production_without_touching_build_pool(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+        import nfl.pool_cache as pool_cache_module
+
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+        sentinel = object()
+        monkeypatch.setattr(pool_cache_module, "load_fresh_cached_pool", lambda *a, **kw: sentinel)
+
+        def _boom(*a, **kw):
+            raise AssertionError("a cache hit must never fall through to build_pool")
+
+        monkeypatch.setattr(pool_builder_module, "build_pool", _boom)
+
+        assert pool_builder_module.build_pool_preferring_cache("2026-09-13", DG_ID) is sentinel

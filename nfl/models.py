@@ -117,6 +117,21 @@ class NflPoolBuildResult:
     players: List[NflPlayer]
     validation: NflPoolValidationResult
     source_provenance: str
+    # NFL M15 production DK-access resilience (nfl/pool_cache.py):
+    # "fresh" for a pool built or cached within POOL_CACHE_FRESHNESS_
+    # SECONDS, "stale" for one reused past that but within
+    # POOL_CACHE_STALE_MAX_SECONDS. Defaults to "fresh" so every
+    # existing caller that builds a pool live (never went through the
+    # cache-reuse path at all) keeps reporting exactly what it always
+    # implied without needing to pass this explicitly.
+    data_status: str = "fresh"
+    # When the underlying real fetch actually produced this data (the
+    # cached artifact's own timestamp) -- None for a pool built live
+    # just now, where "generated now" is already implied and there is
+    # no separate cache timestamp to report. Callers must show this
+    # honestly whenever data_status == "stale" (never silently present
+    # stale data as current -- see nfl/pool_cache.py's own docstring).
+    pool_generated_at_utc: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -126,4 +141,6 @@ class NflPoolBuildResult:
             "source_provenance": self.source_provenance,
             "validation": self.validation.to_dict(),
             "players": [p.to_dict() for p in self.players],
+            "data_status": self.data_status,
+            "pool_generated_at_utc": self.pool_generated_at_utc,
         }
