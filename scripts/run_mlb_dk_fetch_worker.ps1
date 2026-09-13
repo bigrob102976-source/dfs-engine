@@ -62,6 +62,30 @@ $ResearchRefreshIntervalMinutes   = 10
 $ResearchInternalTimeoutSeconds   = 600
 $CriticalAlertThreshold           = 3
 
+# Stage-budget accounting (2026-09-12). Task Scheduler's own
+# ExecutionTimeLimit for BigMoneyDFS_MLB_DK_Fetch_Worker is PT15M, and the
+# three stages share it: DK fetch (<=240s) + research (<=600s) + Vegas/
+# weather (<=240s) sums to 1080s, MORE than the 900s outer limit. The
+# original guard protected that limit with a fixed "$dkSeconds -lt 100"
+# test, but $dkSeconds is the WALL time of the whole `npx @railway/cli
+# run` invocation -- CLI resolution plus production env fetch alone is
+# ~45-60s on top of the fetch script's own ~60-65s -- so the DK stage has
+# not come in under 100s in normal operation since the two-date prefetch
+# landed. The guard therefore fired EVERY cycle and starved the research
+# stage indefinitely (projections/ownership last refreshed 2026-09-12
+# 04:47Z, ~22h stale, and absent entirely for the next slate date).
+# Replaced with a real remaining-budget check: research now gets whatever
+# time is actually left after the DK stage, capped at its own limit and
+# floored at the point where it could not finish anyway. This keeps the
+# original intent (never overrun the outer limit) without ever starving.
+$OuterExecutionLimitSeconds        = 900
+$EnvironmentStageReserveSeconds    = 240
+$StatusWriteReserveSeconds         = 30
+# Steps 1-4 of the 8-step pipeline alone measured ~78s on 2026-09-09, so a
+# budget below this cannot reach the projection/ownership steps that are
+# the whole point of the stage -- skipping is honest, a doomed run is not.
+$ResearchMinimumUsefulSeconds      = 150
+
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not (Test-Path $LogFile)) { New-Item -ItemType File -Path $LogFile | Out-Null }
 
@@ -106,7 +130,39 @@ $ChicagoTz  = [System.TimeZoneInfo]::FindSystemTimeZoneById("Central Standard Ti
 $ChicagoNow = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $ChicagoTz)
 $Date       = $ChicagoNow.ToString("yyyy-MM-dd")
 
-$StartedAt = (Get-Date).ToUniversalTime().ToString("o")
+# ---- Detach from console CTRL+C / CTRL+BREAK (2026-09-13) -------------
+# Both DFS workers run as Task Scheduler tasks with LogonType=Interactive,
+# which executes them inside the logged-on console session. Console
+# control events are delivered to every process attached to that console,
+# so unrelated activity in the same session (an interactive shell killing
+# a child, a terminal/agent session reaping background jobs) could
+# terminate a mid-flight worker. That is the long-unexplained failure
+# recorded against the MLB worker as exit 3221225786 / 0xC000013A
+# (STATUS_CONTROL_C_EXIT) "with zero diagnostic output beyond starting" --
+# both tasks were observed returning exactly that code on 2026-09-13.
+#
+# SetConsoleCtrlHandler(NULL, TRUE) makes THIS process ignore CTRL_C_EVENT
+# outright, and the flag is inherited by child processes -- so the Railway
+# CLI and python child this wrapper spawns become immune too. The proper
+# fix is running the task non-interactively (LogonType=S4U, "run whether
+# user is logged on or not"), but that requires administrator rights this
+# task's account does not have; this achieves the same isolation for the
+# CTRL_C case without elevation. Failure to apply is never fatal: the
+# worker still runs, just as interruptible as it was before.
+try {
+    if (-not ("Win32.ConsoleCtl" -as [type])) {
+        Add-Type -Namespace Win32 -Name ConsoleCtl -MemberDefinition @"
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
+"@ -ErrorAction Stop
+    }
+    [void][Win32.ConsoleCtl]::SetConsoleCtrlHandler([IntPtr]::Zero, $true)
+} catch {
+    # Non-fatal: proceed without CTRL_C immunity rather than skip the run.
+}
+
+$StartedAtUtc = (Get-Date).ToUniversalTime()
+$StartedAt = $StartedAtUtc.ToString("o")
 Write-Log "`n===== START $StartedAt -- MLB slates for $Date ====="
 
 # Load prior status (for the research-stage gate and failure counting).
@@ -230,9 +286,16 @@ $lastResearchAt    = $null
 if ($prior -and $prior.last_research_refresh_at) { $lastResearchAt = [datetime]::Parse($prior.last_research_refresh_at).ToUniversalTime() }
 
 $researchDue = (-not $lastResearchAt) -or (((Get-Date).ToUniversalTime() - $lastResearchAt).TotalMinutes -ge $ResearchRefreshIntervalMinutes)
-$dkWasFast   = ($dkSeconds -lt 100)
 
-if ($researchDue -and $dkWasFast -and (-not $dk.TimedOut)) {
+# How much of the outer ExecutionTimeLimit is actually left for research,
+# after what this cycle has already spent and what stage 3 still needs.
+$elapsedSeconds  = ((Get-Date).ToUniversalTime() - $StartedAtUtc).TotalSeconds
+$researchBudget  = [int]($OuterExecutionLimitSeconds - $elapsedSeconds - $EnvironmentStageReserveSeconds - $StatusWriteReserveSeconds)
+if ($researchBudget -gt $ResearchInternalTimeoutSeconds) { $researchBudget = $ResearchInternalTimeoutSeconds }
+$researchHasBudget = ($researchBudget -ge $ResearchMinimumUsefulSeconds)
+Write-Log ("----- research budget: {0}s remaining of PT15M after {1}s elapsed (DK stage {2}s); minimum useful {3}s -----" -f $researchBudget, [int]$elapsedSeconds, $dkSeconds, $ResearchMinimumUsefulSeconds)
+
+if ($researchDue -and $researchHasBudget -and (-not $dk.TimedOut)) {
     # DIAGNOSTIC HARDENING (2026-09-10): this stage has been observed
     # exiting 3221225786 (STATUS_CONTROL_C_EXIT) with nothing logged
     # beyond "starting" -- Invoke-Stage itself now catches and logs any
@@ -244,7 +307,7 @@ if ($researchDue -and $dkWasFast -and (-not $dk.TimedOut)) {
     # script-level trap (which exits the whole cycle immediately,
     # skipping stage 3 and the status-file write below).
     try {
-        $r = Invoke-Stage -Label "research/identity/projections/ownership" -TimeoutSeconds $ResearchInternalTimeoutSeconds `
+        $r = Invoke-Stage -Label "research/identity/projections/ownership" -TimeoutSeconds $researchBudget `
             -Arguments "--yes @railway/cli ssh --project $RailwayProjectId --service dfs-engine --environment production -- npx tsx scripts/refresh-research-and-eligibility.ts --date $Date"
         $researchRan  = $true
         $researchExit = $r.ExitCode
@@ -265,7 +328,7 @@ if ($researchDue -and $dkWasFast -and (-not $dk.TimedOut)) {
     $researchSkipped = "not due (every ${ResearchRefreshIntervalMinutes}m)"
     Write-Log "----- research stage skipped -- $researchSkipped -----"
 } else {
-    $researchSkipped = "DK stage was slow (${dkSeconds}s) or timed out -- retry next cycle"
+    $researchSkipped = "only ${researchBudget}s of the PT15M cycle budget left after a ${dkSeconds}s DK stage (need >=${ResearchMinimumUsefulSeconds}s) or DK timed out -- retry next cycle"
     Write-Log "----- research stage skipped -- $researchSkipped -----"
 }
 
