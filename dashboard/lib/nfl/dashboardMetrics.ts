@@ -33,6 +33,39 @@ export interface ScoredPlayer {
   gppScore: number | null;
   bigMoneyScore: number | null;
   bigMoneyRank: number | null;
+  /** See weeksOfHistory() below. */
+  weeksOfHistory: number | null;
+  /** false when weeksOfHistory is 0 -- a real, code-derived signal, not
+   * a guess (see weeksOfHistory's own docstring for why this matters). */
+  hasTrackRecord: boolean;
+}
+
+/**
+ * How many weeks of real historical usage the Big Money Native pipeline
+ * found for this player (from usage.rolling.weeks_of_history, already
+ * present in every /api/nfl/data response). null when usage data is
+ * entirely absent for this player (shouldn't happen for anyone with a
+ * projection, but never assumed).
+ *
+ * Why this matters, confirmed against real production data on
+ * 2026-09-13: a player with weeks_of_history === 0 has NO real rolling
+ * features at all (every one of the ~122 rolling/season columns is
+ * null), so historical_models/nfl_v1/inference.py::predict_one's
+ * "missing keys become NaN, imputed by the persisted pipeline's own
+ * train-only-fit imputer" fills an IDENTICAL default feature row for
+ * every such player. Verified live: three unrelated $4,000 QBs on three
+ * different teams (Sam Howell, Jake Haener, Sam Ehlinger) each received
+ * the exact same 8.80/-4.45/19.23 projection/floor/ceiling. That is not
+ * a per-player estimate -- it's a shared fallback that can coincidentally
+ * land close to a real starter's number, which is the mechanism behind
+ * a $4,000 emergency-arm QB outranking a real one. Nothing here is
+ * fabricated to fix that: this file only uses the pipeline's own,
+ * already-computed weeks_of_history to flag when a projection has that
+ * shape, so headline rankings can avoid crowning a coin-flip.
+ */
+export function weeksOfHistory(row: NflPlayerRow): number | null {
+  const v = row.usage?.rolling?.weeks_of_history;
+  return typeof v === "number" ? v : null;
 }
 
 /** Points per $1,000 -- the standard DFS value unit. */
@@ -191,6 +224,7 @@ export function scoreSlate(slate: NflSlateData): ScoredPlayer[] {
     const teamImpliedTotal = teamImpliedTotalFor(row, slate);
     const gameTotal = row.matchup?.total ?? null;
 
+    const woh = weeksOfHistory(row);
     base.push({
       row,
       projection,
@@ -206,6 +240,8 @@ export function scoreSlate(slate: NflSlateData): ScoredPlayer[] {
       gppScore: null,
       bigMoneyScore: null,
       bigMoneyRank: null,
+      weeksOfHistory: woh,
+      hasTrackRecord: woh !== null && woh > 0,
     });
   }
 
@@ -294,6 +330,35 @@ function weighted(terms: [number, number | null][]): number | null {
   }
   if (wsum === 0) return null;
   return toDisplayScore(acc / wsum);
+}
+
+export interface HeadlinePick {
+  player: ScoredPlayer | null;
+  /** true when every candidate with `key` available had zero track
+   * record, so the pick shown is a real player's real number but one
+   * that came from the pipeline's zero-history fallback path (see
+   * weeksOfHistory's docstring) -- callers should render this
+   * distinctly rather than crown it silently. */
+  lowConfidenceFallback: boolean;
+}
+
+/**
+ * Picks the best player by `key` among a pool, preferring players with a
+ * real track record (weeksOfHistory > 0) over the zero-history fallback
+ * case documented on weeksOfHistory() above. Only falls back to a
+ * zero-history pick when literally no track-record candidate exists at
+ * this position -- "no unexplained blanks" outranks "don't show a
+ * low-confidence pick," so a headline card still shows a real number
+ * rather than going empty, but the caller is told it's a fallback.
+ */
+export function pickHeadline(pool: ScoredPlayer[], key: (p: ScoredPlayer) => number | null): HeadlinePick {
+  const withKey = pool.filter((p) => key(p) !== null);
+  if (withKey.length === 0) return { player: null, lowConfidenceFallback: false };
+
+  const trackRecord = withKey.filter((p) => p.hasTrackRecord);
+  const candidates = trackRecord.length > 0 ? trackRecord : withKey;
+  const player = candidates.reduce((a, b) => ((key(b) ?? 0) > (key(a) ?? 0) ? b : a));
+  return { player, lowConfidenceFallback: trackRecord.length === 0 };
 }
 
 export interface StackCandidate {

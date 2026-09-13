@@ -9,6 +9,7 @@ import {
   buildStacks,
   injuryWatch,
   opponentImpliedTotalFor,
+  pickHeadline,
   positionHasNoSpread,
   scoreSlate,
   slateReadiness,
@@ -38,12 +39,16 @@ function LeaderCard({
   player,
   metric,
   emptyReason,
+  lowConfidence,
 }: {
   title: string;
   subtitle?: string;
   player: ScoredPlayer | null;
   metric: (p: ScoredPlayer) => string;
   emptyReason: string;
+  /** See pickHeadline()'s docstring -- this pick was the only candidate
+   * at all, and it has no real game history behind its projection. */
+  lowConfidence?: boolean;
 }) {
   return (
     <DataCard title={title}>
@@ -51,7 +56,17 @@ function LeaderCard({
         <Unavailable reason={emptyReason} />
       ) : (
         <div>
-          <div className="text-sm font-semibold text-text">{player.row.name}</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-sm font-semibold text-text">{player.row.name}</div>
+            {lowConfidence ? (
+              <span
+                title="No recent game history — this is the projection model's zero-history fallback value, not a player-specific estimate."
+                className="rounded bg-yellow/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-yellow"
+              >
+                Low confidence
+              </span>
+            ) : null}
+          </div>
           <div className="mt-0.5 text-[11px] text-text-faint">
             {player.row.position} · {player.row.team}
             {player.row.opponent ? ` vs ${player.row.opponent}` : ""} · {fmtSalary(player.row.salary)}
@@ -122,16 +137,19 @@ function DashboardContent() {
     .filter((r): r is { team: string; total: number; game: string | null } => r.team !== null && r.total !== null);
   const highestImplied = impliedRows.length ? impliedRows.reduce((a, b) => (b.total > a.total ? b : a)) : null;
 
-  const best = (pos: string, key: (p: ScoredPlayer) => number | null): ScoredPlayer | null => {
-    const pool = scored.filter((p) => p.row.position === pos && key(p) !== null);
-    if (!pool.length) return null;
-    return pool.reduce((a, b) => ((key(b) ?? 0) > (key(a) ?? 0) ? b : a));
-  };
-  const topBy = (key: (p: ScoredPlayer) => number | null): ScoredPlayer | null => {
-    const pool = scored.filter((p) => key(p) !== null);
-    if (!pool.length) return null;
-    return pool.reduce((a, b) => ((key(b) ?? 0) > (key(a) ?? 0) ? b : a));
-  };
+  // Both helpers prefer a player with a real track record over the
+  // pipeline's zero-history fallback case (see pickHeadline's own
+  // docstring) -- only falling back to a zero-history pick when no
+  // track-record candidate exists at all, and telling the caller when
+  // that happened so the card can say so rather than crown it silently.
+  const best = (pos: string, key: (p: ScoredPlayer) => number | null) =>
+    pickHeadline(scored.filter((p) => p.row.position === pos), key);
+  const topBy = (key: (p: ScoredPlayer) => number | null) => pickHeadline(scored, key);
+
+  const lowConfidenceNote = (p: ScoredPlayer | null) =>
+    p && !p.hasTrackRecord
+      ? "No recent game history for this pipeline to project from — this is the model's zero-history fallback value, not a player-specific estimate. See Slate Readiness for detail."
+      : undefined;
 
   const dstBaseline = positionHasNoSpread(scored, "DST");
   const bestDst = (() => {
@@ -158,6 +176,25 @@ function DashboardContent() {
   return (
     <div className="space-y-5">
       <NflStalenessBanner data={slate} />
+
+      {/* Launch Blocker Sprint 1 (2026-09-13): confirmed against real
+          production data that a player with zero recent game history
+          gets the pipeline's shared imputed-fallback projection rather
+          than a real per-player estimate (see pickHeadline()'s
+          docstring in dashboardMetrics.ts for the concrete evidence).
+          Individual picks are already guarded against crowning that
+          case silently (see "Low confidence" tags below), but the
+          projection/ranking system as a whole is labeled BETA here
+          until the underlying model is retrained with a real
+          playing-time-expectation signal. */}
+      <div className="rounded-[var(--radius-control)] border border-yellow/30 bg-yellow/5 px-3 py-2 text-[11px] leading-snug text-text-muted">
+        <span className="mr-1.5 rounded bg-yellow/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-yellow">
+          Beta
+        </span>
+        NFL projections and rankings are in beta. Players with no recent game history can receive an unreliable
+        placeholder projection — these are marked &quot;Low confidence&quot; wherever they appear. Vegas, ownership,
+        and Slate Readiness data are not affected by this limitation.
+      </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <MetricCard label="Slate" value={slate.slate_name?.trim() || `DG ${slate.draft_group_id}`} />
@@ -212,14 +249,15 @@ function DashboardContent() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
-          const p = best(pos, (x) => x.bigMoneyScore);
+          const { player: p, lowConfidenceFallback } = best(pos, (x) => x.bigMoneyScore);
           return (
             <LeaderCard
               key={pos}
               title={`Best ${pos}`}
               player={p}
+              lowConfidence={lowConfidenceFallback}
               metric={(x) => `${fmt(x.bigMoneyScore)} BM`}
-              subtitle={p ? `${fmt(p.projection)} proj · ${fmt(p.value, 2)} pts/$1K` : undefined}
+              subtitle={p ? (lowConfidenceFallback ? lowConfidenceNote(p) : `${fmt(p.projection)} proj · ${fmt(p.value, 2)} pts/$1K`) : undefined}
               emptyReason="AWAITING PROJECTION"
             />
           );
@@ -240,37 +278,72 @@ function DashboardContent() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <LeaderCard
           title="Top Cash Play"
-          player={topCash}
+          player={topCash.player}
+          lowConfidence={topCash.lowConfidenceFallback}
           metric={(p) => `${fmt(p.cashScore)} cash`}
-          subtitle={topCash ? `floor ${fmt(topCash.floor)} · ${fmt(topCash.value, 2)} pts/$1K` : undefined}
+          subtitle={
+            topCash.player
+              ? topCash.lowConfidenceFallback
+                ? lowConfidenceNote(topCash.player)
+                : `floor ${fmt(topCash.player.floor)} · ${fmt(topCash.player.value, 2)} pts/$1K`
+              : undefined
+          }
           emptyReason="AWAITING PROJECTION"
         />
         <LeaderCard
           title="Top GPP Play"
-          player={topGpp}
+          player={topGpp.player}
+          lowConfidence={topGpp.lowConfidenceFallback}
           metric={(p) => `${fmt(p.gppScore)} GPP`}
-          subtitle={topGpp ? `ceiling ${fmt(topGpp.ceiling)}` : undefined}
+          subtitle={
+            topGpp.player
+              ? topGpp.lowConfidenceFallback
+                ? lowConfidenceNote(topGpp.player)
+                : `ceiling ${fmt(topGpp.player.ceiling)}`
+              : undefined
+          }
           emptyReason="AWAITING PROJECTION"
         />
         <LeaderCard
           title="Top Value"
-          player={topValue}
+          player={topValue.player}
+          lowConfidence={topValue.lowConfidenceFallback}
           metric={(p) => `${fmt(p.value, 2)} pts/$1K`}
-          subtitle={topValue ? `${fmt(topValue.projection)} proj` : undefined}
+          subtitle={
+            topValue.player
+              ? topValue.lowConfidenceFallback
+                ? lowConfidenceNote(topValue.player)
+                : `${fmt(topValue.player.projection)} proj`
+              : undefined
+          }
           emptyReason="AWAITING PROJECTION"
         />
         <LeaderCard
           title="Top Leverage"
-          player={topLeverage}
+          player={topLeverage.player}
+          lowConfidence={topLeverage.lowConfidenceFallback}
           metric={(p) => `${fmt(p.leverage, 2)} lev`}
-          subtitle={topLeverage ? `${fmt(topLeverage.ownership)}% owned · ceiling ${fmt(topLeverage.ceiling)}` : undefined}
+          subtitle={
+            topLeverage.player
+              ? topLeverage.lowConfidenceFallback
+                ? lowConfidenceNote(topLeverage.player)
+                : `${fmt(topLeverage.player.ownership)}% owned · ceiling ${fmt(topLeverage.player.ceiling)}`
+              : undefined
+          }
           emptyReason="AWAITING OWNERSHIP"
         />
         <LeaderCard
           title="Highest Owned"
-          player={topOwned}
+          player={topOwned.player}
+          lowConfidence={topOwned.lowConfidenceFallback}
           metric={(p) => `${fmt(p.ownership)}%`}
-          subtitle={topOwned ? `${fmt(topOwned.projection)} proj` : undefined}
+          subtitle={
+            topOwned.player
+              ? topOwned.lowConfidenceFallback
+                ? lowConfidenceNote(topOwned.player)
+                : `${fmt(topOwned.player.projection)} proj`
+              : undefined
+          }
           emptyReason="AWAITING OWNERSHIP"
         />
       </div>
@@ -333,6 +406,14 @@ function DashboardContent() {
                       {p.row.name}
                       {p.row.status_info.normalized_status !== "ACTIVE" ? (
                         <span className="ml-1 text-[10px] uppercase text-red">{p.row.status_info.normalized_status}</span>
+                      ) : null}
+                      {!p.hasTrackRecord ? (
+                        <span
+                          title="No recent game history — this projection is the model's zero-history fallback value, not a player-specific estimate."
+                          className="ml-1 rounded bg-yellow/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-yellow"
+                        >
+                          Low conf
+                        </span>
                       ) : null}
                     </td>
                     <td className="py-2 pr-3 text-text-muted">{p.row.team}</td>
