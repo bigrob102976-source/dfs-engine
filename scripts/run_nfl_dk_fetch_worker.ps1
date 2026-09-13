@@ -109,9 +109,16 @@ function Test-MlbWorkerActive {
 }
 
 # Escape hatch: NFL's served pools go stale at nfl/pool_cache.py's 2h
-# ceiling, so deferring indefinitely would be its own outage. Past 90
-# minutes with no successful publish, take the overlap risk instead.
-$NflMaxPublishAgeMinutes = 90
+# ceiling, so deferring indefinitely would be its own outage. Lowered
+# from 90 to 20 minutes on 2026-09-13: MLB was measured running at a
+# 100% duty cycle (Running in 24/24 samples over 129s), so the
+# "MLB idle -> proceed" path is effectively dead and NFL was refreshing
+# ONLY via this escape hatch -- 90 minutes left just 30 minutes of
+# margin against the 2h stale ceiling and kept NFL permanently in the
+# "stale" freshness tier. 20 minutes keeps NFL inside the "fresh"
+# (<=15min) tier far more often while still tolerating one MLB research
+# cycle (up to ~600s) without forcing every single time.
+$NflMaxPublishAgeMinutes = 20
 $publishAgeMinutes = $null
 if ($priorStatus -and $priorStatus.last_success_at) {
     try { $publishAgeMinutes = ((Get-Date).ToUniversalTime() - [datetime]::Parse($priorStatus.last_success_at).ToUniversalTime()).TotalMinutes } catch { $publishAgeMinutes = $null }
