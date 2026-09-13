@@ -379,21 +379,34 @@ if ($published) {
         Add-Content -Path $logPath -Value "NFL_DOWNSTREAM no published DraftGroups in this cycle; nothing to refresh" -Encoding utf8
     } else {
         # Resume from wherever the previous firing stopped.
-        $cursor = 0
+        $startCursor = 0
         if ($priorStatus -and $priorStatus.downstream_cursor) {
-            try { $cursor = [int]$priorStatus.downstream_cursor } catch { $cursor = 0 }
+            try { $startCursor = [int]$priorStatus.downstream_cursor } catch { $startCursor = 0 }
         }
-        if ($cursor -ge $dgIds.Count) { $cursor = 0 }
+        if ($startCursor -ge $dgIds.Count) { $startCursor = 0 }
 
+        # $walkIndex is which DraftGroup THIS firing looks at next -- it
+        # always advances every iteration so one firing still tries to
+        # cover every active DraftGroup rather than looping on a single
+        # failing one for its whole budget. $resumeCursor is the separate,
+        # PERSISTED value the *next* firing starts from -- it stops
+        # advancing at the first DraftGroup that failed this firing, so a
+        # transient failure gets retried on the very next firing instead
+        # of waiting a full round-robin lap (up to ~10-25 minutes,
+        # observed live 2026-09-13 with the old always-advance behavior).
+        $walkIndex = $startCursor
+        $resumeCursor = $null
         $processed = @()
         for ($n = 0; $n -lt $dgIds.Count; $n++) {
             $elapsedNow = ((Get-Date).ToUniversalTime() - $StartedAtUtc).TotalSeconds
             $remaining  = $NflDownstreamTaskLimitSeconds - $elapsedNow - $NflDownstreamReserveSeconds
             if ($remaining -lt ($NflContextTimeoutSeconds + $NflOwnershipTimeoutSeconds)) {
-                Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM budget exhausted after {0} DraftGroup(s); {1}s left, resuming at cursor {2} next firing" -f $processed.Count, [int]$remaining, $cursor) -Encoding utf8
+                if ($null -eq $resumeCursor) { $resumeCursor = $walkIndex }
+                Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM budget exhausted after {0} DraftGroup(s); {1}s left, resuming at cursor {2} next firing" -f $processed.Count, [int]$remaining, $resumeCursor) -Encoding utf8
                 break
             }
-            $dg = $dgIds[$cursor]
+            $dg = $dgIds[$walkIndex]
+            $dgAllStagesOk = $true
             foreach ($stage in @(
                 @{ Name = "context";   Script = "scripts/build_nfl_game_context.py"; Timeout = $NflContextTimeoutSeconds },
                 @{ Name = "ownership"; Script = "scripts/generate_nfl_ownership.py"; Timeout = $NflOwnershipTimeoutSeconds }
@@ -447,11 +460,29 @@ if ($published) {
                     if ($sp) { try { $sp.Dispose() } catch { } }
                 }
                 $sw.Stop()
+                if ($stageExit -ne 0) { $dgAllStagesOk = $false }
                 Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM dg={0} stage={1} exit={2} {3}s" -f $dg.Id, $stage.Name, $stageExit, [int]$sw.Elapsed.TotalSeconds) -Encoding utf8
             }
             $processed += $dg.Id
-            $cursor = ($cursor + 1) % $dgIds.Count
+            if (-not $dgAllStagesOk -and $null -eq $resumeCursor) {
+                # First failure THIS firing: the resume cursor for next
+                # time freezes here so the next firing retries this
+                # DraftGroup first, rather than waiting a full round-robin
+                # lap (observed live 2026-09-13: the SAME DraftGroup ranged
+                # from a clean 23-39s to a full 210s ownership timeout --
+                # consistent with transient Railway/network contention, not
+                # an algorithmic cost; a clean, uncontended run of the
+                # exact same script completed in 23s). $walkIndex still
+                # advances below regardless, so THIS firing keeps trying
+                # the other active DraftGroups instead of looping on one
+                # failure for its whole remaining budget.
+                $resumeCursor = $walkIndex
+                Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM dg={0} had a failed stage; next firing will retry starting here" -f $dg.Id) -Encoding utf8
+            }
+            $walkIndex = ($walkIndex + 1) % $dgIds.Count
         }
+        if ($null -eq $resumeCursor) { $resumeCursor = $walkIndex }
+        $cursor = $resumeCursor
         Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM refreshed {0} of {1} DraftGroup(s) this cycle: {2}" -f $processed.Count, $dgIds.Count, ($processed -join ",")) -Encoding utf8
         $newStatus["downstream_cursor"]  = $cursor
         $newStatus["downstream_last_at"] = (Get-Date).ToUniversalTime().ToString("o")

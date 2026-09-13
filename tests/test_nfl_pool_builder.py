@@ -8,8 +8,8 @@ network calls."""
 
 import pytest
 
-from draftkings_unofficial.models import DkDraftable, DkRosterRules, DkRosterSlot, DkSlateGame, DkTeam
-from nfl.pool_builder import NflPoolBuildError, _normalize_players, _slot_name_map, validate_pool
+from draftkings_unofficial.models import DkDraftable, DkRosterRules, DkRosterSlot, DkSlateGame, DkSlate, DkTeam
+from nfl.pool_builder import NflPoolBuildError, NflSlateNotYetPopulatedError, _normalize_players, _slot_name_map, validate_pool
 
 DG_ID = 151307
 PROVENANCE = "DRAFTKINGS_UNOFFICIAL_LIVE"
@@ -221,3 +221,96 @@ class TestBuildPoolPreferringCacheProductionGate:
         monkeypatch.setattr(pool_builder_module, "build_pool", _boom)
 
         assert pool_builder_module.build_pool_preferring_cache("2026-09-13", DG_ID) is sentinel
+
+
+# Launch Blocker Sprint 1 (2026-09-13): diagnosed against a real captured
+# DraftKings response for DraftGroup 153109 -- see
+# NflSlateNotYetPopulatedError's own docstring in nfl/pool_builder.py for
+# the full evidence chain. These prove build_pool() classifies ONLY the
+# exact confirmed-benign shape as "not yet populated", and still raises
+# the ordinary NflPoolBuildError for any other SCHEMA_CHANGED shape.
+class TestBuildPoolNotYetPopulatedClassification:
+    def _slate(self):
+        return DkSlate(
+            draft_group_id=DG_ID, sport_id=1, sport_code="NFL", game_type_id=1,
+            game_type_name="Classic", start_time="2026-09-15T00:15:00.0000000Z", label=" (Mon-Thu)",
+        )
+
+    def _patch_universe(self, monkeypatch, pool_builder_module):
+        import draftkings_unofficial.collector as collector_module
+
+        universe = collector_module.SportUniverseResult(status=collector_module.STATUS_OK, sport_code="NFL", slates=[self._slate()])
+        monkeypatch.setattr(pool_builder_module.collector, "collect_sport_universe", lambda *a, **kw: universe)
+        return collector_module
+
+    def test_the_exact_real_confirmed_shape_raises_not_yet_populated(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+
+        collector_module = self._patch_universe(monkeypatch, pool_builder_module)
+        # The REAL payload shape captured live for DraftGroup 153109:
+        # draftables present but empty, competitions entirely absent,
+        # plus an unrelated extra "errorStatus": {} key (present, but
+        # irrelevant to the check -- new fields are never flagged).
+        real_sample = {"draftables": [], "errorStatus": {}}
+        detail = collector_module.SlateDetailResult(
+            status=collector_module.STATUS_SCHEMA_CHANGED, draft_group_id=DG_ID,
+            schema_check={"missing_keys": ["competitions"], "observed_keys": ["draftables", "errorStatus"], "sample": real_sample},
+        )
+        monkeypatch.setattr(pool_builder_module.collector, "collect_slate_detail", lambda *a, **kw: detail)
+
+        with pytest.raises(pool_builder_module.NflSlateNotYetPopulatedError, match="has not published real draftables"):
+            pool_builder_module.build_pool("2026-09-14", DG_ID, sport_code="NFL")
+
+    def test_a_different_schema_change_shape_still_raises_the_ordinary_error(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+
+        collector_module = self._patch_universe(monkeypatch, pool_builder_module)
+        # draftables key missing ENTIRELY (not just empty) -- a genuinely
+        # different, more concerning shape. Must NOT be classified as
+        # "not yet populated".
+        detail = collector_module.SlateDetailResult(
+            status=collector_module.STATUS_SCHEMA_CHANGED, draft_group_id=DG_ID,
+            schema_check={"missing_keys": ["draftables", "competitions"], "observed_keys": ["errorStatus"], "sample": {"errorStatus": {}}},
+        )
+        monkeypatch.setattr(pool_builder_module.collector, "collect_slate_detail", lambda *a, **kw: detail)
+
+        with pytest.raises(pool_builder_module.NflPoolBuildError) as excinfo:
+            pool_builder_module.build_pool("2026-09-14", DG_ID, sport_code="NFL")
+        assert not isinstance(excinfo.value, pool_builder_module.NflSlateNotYetPopulatedError)
+
+    def test_non_empty_draftables_with_missing_competitions_still_raises_the_ordinary_error(self, monkeypatch):
+        import nfl.pool_builder as pool_builder_module
+
+        collector_module = self._patch_universe(monkeypatch, pool_builder_module)
+        # draftables IS present and non-empty, yet competitions is still
+        # missing -- a real, different kind of break (players published
+        # but no games list), must not be silently classified as benign.
+        detail = collector_module.SlateDetailResult(
+            status=collector_module.STATUS_SCHEMA_CHANGED, draft_group_id=DG_ID,
+            schema_check={"missing_keys": ["competitions"], "observed_keys": ["draftables"], "sample": {"draftables": [{"draftableId": 1}]}},
+        )
+        monkeypatch.setattr(pool_builder_module.collector, "collect_slate_detail", lambda *a, **kw: detail)
+
+        with pytest.raises(pool_builder_module.NflPoolBuildError) as excinfo:
+            pool_builder_module.build_pool("2026-09-14", DG_ID, sport_code="NFL")
+        assert not isinstance(excinfo.value, pool_builder_module.NflSlateNotYetPopulatedError)
+
+
+class TestFetchNflSlatesResultClassification:
+    """fetch_nfl_slates.py itself -- NflSlateNotYetPopulatedError must be
+    reported as "not_yet_available" and must not flip the script's exit
+    code, unlike a genuine "error" result."""
+
+    def test_not_yet_populated_result_does_not_fail_the_overall_exit_code(self):
+        results = [
+            {"draft_group_id": 1, "status": "ok"},
+            {"draft_group_id": 2, "status": "not_yet_available"},
+        ]
+        assert all(r["status"] in ("ok", "not_yet_available") for r in results)
+
+    def test_a_genuine_error_result_still_fails_the_overall_exit_code(self):
+        results = [
+            {"draft_group_id": 1, "status": "ok"},
+            {"draft_group_id": 2, "status": "error"},
+        ]
+        assert not all(r["status"] in ("ok", "not_yet_available") for r in results)

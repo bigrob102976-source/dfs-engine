@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from draftkings_unofficial import collector
 from nfl.persistence import list_nfl_player_pools, save_nfl_player_pool
-from nfl.pool_builder import NflPoolBuildError, build_pool
+from nfl.pool_builder import NflPoolBuildError, NflSlateNotYetPopulatedError, build_pool
 from nfl.pool_cache import list_nfl_universe_snapshots, prune_old_snapshots, save_nfl_universe_snapshot
 
 CLASSIC_GAME_TYPE_ID = 1
@@ -81,6 +81,19 @@ def main() -> int:
     for s in slates:
         try:
             pool = build_pool(s["slate_date"], s["draft_group_id"], sport_code="NFL")
+        except NflSlateNotYetPopulatedError as exc:
+            # Launch Blocker Sprint 1 (2026-09-13): a real, currently-listed
+            # Classic DraftGroup DraftKings simply hasn't published
+            # draftables for yet (confirmed against DraftGroup 153109, a
+            # "Mon-Thu" slate ~24h out at fetch time -- see
+            # NflSlateNotYetPopulatedError's own docstring for the exact
+            # evidence). Reported distinctly from "error" so this one,
+            # expected, temporary state never makes the whole worker cycle
+            # look unhealthy -- the next cycle retries automatically and
+            # this flips to "ok" the moment DraftKings actually publishes
+            # real data.
+            results.append({"draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "not_yet_available", "error": str(exc)})
+            continue
         except NflPoolBuildError as exc:
             results.append({"draft_group_id": s["draft_group_id"], "slate_date": s["slate_date"], "status": "error", "error": str(exc)})
             continue
@@ -104,7 +117,10 @@ def main() -> int:
         "universe_path": str(universe_path) if universe_path else None,
         "slates_discovered": len(slates), "results": results,
     }))
-    return 0 if all(r["status"] == "ok" for r in results) else 1
+    # "not_yet_available" is an expected, temporary state (see
+    # NflSlateNotYetPopulatedError) -- only a genuine "error" result
+    # should make this cycle look unhealthy.
+    return 0 if all(r["status"] in ("ok", "not_yet_available") for r in results) else 1
 
 
 if __name__ == "__main__":

@@ -31,6 +31,44 @@ class NflPoolBuildError(Exception):
     CSV/mock/synthetic data."""
 
 
+class NflSlateNotYetPopulatedError(NflPoolBuildError):
+    """Launch Blocker Sprint 1 (2026-09-13): a narrow, deliberately
+    conservative subclass of NflPoolBuildError for exactly one real,
+    recurring, benign case -- diagnosed against a real captured
+    DraftKings response for DraftGroup 153109 (a genuine, currently-
+    listed "Mon-Thu" Classic contest whose real start_time was ~24h out
+    at fetch time): the draftables endpoint returned `"draftables": []`
+    (present, structurally valid, genuinely empty) with the
+    "competitions" key entirely absent and an empty "errorStatus": {}
+    object -- not a redesigned key name, not different data under a new
+    key, just nothing published yet for a slate that far in advance.
+
+    This is raised ONLY when BOTH signatures hold: missing_keys is
+    EXACTLY ["competitions"] (nothing else about the shape is
+    surprising) AND the payload's own "draftables" list is present and
+    empty. Any other SCHEMA_CHANGED shape (draftables missing entirely,
+    non-empty draftables with competitions still missing, additional
+    missing keys) is a genuine, different failure and still raises the
+    base NflPoolBuildError -- this class intentionally does not try to
+    cover every SCHEMA_CHANGED case, only this one confirmed-benign one.
+
+    scripts/fetch_nfl_slates.py catches this separately and reports
+    "not_yet_available" rather than "error", so one far-future DraftGroup
+    DraftKings hasn't populated yet does not make the whole worker cycle
+    look unhealthy -- the next cycle retries automatically and this
+    flips to "ok" the moment DraftKings actually publishes real data,
+    with no code change needed."""
+
+
+def _is_not_yet_populated_schema_change(schema_check: Optional[dict]) -> bool:
+    if not schema_check:
+        return False
+    if schema_check.get("missing_keys") != ["competitions"]:
+        return False
+    sample = schema_check.get("sample")
+    return isinstance(sample, dict) and sample.get("draftables") == []
+
+
 def _find_slate(draft_group_id: int, sport_code: str = "NFL"):
     universe = collector.collect_sport_universe(sport_code)
     if universe.status != collector.STATUS_OK:
@@ -199,7 +237,13 @@ def build_pool(slate_date: str, draft_group_id: int, sport_code: str = "NFL") ->
 
     detail = collector.collect_slate_detail(draft_group_id, sport_code, game_type_id=slate.game_type_id)
     if detail.status != collector.STATUS_OK:
-        raise NflPoolBuildError(f"DraftKings unofficial slate detail fetch failed for DraftGroup {draft_group_id}: {detail.status} ({detail.error}).")
+        message = f"DraftKings unofficial slate detail fetch failed for DraftGroup {draft_group_id}: {detail.status} ({detail.error})."
+        if detail.status == collector.STATUS_SCHEMA_CHANGED and _is_not_yet_populated_schema_change(detail.schema_check):
+            raise NflSlateNotYetPopulatedError(
+                f"{message} DraftKings has not published real draftables for this DraftGroup yet "
+                f"(empty draftables list, no competitions) -- not a schema change, will retry automatically."
+            )
+        raise NflPoolBuildError(message)
 
     structural_result = validate_nfl_classic_draftgroup(draft_group_id, universe.contests, detail.games, detail.draftables, detail.roster_rules)
     if not structural_result.passed:
