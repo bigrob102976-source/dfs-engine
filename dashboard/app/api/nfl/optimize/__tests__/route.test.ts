@@ -1,13 +1,20 @@
+import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/auth/guards", () => ({
+  requireAuthApi: vi.fn(),
+}));
 vi.mock("@/lib/orchestrator/pythonRunner", () => ({
   runPythonScript: vi.fn(),
   tail: (s: string) => s,
 }));
 
+const { requireAuthApi } = await import("@/lib/auth/guards");
 const { runPythonScript } = await import("@/lib/orchestrator/pythonRunner");
 const { __resetRateLimitForTests } = await import("@/lib/rateLimit");
 const { POST } = await import("../route");
+
+const USER = { id: "user-1", email: "member@example.com", role: "MEMBER" };
 
 function request(body: unknown) {
   return new Request("http://localhost/api/nfl/optimize", { method: "POST", body: JSON.stringify(body) });
@@ -21,13 +28,27 @@ function mockPythonSuccess(payload: unknown) {
 
 beforeEach(() => {
   __resetRateLimitForTests();
+  (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(USER);
 });
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("POST /api/nfl/optimize -- NFL public access + M13 settings serialization", () => {
-  it("requires no authentication at all -- an anonymous request can build a lineup", async () => {
+// Launch Blocker Sprint 1 (2026-09-13): reversed the prior "NFL public
+// access, Phase 6" decision -- this is AUTHENTICATED COMPUTE now, the
+// most expensive NFL endpoint (a real CP-SAT solve), matching
+// /api/optimizer/build's (MLB's equivalent) auth requirement.
+describe("POST /api/nfl/optimize -- AUTHENTICATED COMPUTE + M13 settings serialization", () => {
+  it("returns 401 for an anonymous request, never calls Python", async () => {
+    (requireAuthApi as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      NextResponse.json({ error: "Authentication required." }, { status: 401 }),
+    );
+    const res = await POST(request({ draftGroupId: 151307, numLineups: 1 }));
+    expect(res.status).toBe(401);
+    expect(runPythonScript).not.toHaveBeenCalled();
+  });
+
+  it("an authenticated request can build a lineup", async () => {
     mockPythonSuccess({ requested: 1, generated: 1, stopped_reason: null, mode: "roster_feasibility", lineups: [] });
     const res = await POST(request({ draftGroupId: 151307, numLineups: 1 }));
     expect(res.status).toBe(200);
@@ -107,7 +128,7 @@ describe("POST /api/nfl/optimize -- NFL public access + M13 settings serializati
     expect(res.status).toBe(502);
   });
 
-  it("429s once the per-IP rate limit is exceeded -- the solver cannot be hammered without an account", async () => {
+  it("429s once the per-IP rate limit is exceeded even for an authenticated caller -- auth alone is not the abuse guard", async () => {
     mockPythonSuccess({ requested: 1, generated: 1, stopped_reason: null, mode: "roster_feasibility", lineups: [] });
     for (let i = 0; i < 20; i++) {
       const res = await POST(request({ draftGroupId: 151307, numLineups: 1 }));

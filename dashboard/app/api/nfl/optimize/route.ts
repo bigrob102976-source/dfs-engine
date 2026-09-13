@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 
+import { requireAuthApi } from "@/lib/auth/guards";
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
-// NFL public access, Phase 6 -- the most expensive NFL endpoint (a real
-// CP-SAT solve), now reachable with no account at all. Bounds abuse
-// without an account/session to key on: 20 solves per IP per 5 minutes
-// is comfortably above normal interactive use (build, tweak settings,
-// rebuild) while still refusing an unbounded automated flood.
+// Launch Blocker Sprint 1 (2026-09-13): reversed the prior "NFL public
+// access, Phase 6" decision to open this route to anonymous callers.
+// This is the most expensive NFL endpoint (a real CP-SAT solve) and is
+// exactly the "optimizer execution" case the product decision calls out
+// as requiring an account -- matches how /api/optimizer/build (MLB's
+// equivalent) has always been gated. The rate limit below is kept as a
+// second, independent layer -- authentication alone is not treated as
+// sufficient abuse protection for a compute-heavy endpoint, since a
+// created account is still a cheap thing to automate.
 const OPTIMIZE_RATE_LIMIT_MAX = 20;
 const OPTIMIZE_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 
@@ -69,12 +74,16 @@ function sanitizeStack(raw: StackRequestBody | undefined): Record<string, unknow
 // args) -- see scripts/nfl_dashboard_optimize.py's own docstring for
 // the exact contract.
 //
-// NFL public access -- no login required. This route never reads or
-// writes anything scoped to a user (no user.id anywhere in this file);
-// it is pure request-in/response-out computation, so opening it to
-// anonymous callers exposes no one's private data. Rate-limited below
-// since it's now reachable without an account.
+// AUTHENTICATED COMPUTE -- an account is required (see the comment on
+// OPTIMIZE_RATE_LIMIT_MAX above for why). This route still never reads
+// or writes anything scoped to the caller (no user.id used below); the
+// account requirement exists purely to raise the cost of automated
+// abuse against a real CP-SAT solve, not because the response itself is
+// private.
 export async function POST(request: Request) {
+  const userOrRes = await requireAuthApi();
+  if (userOrRes instanceof NextResponse) return userOrRes;
+
   if (!checkRateLimit(`nfl-optimize:${getClientIp(request)}`, OPTIMIZE_RATE_LIMIT_MAX, OPTIMIZE_RATE_LIMIT_WINDOW_MS)) {
     return NextResponse.json({ error: "Too many optimizer requests. Please wait a few minutes and try again." }, { status: 429 });
   }

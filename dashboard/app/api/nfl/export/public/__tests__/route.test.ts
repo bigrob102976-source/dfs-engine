@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/orchestrator/pythonRunner", () => ({
   runPythonScript: vi.fn(),
@@ -6,6 +6,7 @@ vi.mock("@/lib/orchestrator/pythonRunner", () => ({
 }));
 
 const { runPythonScript } = await import("@/lib/orchestrator/pythonRunner");
+const { __resetRateLimitForTests } = await import("@/lib/rateLimit");
 const { POST } = await import("../route");
 
 function req(body: unknown) {
@@ -18,6 +19,9 @@ function mockPythonSuccess(payload: unknown) {
   });
 }
 
+beforeEach(() => {
+  __resetRateLimitForTests();
+});
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -27,7 +31,7 @@ const ASSIGNMENTS = [
   { slot: "RB1", draftkings_player_id: "2", name: "RB One" },
 ];
 
-describe("POST /api/nfl/export/public -- no auth required", () => {
+describe("POST /api/nfl/export/public -- PUBLIC READ-equivalent, no auth required", () => {
   it("requires no authentication at all -- no guard is even imported", async () => {
     mockPythonSuccess({ csv: "QB,RB\n1,2\n", lineup_count: 1 });
     const res = await POST(req({ lineups: [{ assignments: ASSIGNMENTS }] }));
@@ -65,5 +69,19 @@ describe("POST /api/nfl/export/public -- no auth required", () => {
     (runPythonScript as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ exitCode: 1, stdout: "", stderr: "boom", command: [] });
     const res = await POST(req({ lineups: [{ assignments: ASSIGNMENTS }] }));
     expect(res.status).toBe(502);
+  });
+
+  // Sprint 1 (2026-09-13): this route spawned a Python subprocess per
+  // call with NO rate limit at all -- proves it now bounds an anonymous
+  // flood.
+  it("rate-limits repeated anonymous requests from the same IP", async () => {
+    mockPythonSuccess({ csv: "QB,RB\n1,2\n", lineup_count: 1 });
+    let lastStatus = 200;
+    for (let i = 0; i < 40; i++) {
+      const res = await POST(req({ lineups: [{ assignments: ASSIGNMENTS }] }));
+      lastStatus = res.status;
+      if (lastStatus === 429) break;
+    }
+    expect(lastStatus).toBe(429);
   });
 });

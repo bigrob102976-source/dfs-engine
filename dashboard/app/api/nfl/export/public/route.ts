@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { parseLastJsonLine } from "@/lib/optimizerWorkspace/jsonLine";
 import { runPythonScript, tail } from "@/lib/orchestrator/pythonRunner";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +18,28 @@ interface PublicExportBody {
 
 const MAX_LINEUPS = 50;
 
-/** NFL public access -- stateless export of lineup data the CALLER
- * supplies directly in this request (the exact assignments
- * /api/nfl/optimize already returned them in the same session). No
- * auth, no database, no persisted saved-lineup record -- there is no
- * user-owned data this route could ever expose, so no login is
- * required. This is a DIFFERENT route from /api/nfl/export, which
- * operates on persisted, user-owned lineupIds and stays authenticated. */
+// PUBLIC READ-equivalent -- stateless export of lineup data the CALLER
+// supplies directly in this request (the exact assignments
+// /api/nfl/optimize already returned in the same session). No auth, no
+// database, no persisted saved-lineup record -- there is no user-owned
+// data this route could ever expose, so per the Launch Blocker Sprint 1
+// product decision this does not need an account: it does not invoke
+// PROTECTED compute (nothing is read from or written to another user's
+// data), only formats caller-supplied input. This is a DIFFERENT route
+// from /api/nfl/export, which operates on persisted, user-owned
+// lineupIds and stays authenticated.
+//
+// Rate-limited below -- Sprint 1 found this route had NONE despite
+// spawning a Python subprocess per call, an unbounded-spawn abuse
+// surface with no account to key a limit on beforehand.
+const PUBLIC_EXPORT_RATE_LIMIT_MAX = 30;
+const PUBLIC_EXPORT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
 export async function POST(request: Request) {
+  if (!checkRateLimit(`nfl-export-public:${getClientIp(request)}`, PUBLIC_EXPORT_RATE_LIMIT_MAX, PUBLIC_EXPORT_RATE_LIMIT_WINDOW_MS)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a few minutes and try again." }, { status: 429 });
+  }
+
   let body: PublicExportBody;
   try {
     body = await request.json();
