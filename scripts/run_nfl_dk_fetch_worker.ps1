@@ -326,4 +326,122 @@ $newStatus = [ordered]@{
 }
 try { $newStatus | ConvertTo-Json | Set-Content -Path $statusPath -Encoding utf8 } catch { }
 
+# ---- Downstream NFL stages: game context (Vegas) + ownership ----------
+# DK refresh -> research/context -> Vegas -> projections -> ownership, all
+# through the EXISTING verified entry points. No second pipeline and no
+# new service: scripts/build_nfl_game_context.py persists the real
+# SportsGameOdds game context (nulls preserved wherever the provider has
+# no line posted), and scripts/generate_nfl_ownership.py runs Big Money
+# Native projections and persists the ownership snapshot. Both are
+# per-DraftGroup and write DraftGroup-scoped artifacts, so slates never
+# collide.
+#
+# Budget-aware round robin. Measured 2026-09-13: game context ~11s and
+# ownership ~77s for ONE DraftGroup, so refreshing all five in a single
+# firing (~450s) plus the DK stage does not fit the task's PT10M limit
+# with any margin. Instead each firing works through as many DraftGroups
+# as the remaining budget allows and records where it stopped, so the
+# next firing resumes from there and every DraftGroup stays refreshed
+# without ever overrunning. MLB is untouched by any of this.
+if ($published) {
+    $NflDownstreamTaskLimitSeconds = 600   # matches the task's PT10M
+    $NflDownstreamReserveSeconds   = 45    # status write + wrapper teardown
+    $NflContextTimeoutSeconds      = 120
+    $downstreamRepoRoot            = "D:\mlb-dfs-engine"
+    $NflOwnershipTimeoutSeconds    = 210
+
+    # DraftGroups that actually published this cycle, from the fetch's own
+    # result document -- never a hardcoded list, so a slate appearing or
+    # disappearing on DraftKings is picked up automatically.
+    $dgIds = @()
+    foreach ($m in [regex]::Matches($output, '"draft_group_id":\s*(\d+),\s*"slate_date":\s*"([^"]+)",\s*"status":\s*"ok"')) {
+        $dgIds += [pscustomobject]@{ Id = $m.Groups[1].Value; Date = $m.Groups[2].Value }
+    }
+    $dgIds = $dgIds | Sort-Object Id -Unique
+
+    if ($dgIds.Count -eq 0) {
+        Add-Content -Path $logPath -Value "NFL_DOWNSTREAM no published DraftGroups in this cycle; nothing to refresh" -Encoding utf8
+    } else {
+        # Resume from wherever the previous firing stopped.
+        $cursor = 0
+        if ($priorStatus -and $priorStatus.downstream_cursor) {
+            try { $cursor = [int]$priorStatus.downstream_cursor } catch { $cursor = 0 }
+        }
+        if ($cursor -ge $dgIds.Count) { $cursor = 0 }
+
+        $processed = @()
+        for ($n = 0; $n -lt $dgIds.Count; $n++) {
+            $elapsedNow = ((Get-Date).ToUniversalTime() - $StartedAtUtc).TotalSeconds
+            $remaining  = $NflDownstreamTaskLimitSeconds - $elapsedNow - $NflDownstreamReserveSeconds
+            if ($remaining -lt ($NflContextTimeoutSeconds + $NflOwnershipTimeoutSeconds)) {
+                Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM budget exhausted after {0} DraftGroup(s); {1}s left, resuming at cursor {2} next firing" -f $processed.Count, [int]$remaining, $cursor) -Encoding utf8
+                break
+            }
+            $dg = $dgIds[$cursor]
+            foreach ($stage in @(
+                @{ Name = "context";   Script = "scripts/build_nfl_game_context.py"; Timeout = $NflContextTimeoutSeconds },
+                @{ Name = "ownership"; Script = "scripts/generate_nfl_ownership.py"; Timeout = $NflOwnershipTimeoutSeconds }
+            )) {
+                $sw = [Diagnostics.Stopwatch]::StartNew()
+                $stageExit = 1
+                $sp = $null
+                try {
+                    $spi = New-Object System.Diagnostics.ProcessStartInfo
+                    if ($railwayExe -and (Test-Path $railwayExe)) {
+                        $spi.FileName  = $railwayExe
+                        $spi.Arguments = "run --project $RailwayProjectId --service nfl-web --environment production -- `"$venvPython`" -u $($stage.Script) $($dg.Id)"
+                    } else {
+                        $spi.FileName  = $npxPath
+                        $spi.Arguments = "--yes `"@railway/cli`" run --project $RailwayProjectId --service nfl-web --environment production -- `"$venvPython`" -u $($stage.Script) $($dg.Id)"
+                    }
+                    # Downstream stages run from the MLB/main checkout, NOT this
+                    # one. Two reasons, both load-bearing:
+                    #   1. SPORTSGAMEODDS_API_KEY lives only in
+                    #      D:\mlb-dfs-engine\dashboard\.env.local. Run from this
+                    #      repo the odds provider is unconfigured, so
+                    #      build_nfl_game_context.py matched 0 games and persisted
+                    #      an EMPTY snapshot over a good one on 2026-09-13, taking
+                    #      every Vegas field on /api/nfl/data back to null.
+                    #   2. That checkout is on `main`, the branch actually deployed,
+                    #      so these stages run the same NFL code as production
+                    #      rather than this checkout's older branch.
+                    # The interpreter stays this repo's venv, which is the one with
+                    # boto3/ortools installed.
+                    $spi.WorkingDirectory       = $downstreamRepoRoot
+                    $spi.UseShellExecute        = $false
+                    $spi.RedirectStandardOutput = $true
+                    $spi.RedirectStandardError  = $true
+                    $sp = New-Object System.Diagnostics.Process
+                    $sp.StartInfo = $spi
+                    [void]$sp.Start()
+                    # Drain both pipes so a full buffer can never deadlock
+                    # the child, then bound the wait exactly as the DK
+                    # stage above does.
+                    $null = $sp.StandardOutput.ReadToEndAsync()
+                    $null = $sp.StandardError.ReadToEndAsync()
+                    if ($sp.WaitForExit($stage.Timeout * 1000)) {
+                        $stageExit = $sp.ExitCode
+                    } else {
+                        try { & taskkill.exe /PID $sp.Id /T /F 2>&1 | Out-Null } catch { }
+                        $stageExit = 1
+                    }
+                } catch {
+                    $stageExit = 1
+                } finally {
+                    if ($sp) { try { $sp.Dispose() } catch { } }
+                }
+                $sw.Stop()
+                Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM dg={0} stage={1} exit={2} {3}s" -f $dg.Id, $stage.Name, $stageExit, [int]$sw.Elapsed.TotalSeconds) -Encoding utf8
+            }
+            $processed += $dg.Id
+            $cursor = ($cursor + 1) % $dgIds.Count
+        }
+        Add-Content -Path $logPath -Value ("NFL_DOWNSTREAM refreshed {0} of {1} DraftGroup(s) this cycle: {2}" -f $processed.Count, $dgIds.Count, ($processed -join ",")) -Encoding utf8
+        $newStatus["downstream_cursor"]  = $cursor
+        $newStatus["downstream_last_at"] = (Get-Date).ToUniversalTime().ToString("o")
+        try { $newStatus | ConvertTo-Json | Set-Content -Path $statusPath -Encoding utf8 } catch { }
+    }
+}
+# ---- end downstream stages -------------------------------------------
+
 exit $exitCode

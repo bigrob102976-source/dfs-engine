@@ -64,6 +64,24 @@ def main(draft_group_id: int) -> int:
             f"away_implied={g.away_implied_total} provider={g.source}"
         )
 
+    # Never persist an EMPTY game context. Readers take the newest
+    # snapshot as authoritative, so writing a zero-game document silently
+    # shadows a good one: on 2026-09-13 a run without odds credentials
+    # wrote games=0 over a snapshot holding four real matched games
+    # (total 46.5, spread -2.5), and /api/nfl/data went back to nulls for
+    # every Vegas field even though correct data was sitting one
+    # snapshot behind it. An empty result means this run could not reach
+    # the provider -- that is a failure to report, never a fact to
+    # publish.
+    odds_provenance = result.odds_fetch.source_provenance
+    if not mr.games:
+        print(
+            f"REFUSING_EMPTY_CONTEXT: matched 0 games for DraftGroup {draft_group_id} "
+            f"(odds provenance={odds_provenance}). Not persisting -- the previous snapshot "
+            f"stays authoritative rather than being shadowed by an empty one."
+        )
+        return 1
+
     timestamp = _timestamp()
     path = save_nfl_game_context_snapshot(mr.games, pool.slate_date, draft_group_id, timestamp)
     print(f"\npersisted: {path}")
