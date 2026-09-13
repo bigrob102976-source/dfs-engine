@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { StripeTestModeBadge } from "@/components/billing/StripeTestModeBadge";
+import { Footer } from "@/components/Footer";
 import { listActivePlans } from "@/lib/db/plans";
 import type { Plan } from "@/lib/db/types";
 
@@ -61,8 +62,8 @@ export default async function PricingPage() {
           BUILD BETTER LINEUPS.
         </h1>
         <p className="mx-auto mt-4 max-w-lg text-sm text-text-muted">
-          AI-driven MLB DFS research, ownership projections, and lineup optimization -- built to find leverage the
-          field is missing.
+          AI-driven MLB and NFL DFS research, ownership projections, and lineup optimization -- built to find
+          leverage the field is missing.
         </p>
 
         <div className="mx-auto mt-12 grid max-w-xl grid-cols-1 gap-6 sm:grid-cols-2">
@@ -76,6 +77,7 @@ export default async function PricingPage() {
           unless canceled before the trial ends.
         </p>
       </main>
+      <Footer />
     </div>
   );
 }

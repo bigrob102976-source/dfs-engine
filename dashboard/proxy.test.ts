@@ -57,6 +57,13 @@ describe("proxy (cheap Edge session-cookie gate)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("never redirects the legal/trust pages, even without a cookie -- Launch Blocker Sprint 1", () => {
+    for (const path of ["/terms", "/privacy", "/responsible-play", "/support"]) {
+      const res = proxy(requestFor(path));
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("never redirects the Stripe webhook route, even without a cookie (it carries none -- signature verification is its own auth)", () => {
     const res = proxy(requestFor("/api/billing/stripe/webhook"));
     expect(res.status).toBe(200);

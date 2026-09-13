@@ -11,7 +11,9 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "BIG MONEY DFS — AI Research Terminal",
-  description: "AI-driven MLB DFS research, projections, and lineup optimization.",
+  // Sprint 1 (2026-09-13): this described MLB only, with NFL live in
+  // production and its own public dashboard at /nfl.
+  description: "AI-driven MLB and NFL DFS research, projections, ownership, and lineup optimization.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

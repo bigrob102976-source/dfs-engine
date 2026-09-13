@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Footer } from "@/components/Footer";
+
 const SPORTS = [
   { code: "MLB", href: "/dashboard", label: "MLB", icon: "⚾" },
   { code: "NFL", href: "/nfl", label: "NFL", icon: "🏈" },
@@ -183,6 +185,8 @@ export function Sidebar() {
           </div>
         </div>
       </div>
+
+      <Footer compact />
     </nav>
   );
 }

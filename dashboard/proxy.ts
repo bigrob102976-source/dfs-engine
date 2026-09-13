@@ -63,6 +63,14 @@ const PUBLIC_PATH_PREFIXES = [
   // via the sport nav instead (Sidebar.tsx).
   "/nfl",
   "/api/nfl",
+  // Launch Blocker Sprint 1 (2026-09-13): legal/trust pages must be
+  // reachable by a completely anonymous visitor -- gating Terms,
+  // Privacy, Responsible Play, or Support behind a login is itself a
+  // launch blocker for a real-money DFS product.
+  "/terms",
+  "/privacy",
+  "/responsible-play",
+  "/support",
 ];
 
 export function proxy(request: NextRequest) {
