@@ -14,6 +14,7 @@ Usage:
     python scripts/nfl_dashboard_data.py <draft_group_id>
 """
 
+import dataclasses
 import json
 import sys
 from datetime import datetime, timezone
@@ -24,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from historical_nfl.identity_persistence import load_crosswalk
 from nfl.big_money_native_inference import build_current_nfl_projection_features, generate_projections
 from nfl.game_context_builder import build_nfl_game_context
+from nfl.game_context_models import NflGameContext
+from nfl.game_context_persistence import load_latest_nfl_game_context_snapshot
 from nfl.game_lock import GameStartTimeMissingError, build_game_lock_info
 from nfl.ownership_model import _usage_share_for_player, build_nfl_ownership_projections
 from nfl.ownership_models import NflOwnershipInputPlayer
@@ -72,6 +75,39 @@ def main(draft_group_id: int) -> int:
     # (never a second fetch).
     game_ctx_result = build_nfl_game_context(pool.players, draft_group_id, pool.slate_date)
     games_by_id = {g.canonical_game_id: g for g in game_ctx_result.match_result.games}
+    vegas_provenance = game_ctx_result.odds_fetch.source_provenance
+
+    # Fall back to the persisted game-context snapshot when THIS process
+    # cannot reach the odds provider. SPORTSGAMEODDS_API_KEY lives in
+    # dashboard/.env.local on the worker machine and is deliberately NOT a
+    # Railway variable, so build_nfl_game_context() above returns
+    # "not_configured" inside the deployed container and every game came
+    # back with spread/total/implied totals of None. That is honest, but it
+    # blanked every Vegas-dependent surface for customers even though the
+    # external worker had already fetched and persisted the real
+    # SportsGameOdds numbers for this exact DraftGroup.
+    #
+    # This is the same "external worker publishes, production reads" split
+    # nfl/pool_cache.py already uses for the player pool, applied to game
+    # context. Nothing is fabricated: only a snapshot the worker really
+    # wrote is used, the provenance below reports it explicitly, and when
+    # no snapshot exists every field stays None exactly as before.
+    if not any(g.total is not None for g in games_by_id.values()):
+        snapshot = load_latest_nfl_game_context_snapshot(pool.slate_date, draft_group_id)
+        snapshot_games = (snapshot or {}).get("games") or []
+        if snapshot_games:
+            allowed = {f.name for f in dataclasses.fields(NflGameContext)}
+            restored = {}
+            for row in snapshot_games:
+                try:
+                    ctx_row = NflGameContext(**{k: v for k, v in row.items() if k in allowed})
+                except TypeError:
+                    continue
+                if ctx_row.canonical_game_id:
+                    restored[ctx_row.canonical_game_id] = ctx_row
+            if restored:
+                games_by_id = restored
+                vegas_provenance = "persisted_snapshot"
 
     # Real projections (reuses the SAME ctx -- no second historical fetch)
     try:
@@ -262,8 +298,8 @@ def main(draft_group_id: int) -> int:
         "ownership_missing": len(players) - ownership_generated_count,
         "ownership_normalization": ownership_normalization_report or None,
         "ownership_model_version": ownership_records[0].model_version if ownership_records else None,
-        "vegas_configured": game_ctx_result.odds_fetch.source_provenance != "not_configured",
-        "vegas_source_provenance": game_ctx_result.odds_fetch.source_provenance,
+        "vegas_configured": vegas_provenance != "not_configured",
+        "vegas_source_provenance": vegas_provenance,
         "players": players,
     }
     print(json.dumps(output, default=str))
