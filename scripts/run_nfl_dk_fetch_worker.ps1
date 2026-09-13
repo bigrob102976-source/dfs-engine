@@ -364,7 +364,16 @@ if ($published) {
     foreach ($m in [regex]::Matches($output, '"draft_group_id":\s*(\d+),\s*"slate_date":\s*"([^"]+)",\s*"status":\s*"ok"')) {
         $dgIds += [pscustomobject]@{ Id = $m.Groups[1].Value; Date = $m.Groups[2].Value }
     }
-    $dgIds = $dgIds | Sort-Object Id -Unique
+    # @() wrapper is load-bearing: a PowerShell pipeline that yields
+    # exactly ONE object unwraps it to a bare scalar rather than a
+    # 1-element array, so a plain `$dgIds = $dgIds | Sort-Object ...`
+    # silently turns $dgIds.Count into $null the moment only one
+    # DraftGroup is still active (observed live 2026-09-13T22:12Z,
+    # once the day slates had locked and only DraftGroup 153071
+    # remained: the log recorded "refreshed 0 of  DraftGroup(s)" --
+    # blank count -- because the for-loop's own `$n -lt $dgIds.Count`
+    # compared 0 against $null and never ran at all).
+    $dgIds = @($dgIds | Sort-Object Id -Unique)
 
     if ($dgIds.Count -eq 0) {
         Add-Content -Path $logPath -Value "NFL_DOWNSTREAM no published DraftGroups in this cycle; nothing to refresh" -Encoding utf8
