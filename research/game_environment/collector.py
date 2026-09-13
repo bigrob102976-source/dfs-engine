@@ -170,7 +170,24 @@ def build_game_report(
     park = ballpark.get_ballpark_profile(home_team)
     roof = park.roof if park is not None else "open"
 
-    weather_snapshot = weather_provider.get_weather(game_id, home_team, game_datetime_utc, roof) if weather_provider.is_configured() else None
+    # Weather is a single signal for ONE game and must degrade to None
+    # like every other signal here -- this function's own docstring above
+    # promises it never raises for an unavailable individual provider,
+    # and the Vegas block below has always honored that with exactly this
+    # try/except. This call did not, so one game Open-Meteo couldn't
+    # cover aborted build_slate_environment_report() for the WHOLE slate
+    # and no environment artifact was written at all -- taking the real
+    # SportsGameOdds Vegas lines for every other game down with it.
+    # Observed 2026-09-13: Open-Meteo's forecast window doesn't reach a
+    # start time already in the past, so every cycle after the slate's
+    # first game began raised here and produced no Vegas data at all
+    # (newest game_environment_snapshots artifact was ~46h stale).
+    weather_snapshot = None
+    if weather_provider.is_configured():
+        try:
+            weather_snapshot = weather_provider.get_weather(game_id, home_team, game_datetime_utc, roof)
+        except (weather.WeatherProviderUnavailableError, weather.WeatherProviderNotConfiguredError):
+            weather_snapshot = None
     weather_analysis = weather.analyze_weather(weather_snapshot, park) if weather_snapshot is not None else None
 
     vegas_snapshot = None
