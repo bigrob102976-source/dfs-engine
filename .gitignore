@@ -112,6 +112,11 @@ dashboard/next-env.d.ts
 # state, not source. See scripts/run_nfl_dk_fetch_worker.ps1.
 /logs/
 
+# Orchestrator shadow-test control files -- a tester rewrites these live
+# to switch simulate_job.ps1's behavior between succeed/fail/hang; local
+# runtime test state, not source. See scripts/orchestrator/simulate_job.ps1.
+/scripts/orchestrator/shadow_control/
+
 # OS / editor
 .DS_Store
 *.pem

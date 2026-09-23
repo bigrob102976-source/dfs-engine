@@ -1,0 +1,54 @@
+[
+  {
+    "sport": "MLB",
+    "enabled": true,
+    "refreshIntervalSeconds": 300,
+    "retryIntervalSeconds": 90,
+    "timeoutSeconds": 1200,
+    "jobScript": "D:\\mlb-dfs-engine\\scripts\\run_mlb_dk_fetch_worker.ps1",
+    "jobArguments": "",
+    "workingDirectory": "D:\\mlb-dfs-engine",
+    "statusFile": "D:\\mlb-dfs-engine\\logs\\mlb_dk_fetch_worker_status.json",
+    "freshnessThresholdSeconds": 900,
+    "_comment": "timeoutSeconds=1200 gives ~2min margin above the wrapper's own documented worst case (DK 240s + research 600s + Vegas 240s = 1080s). freshnessThresholdSeconds=900 matches that same internal budget -- a cycle that hasn't succeeded in 15 minutes is genuinely stale, not just mid-cycle."
+  },
+  {
+    "sport": "NFL",
+    "enabled": true,
+    "refreshIntervalSeconds": 300,
+    "retryIntervalSeconds": 90,
+    "timeoutSeconds": 900,
+    "jobScript": "D:\\nfl-dfs-engine\\scripts\\run_nfl_dk_fetch_worker.ps1",
+    "jobArguments": "",
+    "workingDirectory": "D:\\nfl-dfs-engine",
+    "statusFile": "D:\\nfl-dfs-engine\\logs\\nfl_dk_fetch_worker_status.json",
+    "freshnessThresholdSeconds": 7200,
+    "_comment": "timeoutSeconds=900 covers the wrapper's own internal downstream budget (600s) plus DK-fetch/guard overhead with margin. freshnessThresholdSeconds=7200 matches nfl/pool_cache.py's own documented POOL_CACHE_STALE_MAX_SECONDS (2h) -- the point at which served NFL data is genuinely stale, not the per-cycle cadence."
+  },
+  {
+    "sport": "NBA",
+    "enabled": false,
+    "refreshIntervalSeconds": 300,
+    "retryIntervalSeconds": 90,
+    "timeoutSeconds": 900,
+    "jobScript": null,
+    "jobArguments": "",
+    "workingDirectory": null,
+    "statusFile": null,
+    "freshnessThresholdSeconds": 900,
+    "_comment": "Placeholder only -- disabled. No NBA pipeline exists yet (see the architecture audit). Enabling this before a real jobScript exists would launch nothing and the orchestrator would correctly report it as never-succeeding; left disabled so it does not generate false failure noise."
+  },
+  {
+    "sport": "CFB",
+    "enabled": false,
+    "refreshIntervalSeconds": 300,
+    "retryIntervalSeconds": 90,
+    "timeoutSeconds": 900,
+    "jobScript": null,
+    "jobArguments": "",
+    "workingDirectory": null,
+    "statusFile": null,
+    "freshnessThresholdSeconds": 900,
+    "_comment": "Placeholder only -- disabled. Same reasoning as NBA."
+  }
+]

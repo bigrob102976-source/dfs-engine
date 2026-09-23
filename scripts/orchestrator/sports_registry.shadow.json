@@ -1,0 +1,26 @@
+[
+  {
+    "sport": "MLB",
+    "enabled": true,
+    "refreshIntervalSeconds": 60,
+    "retryIntervalSeconds": 20,
+    "timeoutSeconds": 25,
+    "jobScript": "D:\\mlb-dfs-engine\\scripts\\orchestrator\\simulate_job.ps1",
+    "jobArguments": "-Sport MLB -StatusFile \"D:\\mlb-dfs-engine\\logs\\orchestrator_shadow_mlb_status.json\"",
+    "workingDirectory": "D:\\mlb-dfs-engine",
+    "statusFile": "D:\\mlb-dfs-engine\\logs\\orchestrator_shadow_mlb_status.json",
+    "freshnessThresholdSeconds": 180
+  },
+  {
+    "sport": "NFL",
+    "enabled": true,
+    "refreshIntervalSeconds": 60,
+    "retryIntervalSeconds": 20,
+    "timeoutSeconds": 25,
+    "jobScript": "D:\\mlb-dfs-engine\\scripts\\orchestrator\\simulate_job.ps1",
+    "jobArguments": "-Sport NFL -StatusFile \"D:\\mlb-dfs-engine\\logs\\orchestrator_shadow_nfl_status.json\"",
+    "workingDirectory": "D:\\mlb-dfs-engine",
+    "statusFile": "D:\\mlb-dfs-engine\\logs\\orchestrator_shadow_nfl_status.json",
+    "freshnessThresholdSeconds": 180
+  }
+]
